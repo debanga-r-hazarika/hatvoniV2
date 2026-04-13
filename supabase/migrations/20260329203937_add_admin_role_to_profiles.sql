@@ -1,0 +1,17 @@
+/*\n  # Add Admin Role Support\n\n  1. Changes\n    - Add `is_admin` boolean column to profiles table\n    - Add `role` enum column for future extensibility (admin, customer)\n    - Set default role to 'customer'\n    - Update RLS policies to allow admins to manage all data\n\n  2. Security\n    - Admins can view and modify all profiles\n    - Regular users can only view/modify their own profile\n*/\n\n-- Add role enum type\nDO $$ BEGIN\n  CREATE TYPE user_role AS ENUM ('customer', 'admin');
+\nEXCEPTION\n  WHEN duplicate_object THEN null;
+\nEND $$;
+\n\n-- Add columns to profiles table\nDO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM information_schema.columns\n    WHERE table_name = 'profiles' AND column_name = 'is_admin'\n  ) THEN\n    ALTER TABLE profiles ADD COLUMN is_admin boolean DEFAULT false;
+\n  END IF;
+\nEND $$;
+\n\nDO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM information_schema.columns\n    WHERE table_name = 'profiles' AND column_name = 'role'\n  ) THEN\n    ALTER TABLE profiles ADD COLUMN role user_role DEFAULT 'customer';
+\n  END IF;
+\nEND $$;
+\n\n-- Create index for faster admin queries\nCREATE INDEX IF NOT EXISTS idx_profiles_is_admin ON profiles(is_admin) WHERE is_admin = true;
+\n\n-- Update RLS policies to give admins full access\nDROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+\nDROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+\n\nCREATE POLICY "Users can view own profile or admins can view all"\n  ON profiles FOR SELECT\n  TO authenticated\n  USING (\n    auth.uid() = id OR\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()) = true\n  );
+\n\nCREATE POLICY "Users can update own profile or admins can update all"\n  ON profiles FOR UPDATE\n  TO authenticated\n  USING (\n    auth.uid() = id OR\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()) = true\n  )\n  WITH CHECK (\n    auth.uid() = id OR\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()) = true\n  );
+\n\nCREATE POLICY "Admins can insert profiles"\n  ON profiles FOR INSERT\n  TO authenticated\n  WITH CHECK (\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()) = true\n  );
+\n\nCREATE POLICY "Admins can delete profiles"\n  ON profiles FOR DELETE\n  TO authenticated\n  USING (\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()) = true\n  );
+\n;

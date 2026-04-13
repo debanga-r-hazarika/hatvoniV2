@@ -1,0 +1,16 @@
+/*\n  # Create Addresses Table\n\n  1. New Tables\n    - `addresses`\n      - `id` (uuid, primary key)\n      - `user_id` (uuid, foreign key to auth.users)\n      - `title` (text) - e.g., "Home", "Office"\n      - `address_line1` (text)\n      - `address_line2` (text, optional)\n      - `city` (text)\n      - `state` (text)\n      - `postal_code` (text)\n      - `country` (text)\n      - `is_default` (boolean) - default shipping address\n      - `created_at` (timestamptz)\n      - `updated_at` (timestamptz)\n  \n  2. Security\n    - Enable RLS on `addresses` table\n    - Users can only view and manage their own addresses\n*/\n\nCREATE TABLE IF NOT EXISTS addresses (\n  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),\n  user_id uuid REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,\n  title text NOT NULL DEFAULT 'Home',\n  address_line1 text NOT NULL,\n  address_line2 text,\n  city text NOT NULL,\n  state text NOT NULL,\n  postal_code text NOT NULL,\n  country text NOT NULL DEFAULT 'India',\n  is_default boolean DEFAULT false,\n  created_at timestamptz DEFAULT now(),\n  updated_at timestamptz DEFAULT now()\n);
+\n\n-- Enable RLS\nALTER TABLE addresses ENABLE ROW LEVEL SECURITY;
+\n\n-- RLS Policies\nCREATE POLICY "Users can view own addresses"\n  ON addresses FOR SELECT\n  TO authenticated\n  USING (auth.uid() = user_id);
+\n\nCREATE POLICY "Users can insert own addresses"\n  ON addresses FOR INSERT\n  TO authenticated\n  WITH CHECK (auth.uid() = user_id);
+\n\nCREATE POLICY "Users can update own addresses"\n  ON addresses FOR UPDATE\n  TO authenticated\n  USING (auth.uid() = user_id)\n  WITH CHECK (auth.uid() = user_id);
+\n\nCREATE POLICY "Users can delete own addresses"\n  ON addresses FOR DELETE\n  TO authenticated\n  USING (auth.uid() = user_id);
+\n\n-- Create index for faster queries\nCREATE INDEX IF NOT EXISTS idx_addresses_user_id ON addresses(user_id);
+\nCREATE INDEX IF NOT EXISTS idx_addresses_is_default ON addresses(user_id, is_default) WHERE is_default = true;
+\n\n-- Function to ensure only one default address per user\nCREATE OR REPLACE FUNCTION ensure_single_default_address()\nRETURNS TRIGGER AS $$\nBEGIN\n  IF NEW.is_default = true THEN\n    UPDATE addresses \n    SET is_default = false \n    WHERE user_id = NEW.user_id \n      AND id != NEW.id \n      AND is_default = true;
+\n  END IF;
+\n  RETURN NEW;
+\nEND;
+\n$$ LANGUAGE plpgsql;
+\n\n-- Trigger to enforce single default address\nDROP TRIGGER IF EXISTS trigger_ensure_single_default_address ON addresses;
+\nCREATE TRIGGER trigger_ensure_single_default_address\n  BEFORE INSERT OR UPDATE ON addresses\n  FOR EACH ROW\n  EXECUTE FUNCTION ensure_single_default_address();
+;

@@ -1,0 +1,12 @@
+/*\n  # Fix Infinite Recursion in Profiles RLS Policies\n\n  1. Problem\n    - Current policies query profiles table to check is_admin\n    - This triggers the same RLS check, causing infinite recursion\n\n  2. Solution\n    - Create a security definer function to check admin status\n    - Update policies to use this function instead of subqueries\n\n  3. Changes\n    - Drop problematic policies\n    - Create is_admin() function with SECURITY DEFINER\n    - Recreate policies using the function\n*/\n\n-- Create a security definer function to check if user is admin\nCREATE OR REPLACE FUNCTION is_admin()\nRETURNS boolean\nLANGUAGE sql\nSECURITY DEFINER\nSTABLE\nSET search_path = public\nAS $$\n  SELECT COALESCE(\n    (SELECT is_admin FROM profiles WHERE id = auth.uid()),\n    false\n  )\n$$;
+\n\n-- Drop existing problematic policies on profiles\nDROP POLICY IF EXISTS "Admins can view all profiles" ON profiles;
+\nDROP POLICY IF EXISTS "Admins can update all profiles" ON profiles;
+\nDROP POLICY IF EXISTS "Users can read own profile" ON profiles;
+\nDROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+\n\n-- Recreate policies using the function\nCREATE POLICY "Users can read own profile"\n  ON profiles FOR SELECT\n  TO authenticated\n  USING (id = auth.uid());
+\n\nCREATE POLICY "Admins can view all profiles"\n  ON profiles FOR SELECT\n  TO authenticated\n  USING (is_admin() = true);
+\n\nCREATE POLICY "Users can update own profile"\n  ON profiles FOR UPDATE\n  TO authenticated\n  USING (id = auth.uid())\n  WITH CHECK (id = auth.uid());
+\n\nCREATE POLICY "Admins can update all profiles"\n  ON profiles FOR UPDATE\n  TO authenticated\n  USING (is_admin() = true)\n  WITH CHECK (is_admin() = true);
+\n\n-- Fix wishlists policies that might have same issue\nDROP POLICY IF EXISTS "Users can view own wishlist" ON wishlists;
+\n\nCREATE POLICY "Users can view own wishlist"\n  ON wishlists FOR SELECT\n  TO authenticated\n  USING (user_id = auth.uid() OR is_admin() = true);
+\n;

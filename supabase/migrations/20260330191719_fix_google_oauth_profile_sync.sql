@@ -1,0 +1,17 @@
+/*\n  # Fix Google OAuth profile data inheritance\n\n  1. Problem\n    - The handle_new_user trigger only reads first_name/last_name keys\n    - Google OAuth provides given_name, family_name, name, and avatar_url/picture\n    - The ON CONFLICT DO NOTHING prevents updates for returning Google users\n\n  2. Changes\n    - Update handle_new_user to read Google's given_name, family_name, avatar_url, picture fields\n    - Use COALESCE priority: explicit first_name > given_name from Google > parse from full name\n    - ON CONFLICT now UPSERTs empty name/avatar fields so returning Google users get their data\n*/\n\nCREATE OR REPLACE FUNCTION handle_new_user()\nRETURNS trigger\nLANGUAGE plpgsql\nSECURITY DEFINER\nSET search_path = ''\nAS $$\nDECLARE\n  v_first_name text;
+\n  v_last_name  text;
+\n  v_avatar_url text;
+\n  v_full_name  text;
+\nBEGIN\n  v_first_name := COALESCE(\n    NULLIF(NEW.raw_user_meta_data->>'first_name', ''),\n    NULLIF(NEW.raw_user_meta_data->>'given_name', ''),\n    NULL\n  );
+\n\n  v_last_name := COALESCE(\n    NULLIF(NEW.raw_user_meta_data->>'last_name', ''),\n    NULLIF(NEW.raw_user_meta_data->>'family_name', ''),\n    NULL\n  );
+\n\n  IF v_first_name IS NULL THEN\n    v_full_name := COALESCE(\n      NULLIF(NEW.raw_user_meta_data->>'full_name', ''),\n      NULLIF(NEW.raw_user_meta_data->>'name', '')\n    );
+\n    IF v_full_name IS NOT NULL THEN\n      v_first_name := split_part(v_full_name, ' ', 1);
+\n      v_last_name  := COALESCE(v_last_name, NULLIF(trim(substring(v_full_name FROM position(' ' IN v_full_name) + 1)), ''));
+\n    END IF;
+\n  END IF;
+\n\n  v_avatar_url := COALESCE(\n    NULLIF(NEW.raw_user_meta_data->>'avatar_url', ''),\n    NULLIF(NEW.raw_user_meta_data->>'picture', '')\n  );
+\n\n  INSERT INTO public.profiles (id, first_name, last_name, email, avatar_url, created_at, updated_at)\n  VALUES (\n    NEW.id,\n    COALESCE(v_first_name, ''),\n    COALESCE(v_last_name, ''),\n    NEW.email,\n    v_avatar_url,\n    NOW(),\n    NOW()\n  )\n  ON CONFLICT (id) DO UPDATE SET\n    first_name = CASE\n      WHEN EXCLUDED.first_name <> '' AND (public.profiles.first_name IS NULL OR public.profiles.first_name = '')\n      THEN EXCLUDED.first_name\n      ELSE public.profiles.first_name\n    END,\n    last_name = CASE\n      WHEN EXCLUDED.last_name <> '' AND (public.profiles.last_name IS NULL OR public.profiles.last_name = '')\n      THEN EXCLUDED.last_name\n      ELSE public.profiles.last_name\n    END,\n    avatar_url = CASE\n      WHEN EXCLUDED.avatar_url IS NOT NULL AND (public.profiles.avatar_url IS NULL OR public.profiles.avatar_url = '')\n      THEN EXCLUDED.avatar_url\n      ELSE public.profiles.avatar_url\n    END,\n    updated_at = NOW();
+\n\n  RETURN NEW;
+\nEND;
+\n$$;
+\n;

@@ -1,0 +1,11 @@
+/*\n  # Update Profile Name Fields\n\n  1. Changes\n    - Split `full_name` into `first_name` and `last_name` columns\n    - Migrate existing data from full_name to first_name\n    - Remove full_name column after migration\n  \n  2. Security\n    - No changes to RLS policies (they remain the same)\n*/\n\n-- Add first_name and last_name columns\nDO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM information_schema.columns\n    WHERE table_name = 'profiles' AND column_name = 'first_name'\n  ) THEN\n    ALTER TABLE profiles ADD COLUMN first_name text;
+\n  END IF;
+\nEND $$;
+\n\nDO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM information_schema.columns\n    WHERE table_name = 'profiles' AND column_name = 'last_name'\n  ) THEN\n    ALTER TABLE profiles ADD COLUMN last_name text;
+\n  END IF;
+\nEND $$;
+\n\n-- Migrate existing full_name data to first_name (if full_name exists)\nDO $$\nBEGIN\n  IF EXISTS (\n    SELECT 1 FROM information_schema.columns\n    WHERE table_name = 'profiles' AND column_name = 'full_name'\n  ) THEN\n    UPDATE profiles \n    SET first_name = split_part(full_name, ' ', 1),\n        last_name = CASE \n          WHEN array_length(string_to_array(full_name, ' '), 1) > 1 \n          THEN substring(full_name from position(' ' in full_name) + 1)\n          ELSE ''\n        END\n    WHERE full_name IS NOT NULL AND first_name IS NULL;
+\n    \n    -- Drop full_name column\n    ALTER TABLE profiles DROP COLUMN IF EXISTS full_name;
+\n  END IF;
+\nEND $$;
+;

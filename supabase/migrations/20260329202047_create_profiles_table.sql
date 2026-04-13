@@ -1,0 +1,12 @@
+/*\n  # Create User Profiles Table\n\n  1. New Tables\n    - `profiles`\n      - `id` (uuid, primary key, references auth.users)\n      - `full_name` (text)\n      - `email` (text)\n      - `avatar_url` (text, nullable)\n      - `phone` (text, nullable)\n      - `created_at` (timestamptz)\n      - `updated_at` (timestamptz)\n\n  2. Security\n    - Enable RLS on `profiles` table\n    - Add policy for users to read their own profile\n    - Add policy for users to update their own profile\n    - Add policy for users to insert their own profile\n\n  3. Functions\n    - Create trigger to automatically create profile when user signs up\n*/\n\n-- Create profiles table\nCREATE TABLE IF NOT EXISTS profiles (\n  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,\n  full_name text,\n  email text,\n  avatar_url text,\n  phone text,\n  created_at timestamptz DEFAULT now(),\n  updated_at timestamptz DEFAULT now()\n);
+\n\n-- Enable RLS\nALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
+\n\n-- RLS Policies\nCREATE POLICY "Users can view own profile"\n  ON profiles\n  FOR SELECT\n  TO authenticated\n  USING (auth.uid() = id);
+\n\nCREATE POLICY "Users can update own profile"\n  ON profiles\n  FOR UPDATE\n  TO authenticated\n  USING (auth.uid() = id)\n  WITH CHECK (auth.uid() = id);
+\n\nCREATE POLICY "Users can insert own profile"\n  ON profiles\n  FOR INSERT\n  TO authenticated\n  WITH CHECK (auth.uid() = id);
+\n\n-- Function to handle new user creation\nCREATE OR REPLACE FUNCTION handle_new_user()\nRETURNS TRIGGER AS $$\nBEGIN\n  INSERT INTO public.profiles (id, full_name, email)\n  VALUES (\n    new.id,\n    new.raw_user_meta_data->>'full_name',\n    new.email\n  );
+\n  RETURN new;
+\nEND;
+\n$$ LANGUAGE plpgsql SECURITY DEFINER;
+\n\n-- Trigger to automatically create profile on signup\nDROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+\nCREATE TRIGGER on_auth_user_created\n  AFTER INSERT ON auth.users\n  FOR EACH ROW EXECUTE FUNCTION handle_new_user();
+\n;
