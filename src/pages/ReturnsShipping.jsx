@@ -5,7 +5,7 @@ export default function ReturnsShipping() {
     <main className="max-w-7xl mx-auto px-6 md:px-12 pt-28 pb-12 md:pt-32 md:pb-24">
       {/* Hero Header */}
       <header className="mb-12 md:mb-20">
-        <h1 className="text-4xl md:text-6xl text-primary font-display leading-tight mb-4 tracking-tight">
+        <h1 className="text-4xl md:text-6xl text-primary font-brand leading-tight mb-4 tracking-tight">
           Logistics of <span className="text-secondary">Heritage</span>
         </h1>
         <p className="text-base md:text-xl text-on-surface-variant font-headline max-w-2xl leading-relaxed">
@@ -22,7 +22,7 @@ export default function ReturnsShipping() {
             <span className="bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 inline-block">
               Domestic
             </span>
-            <h2 className="font-display text-2xl md:text-3xl text-primary mb-2">Within India</h2>
+            <h2 className="font-brand text-2xl md:text-3xl text-primary mb-2">Within India</h2>
             <p className="text-sm font-medium text-on-surface-variant">5-7 Business Days</p>
           </div>
           <div className="z-10 bg-surface/80 backdrop-blur-md p-3 rounded-lg self-start mt-4 md:mt-0">
@@ -39,7 +39,7 @@ export default function ReturnsShipping() {
             <span className="bg-tertiary-container text-on-tertiary-container px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest mb-4 inline-block">
               Global
             </span>
-            <h2 className="font-display text-2xl md:text-3xl mb-3 tracking-tighter leading-none">
+            <h2 className="font-brand text-2xl md:text-3xl mb-3 tracking-tighter leading-none">
               The World<br />Over
             </h2>
             <p className="text-lg font-light opacity-90 leading-tight">12-18 Business Days</p>

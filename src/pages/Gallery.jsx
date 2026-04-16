@@ -10,19 +10,19 @@ const galleryItems = [
 
 export default function Gallery() {
   return (
-    <main className="pt-32 pb-24">
+    <main className="pt-32 md:pt-40 pb-24">
       {/* Hero */}
-      <header className="max-w-screen-2xl mx-auto px-12 mb-20 text-center md:text-left">
+      <header className="max-w-screen-2xl mx-auto px-6 md:px-12 mb-20 text-center md:text-left">
         <h1 className="font-brand text-5xl md:text-7xl text-primary leading-tight mb-6 tracking-tighter">
           Glimpses of the <br /><span className="text-secondary">Sacred Hills</span>
         </h1>
-        <p className="font-headline text-xl md:text-2xl text-on-surface-variant max-w-2xl leading-relaxed">
+        <p className="font-brand text-xl md:text-2xl text-on-surface-variant max-w-2xl leading-relaxed">
           Capturing the vibrant landscape and kitchens that inspire every bottle of Hatvoni.
         </p>
       </header>
 
       {/* Gallery Grid */}
-      <div className="max-w-screen-2xl mx-auto px-12">
+      <div className="max-w-screen-2xl mx-auto px-6 md:px-12">
         <div className="grid gap-8" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gridAutoRows: '200px' }}>
           {galleryItems.map((item) => (
             <div
@@ -45,7 +45,7 @@ export default function Gallery() {
       </div>
 
       {/* Quote */}
-      <section className="mt-32 px-12 max-w-4xl mx-auto text-center">
+      <section className="mt-32 px-6 md:px-12 max-w-4xl mx-auto text-center">
         <div className="inline-block p-4 mb-8 bg-secondary-container rounded-full">
           <span className="material-symbols-outlined text-on-secondary-container text-3xl">auto_awesome</span>
         </div>

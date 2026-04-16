@@ -7,6 +7,7 @@ import { avatarService } from '../services/avatarService';
 import AddressModal from '../components/AddressModal';
 import ChangePasswordModal from '../components/ChangePasswordModal';
 import ProfileMobileView from '../components/ProfileMobileView';
+import AccountSidebar from '../components/AccountSidebar';
 
 export default function Profile() {
   const [newsletter, setNewsletter] = useState(true);
@@ -25,7 +26,7 @@ export default function Profile() {
     email: '',
     phone: ''
   });
-  const { user, signOut, refreshProfile } = useAuth();
+  const { user, signOut, refreshProfile, isEmployee, employeeModules } = useAuth();
   const navigate = useNavigate();
 
   const fetchProfile = useCallback(async () => {
@@ -220,12 +221,18 @@ export default function Profile() {
   const isAdmin = profile?.is_admin === true;
   const isSeller = profile?.is_seller === true;
 
+  // For employees: link to their first assigned module, or generic admin page
+  const employeeAdminLink = employeeModules.length > 0
+    ? `/admin/${employeeModules[0]}`
+    : '/admin/orders';
+
   const sidebarLinks = [
     { label: 'Personal Details', href: '/profile', icon: 'person', active: true },
     { label: 'My Orders', href: '/orders', icon: 'package_2', active: false },
     { label: 'Wishlist', href: '/wishlist', icon: 'favorite', active: false },
     ...(isSeller ? [{ label: 'Seller Panel', href: '/seller', icon: 'storefront', active: false, admin: true }] : []),
     ...(isAdmin ? [{ label: 'Admin Panel', href: '/admin', icon: 'admin_panel_settings', active: false, admin: true }] : []),
+    ...(!isAdmin && isEmployee ? [{ label: 'Staff Panel', href: employeeAdminLink, icon: 'badge', active: false, admin: true }] : []),
     { label: 'Log Out', onClick: handleLogout, icon: 'logout', active: false, danger: true },
   ];
 
@@ -240,7 +247,7 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <main className="pt-24 pb-20">
+      <main className="pt-32 pb-24 md:pt-40 md:pb-16 bg-surface min-h-screen">
         <div className="max-w-screen-xl mx-auto px-6 md:px-12 py-8 md:py-16">
           <div className="flex items-center justify-center min-h-[400px]">
             <p className="text-lg text-slate-600">Loading profile...</p>
@@ -251,7 +258,7 @@ export default function Profile() {
   }
 
   return (
-    <main className="pt-24 pb-20">
+    <main className="pt-32 pb-24 md:pt-40 md:pb-16 bg-surface min-h-screen">
       <ProfileMobileView
         profile={profile}
         formData={formData}
@@ -269,7 +276,7 @@ export default function Profile() {
         getFullName={getFullName}
       />
 
-      <div className="hidden lg:block max-w-screen-xl mx-auto px-6 md:px-12 py-8 md:py-16">
+      <div className="hidden lg:block max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
         <div className="mb-10 md:mb-16">
           <h1 className="font-brand text-5xl md:text-6xl text-primary leading-[0.94] tracking-tighter uppercase">My Profile</h1>
           <p className="font-headline text-on-surface-variant text-base md:text-lg leading-relaxed mt-3 md:mt-4 max-w-2xl">
@@ -278,54 +285,8 @@ export default function Profile() {
           <div className="w-24 md:w-32 h-1.5 md:h-2 bg-secondary mt-5 md:mt-6" />
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8 md:gap-16">
-          <aside className="space-y-8 md:space-y-10 lg:sticky lg:top-32 lg:self-start">
-            <div className="bg-surface-container-low rounded-xl p-5 border border-outline-variant/30 transition-all duration-300 hover:shadow-md hover:border-outline-variant/50">
-              <div className="flex items-start gap-4">
-                {profile?.avatar_url ? (
-                  <img
-                    src={profile.avatar_url}
-                    alt="Profile"
-                    className="w-14 h-14 rounded-full object-cover"
-                    onError={(e) => { e.target.style.display = 'none'; }}
-                  />
-                ) : (
-                  <div className="w-14 h-14 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant/40">
-                    <span className="material-symbols-outlined text-4xl">account_circle</span>
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="font-headline font-extrabold text-on-surface text-lg leading-tight truncate">{getFullName()}</p>
-                  <p className="text-sm text-on-surface-variant leading-relaxed truncate">{formData.email}</p>
-                  {memberSince && (
-                    <p className="text-xs text-on-surface-variant/80 uppercase tracking-wider mt-2 leading-relaxed">Member since {memberSince}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            <nav className="hidden lg:flex flex-col space-y-4">
-              {sidebarLinks.map(link => (
-                link.onClick ? (
-                  <button key={link.label} onClick={link.onClick}
-                    className="flex items-center space-x-4 group opacity-40 hover:opacity-70 transition-all duration-200 text-left rounded-lg px-2 py-2 focus-visible:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface">
-                    <span className="w-8 h-[2px] bg-outline group-hover:bg-secondary transition-colors" />
-                    <span className={`font-headline font-bold text-xl leading-snug ${link.danger ? 'text-error' : 'text-on-surface'} tracking-tight`}>{link.label}</span>
-                  </button>
-                ) : (
-                  <Link key={link.label} to={link.href}
-                    className={`flex items-center space-x-4 group rounded-lg px-2 py-2 ${link.danger ? 'opacity-40 hover:opacity-70' : link.label === 'Personal Details' ? '' : 'opacity-40 hover:opacity-100'} transition-all duration-200 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-secondary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-surface`}>
-                    <span className={`w-8 h-[2px] ${link.label === 'Personal Details' ? 'bg-secondary' : 'bg-outline group-hover:bg-secondary'} transition-colors`} />
-                    <span className={`font-headline font-${link.label === 'Personal Details' ? 'extrabold' : 'bold'} text-xl leading-snug ${link.label === 'Personal Details' ? 'text-primary' : link.admin ? 'text-secondary' : 'text-on-surface'} tracking-tight`}>{link.label}</span>
-                  </Link>
-                )
-              ))}
-            </nav>
-            <div className="bg-surface-container-low p-6 md:p-8 rounded-xl border-l-4 border-secondary transition-all duration-300 hover:shadow-md">
-              <p className="font-headline font-bold text-primary-container mb-1 text-sm">Heritage Rewards</p>
-              <p className="text-xs uppercase tracking-widest text-on-surface-variant font-medium">You have earned</p>
-              <p className="text-3xl font-brand text-secondary mt-1">450 pts</p>
-            </div>
-          </aside>
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-10">
+          <AccountSidebar />
 
           <section className="space-y-10 md:space-y-12">
             <div className="bg-surface rounded-2xl border border-outline-variant/30 p-8 md:p-10 transition-all duration-300 hover:shadow-md hover:border-outline-variant/50">

@@ -96,8 +96,6 @@ export default function Seller() {
       if (sellerProductsError) throw sellerProductsError;
 
       const sellerProductKeys = new Set((sellerProducts || []).map((product) => product.key).filter(Boolean));
-
-      // Step 2: Get order items accessible to seller (via RLS)
       const { data: orderItems, error: orderItemsError } = await supabase
         .from('order_items')
         .select('id, order_id, lot_name, quantity, price, product_id, lot_snapshot, products(id, key, name)')
@@ -218,6 +216,18 @@ export default function Seller() {
     }
   }, [isSeller, isAdmin, fetchSellerOrders, fetchSellerProducts]);
 
+  // Realtime: refresh orders when any order is updated (admin finalizes, ships, etc.)
+  useEffect(() => {
+    if (!user?.id) return;
+    const ch = supabase
+      .channel('seller-orders-list-' + user.id)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => {
+        fetchSellerOrders();
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [user?.id, fetchSellerOrders]);
+
   const stats = useMemo(() => {
     const total = products.length;
     const active = products.filter((product) => product.is_active).length;
@@ -264,7 +274,7 @@ export default function Seller() {
 
   const sellerFullName = `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim().toLowerCase();
   const sellerEmail = String(profile?.email || '').toLowerCase();
-  const isInsiderManagedSeller = sellerFullName.includes('hatvoni') || sellerEmail.endsWith('@hatvoni.com');
+  const isInsiderManagedSeller = profile?.is_own_seller === true || sellerFullName.includes('hatvoni') || sellerEmail.endsWith('@hatvoni.com');
 
   const updateItemDecisions = useCallback(async (updates) => {
     if (!updates.length || isUpdating || isInsiderManagedSeller || !user?.id) return;
@@ -312,25 +322,16 @@ export default function Seller() {
         return updatedKeys.has(prev) ? '' : prev;
       });
 
-      // Notify Insider for every decision (approve or reject) so website_order_item_approvals stays in sync
+      // Decisions are stored locally in seller_order_item_decisions
       const notifyErrors = [];
       await Promise.all(pendingUpdates.map(async ({ item, decision: itemDecision, reason }) => {
-        const { error: notifyError } = await supabase.functions.invoke('notify-seller-approved', {
-          body: {
-            order_id: item.order_id,
-            product_name: item.product_name,
-            decision: itemDecision,
-            ...(itemDecision === 'rejected' && reason ? { rejection_reason: reason } : {}),
-          },
-        });
-
-        if (notifyError) {
-          notifyErrors.push(notifyError.message || 'notify-seller-approved failed');
-        }
+        // No-op: decisions are already written to seller_order_item_decisions above.
+        // Admin panel will handle order progression from here.
+        void item; void itemDecision; void reason;
       }));
 
       if (notifyErrors.length > 0) {
-        console.warn('Insider sync warning:', notifyErrors[0]);
+        console.warn('Decision sync warning:', notifyErrors[0]);
       }
 
       await fetchSellerOrders();
@@ -435,7 +436,7 @@ export default function Seller() {
   if (!isSeller && !isAdmin) return null;
 
   return (
-    <div className="min-h-screen bg-surface pt-24 pb-12">
+    <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <header className="mb-8">
           <h1 className="font-brand text-4xl md:text-5xl text-primary tracking-tight">Seller Panel</h1>
@@ -510,11 +511,12 @@ export default function Seller() {
                 className="px-4 py-2.5 border border-outline-variant rounded-xl bg-surface focus:ring-2 focus:ring-secondary focus:border-transparent font-body text-sm"
               >
                 <option value="all">All Status</option>
-                <option value="pending">Pending</option>
+                <option value="pending">Pending Approval</option>
                 <option value="processing">Processing</option>
                 <option value="shipped">Shipped</option>
                 <option value="delivered">Delivered</option>
                 <option value="cancelled">Cancelled</option>
+                <option value="rejected">Rejected</option>
               </select>
             )}
           </div>
@@ -603,163 +605,80 @@ export default function Seller() {
                 <div className="space-y-4">
                   {filteredOrders.map((order) => {
                     const customerName = `${order.profiles?.first_name || ''} ${order.profiles?.last_name || ''}`.trim() || 'N/A';
+                    const { pending = 0, approved = 0, rejected = 0 } = order.seller_decision_summary || {};
 
                     return (
                       <div key={order.id} className="rounded-2xl border border-outline-variant/30 bg-surface p-5">
-                        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                        {/* Order header */}
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                           <div>
-                            <div className="flex items-center gap-3 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
                               <h3 className="font-body font-semibold text-primary">Order #{order.id.slice(0, 8)}</h3>
-                              <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold capitalize ${orderStatusColors[order.status] || orderStatusColors.pending}`}>
+                              <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold capitalize ${orderStatusColors[order.status] || orderStatusColors.pending}`}>
                                 {order.status}
                               </span>
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-primary-container/40 text-primary">
+                              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary-container/40 text-primary">
                                 {order.seller_items.length} item{order.seller_items.length === 1 ? '' : 's'}
                               </span>
-                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-surface-container text-on-surface-variant">
-                                {order.seller_decision_summary?.pending || 0} pending
-                              </span>
+                              {pending > 0 && (
+                                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800">
+                                  {pending} pending
+                                </span>
+                              )}
                             </div>
-                            <p className="text-sm text-on-surface-variant mt-2">Customer: {customerName} • {order.profiles?.email || 'N/A'}</p>
-                            <p className="text-xs text-on-surface-variant mt-1">Placed on {new Date(order.created_at).toLocaleDateString()}</p>
-                            <p className="text-xs text-on-surface-variant mt-1">
-                              {order.seller_decision_summary?.approved || 0} approved, {order.seller_decision_summary?.rejected || 0} rejected
+                            <p className="text-xs text-on-surface-variant mt-1.5">{customerName} · {order.profiles?.email || ''}</p>
+                            <p className="text-xs text-on-surface-variant mt-0.5">
+                              {new Date(order.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                             </p>
+                            {(approved > 0 || rejected > 0) && (
+                              <p className="text-xs text-on-surface-variant mt-0.5">
+                                {approved > 0 && <span className="text-emerald-700 font-medium">{approved} approved</span>}
+                                {approved > 0 && rejected > 0 && <span className="mx-1">·</span>}
+                                {rejected > 0 && <span className="text-red-700 font-medium">{rejected} rejected</span>}
+                              </p>
+                            )}
                           </div>
-                          <div className="text-left lg:text-right">
-                            <p className="text-xs uppercase tracking-wider text-on-surface-variant font-bold">Seller subtotal</p>
-                            <p className="text-2xl font-brand text-primary">₹{Number(order.seller_subtotal || 0).toLocaleString('en-IN')}</p>
+                          <div className="flex flex-col items-start sm:items-end gap-2 shrink-0">
+                            <div className="text-right">
+                              <p className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Your share</p>
+                              <p className="text-xl font-brand text-primary">₹{Number(order.seller_subtotal || 0).toLocaleString('en-IN')}</p>
+                            </div>
                             <button
                               onClick={() => navigate(`/seller/orders/${order.id}`)}
-                              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary-container/50 text-primary text-xs font-semibold hover:bg-primary-container transition-colors"
+                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-on-primary text-xs font-semibold hover:bg-primary/90 transition-colors"
                             >
                               <span className="material-symbols-outlined text-sm">open_in_new</span>
-                              View details
+                              {pending > 0 ? `Review ${pending} pending` : 'View details'}
                             </button>
                           </div>
                         </div>
 
-                        <div className="mt-5 overflow-x-auto">
-                          <table className="min-w-full">
-                            <thead>
-                              <tr className="border-b border-outline-variant/20">
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Product</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Key</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Qty</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Price</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Line Total</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Decision</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Reason</th>
-                                <th className="px-3 py-2 text-left text-xs font-bold text-on-surface-variant uppercase tracking-wider">Actions</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-outline-variant/20">
-                              {order.seller_items.map((item) => (
-                                <tr key={item.id}>
-                                  <td className="px-3 py-3 text-sm text-primary font-medium">{item.product_name || 'Product'}</td>
-                                  <td className="px-3 py-3 text-xs font-mono text-on-surface-variant">{item.product_key || 'N/A'}</td>
-                                  <td className="px-3 py-3 text-sm text-on-surface-variant">{item.quantity}</td>
-                                  <td className="px-3 py-3 text-sm text-on-surface-variant">₹{Number(item.unit_price || 0).toLocaleString('en-IN')}</td>
-                                  <td className="px-3 py-3 text-sm font-semibold text-primary">₹{Number(item.line_total || 0).toLocaleString('en-IN')}</td>
-                                  <td className="px-3 py-3">
-                                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold capitalize ${decisionColors[item.seller_decision] || decisionColors.pending}`}>
-                                      {item.seller_decision || 'pending'}
-                                    </span>
-                                    {item.seller_decided_at && (
-                                      <p className="text-[10px] text-on-surface-variant mt-1">{new Date(item.seller_decided_at).toLocaleString('en-IN')}</p>
-                                    )}
-                                  </td>
-                                  <td className="px-3 py-3 text-sm text-on-surface-variant">
-                                    {item.seller_decision === 'rejected'
-                                      ? item.seller_decision_reason
-                                      : (rejectingItemKey === getDecisionKey(item)
-                                        ? (decisionReasons[getDecisionKey(item)] || '—')
-                                        : '—')}
-                                  </td>
-                                  <td className="px-3 py-3">
-                                    {!isInsiderManagedSeller && item.seller_decision === 'pending' ? (
-                                      <div className="flex flex-col gap-2 min-w-[220px]">
-                                        {rejectingItemKey === getDecisionKey(item) && (
-                                          <>
-                                            <select
-                                              value={decisionReasons[getDecisionKey(item)] || ''}
-                                              onChange={(e) => {
-                                                const itemKey = getDecisionKey(item);
-                                                const value = e.target.value;
-                                                setDecisionReasons((prev) => ({ ...prev, [itemKey]: value }));
-                                                if (value) {
-                                                  setDecisionErrors((prev) => {
-                                                    const next = { ...prev };
-                                                    delete next[itemKey];
-                                                    return next;
-                                                  });
-                                                }
-                                              }}
-                                              className="px-3 py-2 rounded-lg border border-outline-variant bg-surface text-sm text-on-surface focus:ring-2 focus:ring-secondary focus:border-transparent"
-                                              disabled={isUpdating}
-                                            >
-                                              <option value="">Select rejection reason</option>
-                                              {rejectionReasons.map((reason) => (
-                                                <option key={reason.value} value={reason.label}>{reason.label}</option>
-                                              ))}
-                                            </select>
-                                            {decisionErrors[getDecisionKey(item)] && (
-                                              <p className="text-xs text-red-700 font-medium">{decisionErrors[getDecisionKey(item)]}</p>
-                                            )}
-                                          </>
-                                        )}
-                                        <div className="flex items-center gap-2">
-                                          <button
-                                            onClick={() => handleApproveItem(item)}
-                                            disabled={isUpdating}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-green-600 text-white text-xs font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
-                                          >
-                                            <span className="material-symbols-outlined text-sm">check</span>
-                                            Approve
-                                          </button>
-                                          <button
-                                            onClick={() => {
-                                              if (rejectingItemKey === getDecisionKey(item)) {
-                                                handleRejectItem(item);
-                                                return;
-                                              }
-                                              beginRejectItem(item);
-                                            }}
-                                            disabled={isUpdating}
-                                            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
-                                          >
-                                            <span className="material-symbols-outlined text-sm">close</span>
-                                            {rejectingItemKey === getDecisionKey(item) ? 'Confirm Reject' : 'Reject'}
-                                          </button>
-                                          {rejectingItemKey === getDecisionKey(item) && (
-                                            <button
-                                              onClick={() => {
-                                                const itemKey = getDecisionKey(item);
-                                                setRejectingItemKey('');
-                                                setDecisionErrors((prev) => {
-                                                  const next = { ...prev };
-                                                  delete next[itemKey];
-                                                  return next;
-                                                });
-                                              }}
-                                              disabled={isUpdating}
-                                              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant text-on-surface text-xs font-semibold hover:bg-surface-container transition-colors disabled:opacity-50"
-                                            >
-                                              Cancel
-                                            </button>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <span className="text-sm text-on-surface-variant">
-                                        {isInsiderManagedSeller ? 'Managed in Insider' : 'Locked'}
-                                      </span>
-                                    )}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                        {/* Item summary — read-only, no actions */}
+                        <div className="mt-4 space-y-1.5">
+                          {order.seller_items.map((item) => (
+                            <div key={item.id} className={`flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-xs ${
+                              item.seller_decision === 'approved' ? 'bg-emerald-50 border border-emerald-100'
+                              : item.seller_decision === 'rejected' ? 'bg-red-50 border border-red-100'
+                              : 'bg-surface-container border border-outline-variant/20'
+                            }`}>
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                  item.seller_decision === 'approved' ? 'bg-emerald-500'
+                                  : item.seller_decision === 'rejected' ? 'bg-red-500'
+                                  : 'bg-amber-400'
+                                }`} />
+                                <span className="font-medium text-on-surface truncate">{item.product_name}</span>
+                                <span className="text-on-surface-variant font-mono hidden sm:inline">· {item.product_key}</span>
+                                <span className="text-on-surface-variant">× {item.quantity}</span>
+                              </div>
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="font-semibold text-primary">₹{Number(item.line_total || 0).toLocaleString('en-IN')}</span>
+                                {item.seller_decision === 'rejected' && item.seller_decision_reason && (
+                                  <span className="text-red-600 hidden sm:inline">· {item.seller_decision_reason}</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );

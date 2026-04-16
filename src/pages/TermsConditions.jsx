@@ -7,7 +7,7 @@ export default function TermsConditions() {
           <span className="font-headline font-bold uppercase tracking-[0.2em] text-xs text-secondary mb-3 block">
             Legal Documentation
           </span>
-          <h1 className="font-display text-4xl md:text-7xl text-primary mb-6 leading-tight tracking-tight">
+          <h1 className="font-brand text-4xl md:text-7xl text-primary mb-6 leading-tight tracking-tight">
             Terms &amp;<br className="md:hidden" /> Conditions
           </h1>
           <p className="font-headline text-on-surface-variant text-sm md:text-lg max-w-2xl border-l-2 border-secondary-container pl-4">
@@ -26,7 +26,7 @@ export default function TermsConditions() {
           {/* Sticky TOC — desktop only */}
           <aside className="hidden lg:block lg:col-span-3">
             <nav className="sticky top-32 space-y-6">
-              <h3 className="font-display text-secondary text-sm uppercase tracking-widest">Navigation</h3>
+              <h3 className="font-brand text-secondary text-sm uppercase tracking-widest">Navigation</h3>
               <ul className="space-y-4 font-headline text-sm text-on-surface-variant">
                 {[
                   ['#acceptance', 'Acceptance'],
@@ -140,7 +140,7 @@ export default function TermsConditions() {
 
             {/* Section 5: Liability */}
             <div id="liability" className="bg-primary text-on-primary-container p-6 md:p-10 rounded-xl">
-              <h2 className="font-display text-xl md:text-2xl text-secondary-container mb-4">
+              <h2 className="font-brand text-xl md:text-2xl text-secondary-container mb-4">
                 Limitation of Liability
               </h2>
               <p className="leading-relaxed opacity-90 text-sm md:text-base">

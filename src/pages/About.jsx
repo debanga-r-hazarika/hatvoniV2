@@ -1,6 +1,6 @@
 export default function About() {
   return (
-    <main className="pt-24">
+    <main className="pt-32 md:pt-40">
       {/* Hero */}
       <section className="relative h-[870px] flex items-center overflow-hidden px-6 md:px-12 mb-24">
         <div className="absolute inset-0 z-0">
@@ -68,7 +68,7 @@ export default function About() {
             <div className="md:col-span-2 md:row-span-2 bg-white p-12 rounded-xl flex flex-col justify-between group overflow-hidden relative shadow-sm">
               <div className="relative z-10">
                 <span className="material-symbols-outlined text-secondary text-5xl mb-8 block">eco</span>
-                <h3 className="font-headline text-2xl font-bold text-primary mb-4">Biodynamic Preservation</h3>
+                <h3 className="font-brand text-2xl font-bold text-primary mb-4">Biodynamic Preservation</h3>
                 <p className="text-on-surface-variant leading-relaxed">Protecting native heirloom seeds and promoting ancient polyculture farming methods that rejuvenate the soil naturally without chemical interference.</p>
               </div>
               <div className="absolute bottom-0 right-0 opacity-5 group-hover:opacity-10 transition-opacity translate-y-10 translate-x-10">
@@ -113,16 +113,16 @@ export default function About() {
                 alt="Local Producer"
                 className="w-full aspect-[3/4] object-cover rounded-xl"
               />
-              <h4 className="font-headline text-xl font-bold text-primary">Ananya's Garden, Assam</h4>
+              <h4 className="font-brand text-xl font-bold text-primary">Ananya's Garden, Assam</h4>
               <p className="text-on-surface-variant">Ananya oversees our heritage rice collective, ensuring the ancient 'Boka Saul' variety remains as potent as it was in her grandfather's time.</p>
             </div>
-            <div className="space-y-6 pt-24">
+            <div className="space-y-6 pt-32 md:pt-40">
               <img
                 src="https://lh3.googleusercontent.com/aida-public/AB6AXuDuLgIyYW8ShMe7Xn2hNURJ3Fa-7QXW7-TIVSYDPEkq931mRKaFUdiGNaY-lCyZmT4nLqXZECrPJzQpztgttpQFhgRtpr0RxNrzOkFsN6meG4Y1JqjGHEKNfnQVKNxHnQI6WKLs6BbvqTef35usm5UVGKIaq_WkUjG8ZL7yZMOJeX5C6iet_AZTnbe1U-RRghzfEgCt7rHtE29E524kYfW4fSERA7kNKYKTLQhlljLxVqFvWAeWFEKsOcgAXYm2maLdSpoLmz7ePrvh"
                 alt="Traditional Fermentation"
                 className="w-full aspect-[3/4] object-cover rounded-xl"
               />
-              <h4 className="font-headline text-xl font-bold text-primary">The Fermentation Lab</h4>
+              <h4 className="font-brand text-xl font-bold text-primary">The Fermentation Lab</h4>
               <p className="text-on-surface-variant">Our slow-aging process takes place in the cooler altitudes of Mizoram, where temperature and spirit align perfectly.</p>
             </div>
           </div>

@@ -47,7 +47,7 @@ function ProductCard({ product, wishlistIds, onToggleWishlist }) {
         </div>
         <div className="space-y-3">
           <div className="flex items-start justify-between gap-4">
-            <h3 className="font-display text-2xl font-extrabold text-primary">{product.name}</h3>
+            <h3 className="font-brand text-2xl font-extrabold text-primary">{product.name}</h3>
             <span className="text-xl font-bold text-secondary">Rs. {Number(product.price || 0).toLocaleString()}</span>
           </div>
           <p className="text-sm leading-relaxed text-on-surface-variant line-clamp-3">
@@ -164,13 +164,13 @@ export default function Products() {
   }, [products, activeCategory]);
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-16 pt-32 lg:px-20">
+    <main className="mx-auto max-w-7xl px-6 py-16 pt-32 md:pt-40 lg:px-20">
       <section className="mb-20 space-y-6">
         <div className="flex items-center gap-4">
           <div className="h-px w-12 bg-secondary" />
           <span className="text-xs font-bold uppercase tracking-[0.2em] text-secondary">Authentic Heritage</span>
         </div>
-        <h1 className="max-w-4xl font-headline text-5xl leading-none tracking-tight text-primary md:text-7xl lg:text-8xl">
+        <h1 className="max-w-4xl font-brand text-5xl leading-none tracking-tight text-primary md:text-7xl lg:text-8xl">
           The Essence of <br />
           <span className="text-secondary">North East India</span>
         </h1>
@@ -238,7 +238,7 @@ export default function Products() {
           />
         </div>
         <div className="w-full space-y-6 md:w-1/2">
-          <h2 className="font-headline text-3xl text-primary">More than a flavor.</h2>
+          <h2 className="font-brand text-3xl text-primary">More than a flavor.</h2>
           <p className="leading-loose text-on-surface-variant">
             In North East Indian households, Khar is not just an ingredient. It is a ritual tied to balance, nourishment, and continuity. Every Hatvoni product supports living culinary traditions and local farming communities.
           </p>

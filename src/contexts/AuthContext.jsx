@@ -16,13 +16,34 @@ export const AuthProvider = ({ children }) => {
   const [profile, setProfile] = useState(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isSeller, setIsSeller] = useState(false);
+  const [isEmployee, setIsEmployee] = useState(false);
+  const [employeeModules, setEmployeeModules] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const fetchEmployeeModules = async (userId) => {
+    if (!userId) {
+      setIsEmployee(false);
+      setEmployeeModules([]);
+      return;
+    }
+    try {
+      const { data } = await supabase.rpc('get_my_employee_modules');
+      const modules = Array.isArray(data) ? data : [];
+      setIsEmployee(modules.length > 0);
+      setEmployeeModules(modules);
+    } catch {
+      setIsEmployee(false);
+      setEmployeeModules([]);
+    }
+  };
 
   const fetchProfile = async (userId, sessionUser) => {
     if (!userId) {
       setProfile(null);
       setIsAdmin(false);
       setIsSeller(false);
+      setIsEmployee(false);
+      setEmployeeModules([]);
       return;
     }
 
@@ -69,22 +90,30 @@ export const AuthProvider = ({ children }) => {
             setProfile(updated);
             setIsAdmin(updated.is_admin === true);
             setIsSeller(updated.is_seller === true);
+            if (!updated.is_admin) await fetchEmployeeModules(userId);
+            else { setIsEmployee(false); setEmployeeModules([]); }
             return;
           }
         }
         setProfile(data);
         setIsAdmin(data.is_admin === true);
         setIsSeller(data.is_seller === true);
+        if (!data.is_admin) await fetchEmployeeModules(userId);
+        else { setIsEmployee(false); setEmployeeModules([]); }
       } else {
         setProfile(null);
         setIsAdmin(false);
         setIsSeller(false);
+        setIsEmployee(false);
+        setEmployeeModules([]);
       }
     } catch (err) {
       console.error('Exception fetching profile:', err);
       setProfile(null);
       setIsAdmin(false);
       setIsSeller(false);
+      setIsEmployee(false);
+      setEmployeeModules([]);
     }
   };
 
@@ -162,6 +191,9 @@ export const AuthProvider = ({ children }) => {
     profile,
     isAdmin,
     isSeller,
+    isEmployee,
+    employeeModules,
+    hasModule: (mod) => isAdmin || employeeModules.includes(mod),
     loading,
     signUp,
     signIn,

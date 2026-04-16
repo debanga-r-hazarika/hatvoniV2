@@ -5,12 +5,12 @@ import { cartService } from '../services/cartService';
 
 const navLinks = [
   { to: '/', label: 'Home' },
-  { to: '/about', label: 'About Us' },
-  { to: '/products', label: 'Our Products' },
+  { to: '/products', label: 'Shop' },
+  { to: '/about', label: 'Story' },
   { to: '/traditions', label: 'Traditions' },
   { to: '/recipes', label: 'Recipes' },
   { to: '/gallery', label: 'Gallery' },
-  { to: '/contact', label: 'Contact Us' },
+  { to: '/contact', label: 'Contact' },
 ];
 
 export default function Navbar() {
@@ -118,169 +118,178 @@ export default function Navbar() {
     <>
       <header
         ref={navRef}
-        className={`fixed top-0 w-full z-50 transition-all duration-500 ease-out ${
+        className={`fixed top-0 w-full z-50 transition-all duration-500 ease-out font-body ${
           hidden ? '-translate-y-full' : 'translate-y-0'
-        } ${
-          scrolled
-            ? 'bg-white/95 backdrop-blur-xl shadow-sm'
-            : 'bg-transparent'
         }`}
-        style={{ willChange: 'transform, background-color' }}
+        style={{ willChange: 'transform' }}
       >
-        <nav className="flex justify-between items-center px-6 md:px-12 py-4 md:py-5 w-full max-w-screen-2xl mx-auto">
-          {/* Logo */}
-          <Link
-            to="/"
-            className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-          >
-            <span
-              className="text-2xl md:text-3xl font-bold tracking-tight"
-              style={{ fontFamily: "'Rammetto One', sans-serif", color: '#004a2b' }}
-            >
-              Hatvoni
-            </span>
-          </Link>
+        {/* Top Announcement Bar */}
+        <div className="bg-primary text-white py-1.5 px-4 text-center text-xs tracking-wide border-b border-primary-fixed/20 relative z-10 hidden sm:block">
+          Discover the Authentic Heritage & Flavors of Northeast India
+        </div>
 
-          {/* Desktop nav links — Inter Medium, #004a2b, 19px */}
-          <div className="hidden md:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <NavLink
-                key={link.to}
-                to={link.to}
-                className={({ isActive }) =>
-                  `relative px-3 py-2 rounded-lg transition-all duration-200 text-[19px] font-medium ${
-                    isActive
-                      ? 'text-[#004a2b]'
-                      : 'text-[#004a2b]/80 hover:text-[#004a2b] hover:bg-[#004a2b]/5'
-                  }`
-                }
-                style={{ fontFamily: "'Inter', sans-serif" }}
-                end={link.to === '/'}
-              >
-                {({ isActive }) => (
-                  <>
-                    {link.label}
-                    {isActive && (
-                      <span className="absolute bottom-0 left-1/2 -translate-x-1/2 h-0.5 w-4/5 bg-[#004a2b] rounded-full" />
-                    )}
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </div>
-
-          <div className="flex items-center space-x-1">
+        {/* Main Navbar */}
+        <div 
+          className={`w-full transition-all duration-500 ${
+            scrolled
+              ? 'bg-surface/90 backdrop-blur-md shadow-sm border-b border-outline-variant/30 py-2'
+              : 'bg-surface py-2 md:py-3'
+          }`}
+        >
+          <nav className="flex justify-between items-center px-4 md:px-8 xl:px-12 w-full max-w-screen-2xl mx-auto overflow-hidden">
+            {/* Logo */}
             <Link
-              to="/wishlist"
-              className="relative p-2.5 text-[#004a2b] hover:bg-[#004a2b]/5 rounded-full transition-all duration-300 hover:scale-110 active:scale-95 group"
+              to="/"
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity z-10 shrink-0"
             >
-              <span className="material-symbols-outlined text-xl transition-transform duration-300 group-hover:scale-110">favorite</span>
-            </Link>
-            <Link
-              to="/cart"
-              className="relative p-2.5 text-[#004a2b] hover:bg-[#004a2b]/5 rounded-full transition-all duration-300 hover:scale-110 active:scale-95 group"
-            >
-              <span className="material-symbols-outlined text-xl transition-transform duration-300 group-hover:scale-110">shopping_cart</span>
-              <span className="absolute top-0.5 right-0.5 bg-[#fcb748] text-white text-[9px] min-w-4 h-4 px-1 rounded-full flex items-center justify-center font-bold">{cartCount}</span>
+              <span className="text-2xl md:text-3xl xl:text-4xl font-bold tracking-tight font-brand text-primary leading-[0.9]">
+                 Hatvoni
+              </span>
             </Link>
 
-            {user ? (
-              <>
-                <div className="hidden md:flex items-center space-x-2 ml-3">
-                  {isAdmin && (
+            {/* Desktop nav links */}
+            <div className="hidden lg:flex flex-1 justify-center items-center gap-0.5 xl:gap-3 mx-2 xl:mx-4">
+              {navLinks.map((link) => (
+                <NavLink
+                  key={link.to}
+                  to={link.to}
+                  className={({ isActive }) =>
+                    `relative px-1.5 xl:px-3 py-2 rounded-full transition-all duration-300 text-[13px] xl:text-[15px] font-medium tracking-wide whitespace-nowrap ${
+                      isActive
+                        ? 'text-primary'
+                        : 'text-primary/70 hover:text-primary hover:bg-primary/5'
+                    }`
+                  }
+                  end={link.to === '/'}
+                >
+                  {({ isActive }) => (
                     <>
+                      {link.label}
+                      {isActive && (
+                        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-[3px] w-1 bg-secondary rounded-full" />
+                      )}
+                    </>
+                  )}
+                </NavLink>
+              ))}
+            </div>
+
+            {/* Icons & Utility */}
+            <div className="flex items-center space-x-1 md:space-x-2 xl:space-x-3 z-10 shrink-0">
+              <div className="hidden sm:flex space-x-1 xl:space-x-2">
+                <Link
+                  to="/wishlist"
+                  className="relative p-2 xl:p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
+                  aria-label="Wishlist"
+                >
+                  <span className="material-symbols-outlined text-[22px] xl:text-[24px] transition-transform duration-300 group-hover:scale-110">favorite</span>
+                </Link>
+                <Link
+                  to="/cart"
+                  className="relative p-2 xl:p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
+                  aria-label="Cart"
+                >
+                  <span className="material-symbols-outlined text-[22px] xl:text-[24px] transition-transform duration-300 group-hover:scale-110">shopping_cart</span>
+                  {cartCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 bg-secondary-container text-on-secondary-container text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-bold border-2 border-surface shadow-sm">
+                      {cartCount}
+                    </span>
+                  )}
+                </Link>
+              </div>
+
+              {/* User / Auth Section */}
+              {user ? (
+                <>
+                  <div className="hidden md:flex items-center space-x-2 xl:space-x-4 ml-1 xl:ml-4 border-l border-outline-variant/40 pl-3 xl:pl-6">
+                    {isAdmin && (
                       <Link
                         to="/admin"
-                        className="px-4 py-2 text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 rounded-lg transition-all duration-300 active:scale-95"
-                        style={{ fontFamily: "'Inter', sans-serif" }}
+                        className="px-3 xl:px-4 py-1.5 xl:py-2 text-[10px] xl:text-xs font-semibold uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 rounded-full transition-all duration-300 shadow-sm hover:shadow active:scale-95 hidden xl:block"
                       >
                         Admin
                       </Link>
-                      <Link
-                        to="/admin/coupons"
-                        className="px-4 py-2 text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 rounded-lg transition-all duration-300 active:scale-95"
-                        style={{ fontFamily: "'Inter', sans-serif" }}
-                      >
-                        Coupons
-                      </Link>
-                    </>
-                  )}
-                  {isSeller && (
-                    <Link
-                      to="/seller"
-                      className="px-4 py-2 text-sm font-medium bg-primary text-white hover:opacity-90 rounded-lg transition-all duration-300 active:scale-95"
-                      style={{ fontFamily: "'Inter', sans-serif" }}
-                    >
-                      Seller Panel
-                    </Link>
-                  )}
-                  <Link
-                    to="/profile"
-                    className="flex items-center space-x-2 px-3 py-2 hover:bg-[#004a2b]/5 rounded-lg transition-all duration-300 group"
-                  >
-                    {profile?.avatar_url ? (
-                      <img src={profile.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover ring-2 ring-[#004a2b]/20" />
-                    ) : (
-                      <span className="material-symbols-outlined text-xl text-[#004a2b]">person</span>
                     )}
-                    <span className="text-sm font-medium text-[#004a2b]" style={{ fontFamily: "'Inter', sans-serif" }}>{getUserDisplayName()}</span>
-                  </Link>
-                  <button
-                    onClick={handleSignOut}
-                    className="px-4 py-2 text-sm font-medium text-[#004a2b] hover:bg-[#004a2b]/5 rounded-lg transition-all duration-300 active:scale-95"
-                    style={{ fontFamily: "'Inter', sans-serif" }}
-                  >
-                    Logout
-                  </button>
-                </div>
-                <Link
-                  to="/profile"
-                  className="md:hidden p-2.5 text-[#004a2b] hover:bg-[#004a2b]/5 rounded-full transition-all duration-300"
-                >
-                  {profile?.avatar_url ? (
-                    <img src={profile.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover" />
-                  ) : (
-                    <span className="material-symbols-outlined text-xl">person</span>
-                  )}
-                </Link>
-              </>
-            ) : (
-              <div className="hidden md:flex items-center space-x-2 ml-3">
-                <Link
-                  to="/login"
-                  className="px-4 py-2 text-sm font-medium text-[#004a2b] hover:bg-[#004a2b]/5 rounded-lg transition-all duration-300 active:scale-95"
-                  style={{ fontFamily: "'Inter', sans-serif" }}
-                >
-                  Login
-                </Link>
-                <Link
-                  to="/signup"
-                  className="px-4 py-2 text-sm font-medium bg-[#004a2b] text-white hover:bg-[#003820] rounded-lg transition-all duration-300 active:scale-95"
-                  style={{ fontFamily: "'Inter', sans-serif" }}
-                >
-                  Sign Up
-                </Link>
-              </div>
-            )}
+                    {isSeller && (
+                      <Link
+                        to="/seller"
+                        className="px-3 xl:px-4 py-1.5 xl:py-2 text-[10px] xl:text-xs font-semibold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-white rounded-full transition-all duration-300 active:scale-95 hidden xl:block"
+                      >
+                        Seller
+                      </Link>
+                    )}
+                    <div className="relative group">
+                      <Link
+                        to="/profile"
+                        className="flex items-center gap-2 px-1 xl:px-1.5 py-1 xl:py-1.5 pr-2 xl:pr-4 hover:bg-primary/5 rounded-full border border-transparent hover:border-outline-variant/30 transition-all duration-300"
+                      >
+                        {profile?.avatar_url ? (
+                          <img src={profile.avatar_url} alt="Profile" className="w-7 h-7 xl:w-8 xl:h-8 rounded-full object-cover shadow-sm" />
+                        ) : (
+                          <div className="w-7 h-7 xl:w-8 xl:h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary/70">
+                            <span className="material-symbols-outlined text-[18px] xl:text-[20px]">person</span>
+                          </div>
+                        )}
+                        <span className="text-xs xl:text-sm font-medium text-primary hidden lg:block truncate max-w-[80px] xl:max-w-[120px]">{getUserDisplayName()}</span>
+                      </Link>
+                    </div>
+                  </div>
 
-            <button
-              className="md:hidden p-2.5 text-[#004a2b] hover:bg-[#004a2b]/5 rounded-full transition-all duration-300 active:scale-95"
-              onClick={toggleMenu}
-              aria-label="Toggle menu"
-              aria-expanded={menuOpen}
-            >
-              <span className={`material-symbols-outlined transition-transform duration-300 ${menuOpen && !isClosing ? 'rotate-90' : 'rotate-0'}`}>
-                {menuOpen && !isClosing ? 'close' : 'menu'}
-              </span>
-            </button>
-          </div>
-        </nav>
+                  {/* Mobile Icons */}
+                  <div className="flex sm:hidden items-center ml-2">
+                    <Link
+                      to="/cart"
+                      className="relative p-2 text-primary/80 hover:text-primary rounded-full transition-all duration-300"
+                    >
+                      <span className="material-symbols-outlined text-[22px]">shopping_cart</span>
+                      {cartCount > 0 && (
+                        <span className="absolute top-1 right-0 bg-secondary-container text-on-secondary-container text-[9px] min-w-[16px] h-[16px] px-1 rounded-full flex items-center justify-center font-bold">
+                          {cartCount}
+                        </span>
+                      )}
+                    </Link>
+                  </div>
+                </>
+              ) : (
+                <div className="hidden md:flex items-center space-x-1 xl:space-x-3 ml-2 xl:ml-4 border-l border-outline-variant/40 pl-3 xl:pl-6">
+                  <Link
+                     to="/login"
+                     className="text-xs xl:text-sm font-medium text-primary hover:text-primary/70 transition-colors duration-300 px-2 xl:px-3 py-2"
+                  >
+                     Log In
+                  </Link>
+                  <Link
+                    to="/signup"
+                    className="px-3 xl:px-5 py-2 xl:py-2.5 text-xs xl:text-sm font-semibold bg-primary text-white hover:bg-primary/90 rounded-full transition-all duration-300 shadow-sm hover:shadow-md active:scale-95"
+                  >
+                    Join Us
+                  </Link>
+                </div>
+              )}
+
+              {/* Mobile Menu Toggle */}
+              <button
+                className="lg:hidden p-2 text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 ml-1"
+                onClick={toggleMenu}
+                aria-label="Toggle menu"
+                aria-expanded={menuOpen}
+              >
+                <div className="w-[20px] xl:w-[22px] h-[14px] xl:h-[16px] flex flex-col justify-between items-end relative">
+                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? 'rotate-45 top-1/2 -translate-y-1/2' : 'top-0'}`} />
+                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-200 absolute w-[80%] top-1/2 -translate-y-1/2 ${menuOpen ? 'opacity-0 translate-x-2' : ''}`} />
+                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? '-rotate-45 top-1/2 -translate-y-1/2' : 'bottom-0'}`} />
+                </div>
+              </button>
+            </div>
+          </nav>
+        </div>
       </header>
 
+      {/* Mobile Sidebar Overlay */}
       {(menuOpen || isClosing) && (
         <>
           <div
-            className={`fixed inset-0 bg-black/40 backdrop-blur-sm z-40 md:hidden transition-opacity duration-300 ${
+            className={`fixed inset-0 bg-scrim/40 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-400 ease-in-out ${
               isClosing ? 'opacity-0' : 'opacity-100'
             }`}
             onClick={closeMenu}
@@ -288,211 +297,162 @@ export default function Navbar() {
           />
 
           <div
-            className={`fixed top-0 right-0 h-full w-[85%] max-w-sm bg-surface z-50 md:hidden shadow-2xl transition-transform duration-300 ease-out ${
+            className={`fixed top-0 right-0 h-[100dvh] w-[85%] max-w-[360px] bg-surface z-50 lg:hidden flex flex-col shadow-[rgba(0,0,0,0.1)_0px_10px_50px] transition-transform duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] ${
               isClosing ? 'translate-x-full' : 'translate-x-0'
             }`}
-            style={{ willChange: 'transform' }}
           >
-            <div className="flex flex-col h-full">
-              <div className="flex items-center justify-between px-6 py-5 border-b border-outline-variant/30">
+            <div className="flex items-center justify-between px-6 py-5 border-b border-primary/10 bg-surface">
+              <Link
+                to="/"
+                onClick={handleLinkClick}
+                className="font-brand text-3xl text-primary tracking-tighter leading-none"
+              >
+                Hatvoni
+              </Link>
+              <button
+                onClick={closeMenu}
+                className="w-10 h-10 text-primary/70 hover:text-primary hover:bg-surface-container rounded-full transition-all duration-300 flex items-center justify-center -mr-2 bg-surface"
+                aria-label="Close menu"
+              >
+                <span className="material-symbols-outlined text-[20px]">close</span>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-6 no-scrollbar bg-surface-container-lowest">
+              <nav className="flex flex-col space-y-1 mb-8">
+                {navLinks.map((link, index) => (
+                  <NavLink
+                    key={link.to}
+                    to={link.to}
+                    className={({ isActive }) =>
+                      `flex items-center px-4 py-3.5 rounded-2xl font-headline tracking-wide text-[16px] transition-all duration-300 ${
+                        isActive
+                          ? 'text-primary bg-primary/5 font-semibold'
+                          : 'text-primary/70 hover:bg-surface-container hover:text-primary'
+                      }`
+                    }
+                    onClick={handleLinkClick}
+                    end={link.to === '/'}
+                    style={{
+                      animationDelay: `${index * 40}ms`,
+                      animation: isClosing ? 'none' : 'slideInRight 0.4s cubic-bezier(0.22,1,0.36,1) forwards',
+                      opacity: isClosing ? 1 : 0,
+                    }}
+                  >
+                    {link.label}
+                  </NavLink>
+                ))}
+              </nav>
+
+              <div className="pt-6 border-t border-primary/10 flex flex-col space-y-2">
+                <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest px-4 mb-2">Shopping</div>
                 <Link
-                  to="/"
+                  to="/wishlist"
                   onClick={handleLinkClick}
-                  className="font-display text-2xl text-primary tracking-tighter"
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
+                  style={{ animationDelay: '200ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
                 >
-                  Hatvoni
+                  <span className="material-symbols-outlined text-[20px] text-primary/60">favorite</span>
+                  Wishlist
                 </Link>
-                <button
-                  onClick={closeMenu}
-                  className="p-2 text-primary hover:bg-surface-container-low rounded-full transition-all duration-300"
-                  aria-label="Close menu"
+                <Link
+                  to="/cart"
+                  onClick={handleLinkClick}
+                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
+                  style={{ animationDelay: '240ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
                 >
-                  <span className="material-symbols-outlined">close</span>
-                </button>
+                  <span className="material-symbols-outlined text-[20px] text-primary/60">shopping_cart</span>
+                  Shopping Cart
+                  {cartCount > 0 && <span className="ml-auto bg-secondary-container text-on-secondary-container text-xs px-2.5 py-0.5 rounded-full font-bold">{cartCount}</span>}
+                </Link>
               </div>
 
-              <div className="flex-1 overflow-y-auto px-4 py-6">
-                <nav className="space-y-1">
-                  {navLinks.map((link, index) => (
-                    <NavLink
-                      key={link.to}
-                      to={link.to}
-                      className={({ isActive }) =>
-                        `flex items-center px-4 py-3.5 rounded-xl font-body tracking-tight text-base transition-all duration-300 ${
-                          isActive
-                            ? 'text-secondary bg-secondary/10 font-bold'
-                            : 'text-primary/80 hover:bg-surface-container-low hover:text-primary'
-                        }`
-                      }
+              <div className="mt-6 pt-6 border-t border-primary/10 flex flex-col space-y-2">
+                <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest px-4 mb-2">Account</div>
+                {user ? (
+                  <>
+                    {isAdmin && (
+                      <Link
+                        to="/admin"
+                        onClick={handleLinkClick}
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 text-amber-700 font-body text-sm font-semibold hover:bg-amber-500/20 transition-all duration-300"
+                        style={{ animationDelay: '280ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
+                        Admin Dashboard
+                      </Link>
+                    )}
+                    {isSeller && (
+                      <Link
+                        to="/seller"
+                        onClick={handleLinkClick}
+                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-primary/10 text-primary font-body text-sm font-semibold hover:bg-primary/20 transition-all duration-300"
+                        style={{ animationDelay: '300ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                      >
+                        <span className="material-symbols-outlined text-[20px]">storefront</span>
+                        Seller Panel
+                      </Link>
+                    )}
+                    
+                    <Link
+                      to="/profile"
                       onClick={handleLinkClick}
-                      end={link.to === '/'}
-                      style={{
-                        animationDelay: `${index * 50}ms`,
-                        animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                        opacity: isClosing ? 1 : 0,
-                      }}
+                      className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
+                      style={{ animationDelay: '320ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
                     >
-                      {link.label}
-                    </NavLink>
-                  ))}
-                </nav>
-
-                <div className="mt-8 pt-6 border-t border-outline-variant/30 space-y-1">
-                  <Link
-                    to="/wishlist"
-                    onClick={handleLinkClick}
-                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300"
-                    style={{
-                      animationDelay: `${navLinks.length * 50}ms`,
-                      animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                      opacity: isClosing ? 1 : 0,
-                    }}
-                  >
-                    <span className="material-symbols-outlined text-lg">favorite</span>
-                    Wishlist
-                  </Link>
-                  <Link
-                    to="/cart"
-                    onClick={handleLinkClick}
-                    className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300"
-                    style={{
-                      animationDelay: `${(navLinks.length + 1) * 50}ms`,
-                      animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                      opacity: isClosing ? 1 : 0,
-                    }}
-                  >
-                    <span className="material-symbols-outlined text-lg">shopping_cart</span>
-                    Cart
-                    <span className="ml-auto bg-secondary text-white text-xs px-2 py-0.5 rounded-full font-bold">{cartCount}</span>
-                  </Link>
-                </div>
-
-                <div className="mt-6 pt-6 border-t border-outline-variant/30 space-y-1">
-                  {user ? (
-                    <>
-                      {isAdmin && (
-                        <>
-                          <Link
-                            to="/admin"
-                            onClick={handleLinkClick}
-                            className="flex items-center gap-3 px-4 py-3.5 rounded-xl bg-amber-500 text-white font-body font-semibold text-sm hover:bg-amber-600 transition-all duration-300"
-                            style={{
-                              animationDelay: `${(navLinks.length + 2) * 50}ms`,
-                              animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                              opacity: isClosing ? 1 : 0,
-                            }}
-                          >
-                            <span className="material-symbols-outlined text-lg">admin_panel_settings</span>
-                            Admin Dashboard
-                          </Link>
-                          <Link
-                            to="/admin/coupons"
-                            onClick={handleLinkClick}
-                            className="flex items-center gap-3 px-4 py-3.5 rounded-xl bg-emerald-600 text-white font-body font-semibold text-sm hover:bg-emerald-700 transition-all duration-300"
-                            style={{
-                              animationDelay: `${(navLinks.length + 3) * 50}ms`,
-                              animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                              opacity: isClosing ? 1 : 0,
-                            }}
-                          >
-                            <span className="material-symbols-outlined text-lg">sell</span>
-                            Manage Coupons
-                          </Link>
-                        </>
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
+                      ) : (
+                        <span className="material-symbols-outlined text-[20px] text-primary/60">person</span>
                       )}
-                      {isSeller && (
-                        <Link
-                          to="/seller"
-                          onClick={handleLinkClick}
-                          className="flex items-center gap-3 px-4 py-3.5 rounded-xl bg-primary text-white font-body font-semibold text-sm hover:opacity-90 transition-all duration-300"
-                          style={{
-                            animationDelay: `${(navLinks.length + 2) * 50}ms`,
-                            animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                            opacity: isClosing ? 1 : 0,
-                          }}
-                        >
-                          <span className="material-symbols-outlined text-lg">storefront</span>
-                          Seller Panel
-                        </Link>
-                      )}
-                      <Link
-                        to="/profile"
-                        onClick={handleLinkClick}
-                        className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300"
-                        style={{
-                          animationDelay: `${(navLinks.length + 4) * 50}ms`,
-                          animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                          opacity: isClosing ? 1 : 0,
-                        }}
-                      >
-                        {profile?.avatar_url ? (
-                          <img src={profile.avatar_url} alt="" className="w-6 h-6 rounded-full object-cover ring-2 ring-primary/20" />
-                        ) : (
-                          <span className="material-symbols-outlined text-lg">person</span>
-                        )}
-                        Profile
-                      </Link>
-                      <Link
-                        to="/orders"
-                        onClick={handleLinkClick}
-                        className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300"
-                        style={{
-                          animationDelay: `${(navLinks.length + 5) * 50}ms`,
-                          animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                          opacity: isClosing ? 1 : 0,
-                        }}
-                      >
-                        <span className="material-symbols-outlined text-lg">package_2</span>
-                        Orders
-                      </Link>
-                      <button
-                        onClick={handleSignOut}
-                        className="flex w-full items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300 text-left"
-                        style={{
-                          animationDelay: `${(navLinks.length + 6) * 50}ms`,
-                          animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                          opacity: isClosing ? 1 : 0,
-                        }}
-                      >
-                        <span className="material-symbols-outlined text-lg">logout</span>
-                        Logout
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <Link
-                        to="/login"
-                        onClick={handleLinkClick}
-                        className="flex items-center gap-3 px-4 py-3.5 rounded-xl text-primary font-body font-semibold text-sm hover:bg-surface-container-low transition-all duration-300"
-                        style={{
-                          animationDelay: `${(navLinks.length + 2) * 50}ms`,
-                          animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                          opacity: isClosing ? 1 : 0,
-                        }}
-                      >
-                        <span className="material-symbols-outlined text-lg">login</span>
-                        Login
-                      </Link>
-                      <Link
-                        to="/signup"
-                        onClick={handleLinkClick}
-                        className="flex items-center justify-center gap-2 px-4 py-3.5 mt-2 rounded-xl bg-secondary text-white font-body font-semibold text-sm hover:bg-secondary/90 transition-all duration-300"
-                        style={{
-                          animationDelay: `${(navLinks.length + 3) * 50}ms`,
-                          animation: isClosing ? 'none' : 'slideInRight 0.3s ease-out forwards',
-                          opacity: isClosing ? 1 : 0,
-                        }}
-                      >
-                        Sign Up
-                      </Link>
-                    </>
-                  )}
-                </div>
+                      My Profile
+                    </Link>
+                    <Link
+                      to="/orders"
+                      onClick={handleLinkClick}
+                      className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
+                      style={{ animationDelay: '360ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                    >
+                      <span className="material-symbols-outlined text-[20px] text-primary/60">package_2</span>
+                      My Orders
+                    </Link>
+                    <button
+                      onClick={handleSignOut}
+                      className="flex w-full items-center gap-3 px-4 py-3 mt-4 rounded-2xl text-error font-body text-sm font-medium bg-error/5 hover:bg-error/10 transition-all duration-300 text-left"
+                      style={{ animationDelay: '400ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                    >
+                      <span className="material-symbols-outlined text-[20px]">logout</span>
+                      Sign out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      to="/login"
+                      onClick={handleLinkClick}
+                      className="flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl bg-surface-container text-primary font-body text-sm font-semibold hover:bg-surface-variant transition-all duration-300"
+                      style={{ animationDelay: '280ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                    >
+                      Log In
+                    </Link>
+                    <Link
+                      to="/signup"
+                      onClick={handleLinkClick}
+                      className="flex items-center justify-center gap-2 px-4 py-3.5 mt-3 rounded-2xl bg-primary text-white font-body text-sm font-semibold hover:bg-primary/90 transition-all duration-300 shadow-md"
+                      style={{ animationDelay: '320ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
+                    >
+                      Create an Account
+                    </Link>
+                  </>
+                )}
               </div>
+            </div>
 
-              <div className="px-6 py-4 border-t border-outline-variant/30">
-                <p className="text-xs text-primary/50 text-center font-body">
-                  Premium Kosher Products
+            <div className="px-6 py-5 border-t border-primary/10 bg-surface">
+              <div className="flex flex-col items-center justify-center">
+                <span className="font-brand text-primary/30 text-2xl leading-[0.9]">Hatvoni</span>
+                <p className="text-[9px] text-primary/50 text-center font-body uppercase tracking-[0.2em] mt-1.5 font-medium">
+                  Authentic Flavors of<br/>Northeast India
                 </p>
               </div>
             </div>
@@ -502,14 +462,16 @@ export default function Navbar() {
 
       <style>{`
         @keyframes slideInRight {
-          from {
-            opacity: 0;
-            transform: translateX(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateX(0);
-          }
+          from { opacity: 0; transform: translateX(20px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
       `}</style>
     </>

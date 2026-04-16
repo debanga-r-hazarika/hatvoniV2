@@ -122,49 +122,6 @@ function AvatarSection({ profile, avatarUploading, fileInputRef, onUpload, getFu
   );
 }
 
-function RewardsCard() {
-  return (
-    <div className="mx-4 rounded-[24px] overflow-hidden relative animate-fade-up delay-100"
-      style={{ background: 'linear-gradient(145deg, #003d24 0%, #005230 45%, #006b3e 100%)' }}>
-      <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-white/5 -translate-y-1/2 translate-x-1/4 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-white/5 translate-y-1/2 -translate-x-1/4 blur-2xl pointer-events-none" />
-      <div className="animate-shimmer absolute inset-0 pointer-events-none" />
-
-      <div className="relative z-10 p-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-white/50 text-[11px] font-headline font-bold uppercase tracking-[0.18em]">
-              Heritage Rewards
-            </p>
-            <div className="flex items-baseline gap-2 mt-2.5">
-              <span className="text-white font-brand text-[42px] leading-none">2,450</span>
-              <span className="text-white/60 font-headline font-semibold text-[15px]">pts</span>
-            </div>
-          </div>
-          <span className="mt-1 bg-secondary-container/90 text-on-secondary-container text-[10px] font-headline font-black uppercase tracking-[0.14em] px-3.5 py-1.5 rounded-full shadow-md border border-on-secondary-container/20">
-            Gold Tier
-          </span>
-        </div>
-
-        <div className="flex gap-3 mt-5">
-          {[
-            { label: 'Savings', value: '₹1,240' },
-            { label: 'Orders', value: '12' },
-          ].map(({ label, value }) => (
-            <div key={label} className="flex-1 bg-white/10 backdrop-blur-sm rounded-2xl px-4 py-3.5 border border-white/10">
-              <p className="text-white/50 text-[10px] font-headline font-bold uppercase tracking-[0.18em]">{label}</p>
-              <p className="text-white font-headline font-extrabold text-[30px] mt-1 leading-[0.95]">{value}</p>
-            </div>
-          ))}
-        </div>
-
-        <button className="w-full mt-5 bg-secondary-container text-on-secondary-container py-3.5 rounded-2xl font-headline font-black text-[13px] uppercase tracking-[0.15em] transition-all duration-200 active:scale-[0.98] press-effect shadow-lg shadow-black/20">
-          Redeem Rewards
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function InfoRow({ label, value, isLast = false }) {
   return (
@@ -391,7 +348,6 @@ export default function ProfileMobileView({
         onUpload={onAvatarUpload}
         getFullName={getFullName}
       />
-      <RewardsCard />
       <PersonalInfoSection
         formData={formData}
       />

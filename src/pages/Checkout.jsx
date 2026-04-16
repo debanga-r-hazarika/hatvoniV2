@@ -338,26 +338,19 @@ export default function Checkout() {
 
     try {
       const order = await createLocalOrder(paymentMethod);
-      // Record coupon usage for single applied coupon
-      if (appliedCoupon?.valid) {
-        await couponService.recordCouponUsage(
-          appliedCoupon.code,
-          user.id,
-          order.id,
-          totalsWithCoupon.totalDiscount,
-          totals.subtotal
-        );
-      }
       createdOrderId = order.id;
 
       if (paymentMethod === 'cod') {
-        // Fire-and-forget: sync to insider in background, never block checkout
-        supabase.auth.getSession().then(({ data: sessionData }) => {
-          const accessToken = sessionData?.session?.access_token;
-          if (accessToken) supabase.functions.setAuth(accessToken);
-          return supabase.functions.invoke('forward-order-to-insider', { body: { order_id: order.id } });
-        }).catch((err) => console.warn('Insider sync failed (will retry on order page):', err));
-
+        // Record coupon usage only on confirmed placement
+        if (appliedCoupon?.valid) {
+          await couponService.recordCouponUsage(
+            appliedCoupon.code,
+            user.id,
+            order.id,
+            totalsWithCoupon.totalDiscount,
+            totals.subtotal
+          );
+        }
         cartService.clearCart();
         navigate(`/order/${order.id}?placed=1`);
         return;
@@ -382,31 +375,6 @@ export default function Checkout() {
       }
 
       const paymentAttempt = await new Promise((resolve) => {
-        const razorpayMethodConfig = paymentMethod === RAZORPAY_UPI_METHOD
-          ? {
-              method: {
-                upi: true,
-                card: false,
-                netbanking: false,
-                wallet: false,
-                emi: false,
-                paylater: false,
-              },
-              upi: { flow: 'intent' },
-            }
-          : paymentMethod === RAZORPAY_CARDS_METHOD
-            ? {
-                method: {
-                  upi: false,
-                  card: true,
-                  netbanking: true,
-                  wallet: true,
-                  emi: true,
-                  paylater: true,
-                },
-              }
-            : {};
-
         const razorpay = new window.Razorpay({
           key: razorpayOrder.key_id,
           amount: razorpayOrder.amount,
@@ -423,7 +391,6 @@ export default function Checkout() {
             local_order_id: order.id,
             checkout_payment_method: paymentMethod,
           },
-          ...razorpayMethodConfig,
           handler: async (response) => {
             try {
               const { error: verifyError, data: verifyData } = await supabase.functions.invoke(RAZORPAY_VERIFY_FUNCTION, {
@@ -473,7 +440,24 @@ export default function Checkout() {
       });
 
       if (paymentAttempt?.status === 'verified') {
+        // Record coupon usage only after confirmed payment
+        if (appliedCoupon?.valid) {
+          await couponService.recordCouponUsage(
+            appliedCoupon.code,
+            user.id,
+            order.id,
+            totalsWithCoupon.totalDiscount,
+            totals.subtotal
+          );
+        }
         cartService.clearCart();
+      } else if (paymentAttempt?.status === 'cancelled' || paymentAttempt?.status === 'failed') {
+        // Mark order as failed in DB so it doesn't appear as a ghost pending order
+        await supabase
+          .from('orders')
+          .update({ payment_status: 'failed', status: 'cancelled' })
+          .eq('id', order.id)
+          .neq('payment_status', 'paid'); // never downgrade a paid order
       }
 
       navigate(`/payment-processing/${order.id}?attempt=${encodeURIComponent(paymentAttempt?.status || 'processing')}`);
@@ -499,8 +483,8 @@ export default function Checkout() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="bg-background sticky top-0 z-50 py-4 md:py-6 px-6 md:px-8 flex justify-between items-center max-w-7xl mx-auto w-full border-b border-outline-variant/20">
-        <Link to="/" className="font-display text-xl md:text-2xl text-primary tracking-tighter">Hatvoni</Link>
+      <header className="bg-surface/90 backdrop-blur-md sticky top-0 z-50 py-4 md:py-6 px-6 md:px-8 flex justify-between items-center max-w-7xl mx-auto w-full border-b border-outline-variant/20">
+        <Link to="/" className="font-brand text-3xl md:text-4xl text-primary leading-[0.9]">Hatvoni</Link>
         <div className="flex items-center gap-2 text-primary">
           <span className="material-symbols-outlined text-lg">lock</span>
           <span className="font-headline font-semibold text-xs md:text-sm tracking-tight">SECURE CHECKOUT</span>
@@ -511,9 +495,9 @@ export default function Checkout() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 md:gap-14">
           <div className="lg:col-span-7 space-y-10 md:space-y-12">
             <section>
-              <div className="flex items-center gap-3 md:gap-4 mb-8 md:mb-10">
-                <span className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-headline font-bold text-sm">1</span>
-                <h2 className="font-headline text-xl md:text-2xl font-bold tracking-tight text-primary uppercase">Delivery Details</h2>
+              <div className="flex items-center gap-4 mb-8 md:mb-10">
+                <span className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shrink-0">1</span>
+                <h2 className="font-brand text-4xl text-primary leading-[0.94] tracking-tight">Delivery Details</h2>
               </div>
 
               {savedAddresses.length > 0 && (
@@ -611,10 +595,11 @@ export default function Checkout() {
               </div>
             </section>
 
-            <section className="bg-surface-container-low rounded-xl p-5 md:p-6">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-headline font-bold text-sm">2</span>
-                <h2 className="font-headline text-xl md:text-2xl font-bold tracking-tight text-primary uppercase">Payment Method</h2>
+            <section className="bg-surface-container-lowest border border-outline-variant/30 rounded-[2rem] shadow-sm relative overflow-hidden p-6 md:p-10">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-secondary/5 rounded-bl-[100px] -z-10"></div>
+              <div className="flex items-center gap-4 mb-8">
+                <span className="w-10 h-10 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-sm shrink-0">2</span>
+                <h2 className="font-brand text-4xl text-primary leading-[0.94] tracking-tight">Payment Method</h2>
               </div>
 
               <div className="space-y-3">
@@ -636,32 +621,16 @@ export default function Checkout() {
 
                 <button
                   type="button"
-                  onClick={() => handleSelectPaymentMethod(RAZORPAY_UPI_METHOD)}
-                  className={`w-full text-left border rounded-xl p-4 transition ${paymentMethod === RAZORPAY_UPI_METHOD ? 'border-primary/40 bg-primary/5' : 'border-outline-variant/40 bg-white'}`}
+                  onClick={() => handleSelectPaymentMethod(LEGACY_RAZORPAY_METHOD)}
+                  className={`w-full text-left border rounded-xl p-4 transition ${isRazorpayPaymentMethod(paymentMethod) ? 'border-primary/40 bg-primary/5' : 'border-outline-variant/40 bg-white'}`}
                 >
                   <div className="flex justify-between items-start gap-3">
                     <div>
-                      <p className="font-headline font-bold text-on-surface text-base">UPI Payment (Razorpay)</p>
-                      <p className="text-xs text-on-surface-variant mt-1">Instant UPI apps and QR via Razorpay secure checkout.</p>
+                      <p className="font-headline font-bold text-on-surface text-base">Pay with Razorpay</p>
+                      <p className="text-xs text-on-surface-variant mt-1">UPI, cards, netbanking, wallets and EMI — choose inside Razorpay's secure checkout.</p>
                     </div>
-                    <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: paymentMethod === RAZORPAY_UPI_METHOD ? "'FILL' 1" : "'FILL' 0" }}>
-                      {paymentMethod === RAZORPAY_UPI_METHOD ? 'check_circle' : 'radio_button_unchecked'}
-                    </span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleSelectPaymentMethod(RAZORPAY_CARDS_METHOD)}
-                  className={`w-full text-left border rounded-xl p-4 transition ${paymentMethod === RAZORPAY_CARDS_METHOD ? 'border-primary/40 bg-primary/5' : 'border-outline-variant/40 bg-white'}`}
-                >
-                  <div className="flex justify-between items-start gap-3">
-                    <div>
-                      <p className="font-headline font-bold text-on-surface text-base">Cards/Netbanking (Razorpay)</p>
-                      <p className="text-xs text-on-surface-variant mt-1">Credit/debit cards, netbanking, wallets and EMI through Razorpay.</p>
-                    </div>
-                    <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: paymentMethod === RAZORPAY_CARDS_METHOD ? "'FILL' 1" : "'FILL' 0" }}>
-                      {paymentMethod === RAZORPAY_CARDS_METHOD ? 'check_circle' : 'radio_button_unchecked'}
+                    <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: isRazorpayPaymentMethod(paymentMethod) ? "'FILL' 1" : "'FILL' 0" }}>
+                      {isRazorpayPaymentMethod(paymentMethod) ? 'check_circle' : 'radio_button_unchecked'}
                     </span>
                   </div>
                 </button>
@@ -675,9 +644,9 @@ export default function Checkout() {
 
           <aside className="lg:col-span-5">
             <div className="sticky top-24 space-y-6 md:space-y-8">
-              <div className="bg-surface-container-low rounded-xl p-6 md:p-8">
-                <h3 className="font-headline text-lg md:text-xl font-bold text-primary mb-6 md:mb-8 flex items-center gap-2">
-                  <span className="material-symbols-outlined">shopping_basket</span>
+              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-[2rem] p-6 md:p-8 shadow-sm">
+                <h3 className="font-brand text-3xl font-bold text-primary mb-6 md:mb-8 flex items-center gap-3">
+                  <span className="material-symbols-outlined text-[28px]">shopping_basket</span>
                   Order Summary
                 </h3>
 
@@ -758,11 +727,13 @@ export default function Checkout() {
                         .join(' ')}
                     </div>
                   )}
-                  <div className="flex justify-between items-center pt-4 md:pt-6">
-                    <span className="font-headline font-bold text-base md:text-lg text-primary uppercase tracking-tight">
-                      {paymentMethod === 'cod' ? 'Amount to Collect' : 'Amount to Pay'}
-                    </span>
-                    <span className="font-headline font-extrabold text-xl md:text-2xl text-primary">Rs. {totalsWithCoupon.finalTotal.toLocaleString()}</span>
+                  <div className="flex justify-between items-end pt-4 md:pt-6">
+                    <div>
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant block mb-1">
+                          {paymentMethod === 'cod' ? 'Amount to Collect' : 'Amount to Pay'}
+                        </span>
+                        <span className="font-brand text-4xl md:text-5xl text-primary leading-none">₹{totalsWithCoupon.finalTotal.toLocaleString()}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -773,12 +744,12 @@ export default function Checkout() {
                 <button
                   onClick={handlePlaceOrder}
                   disabled={placingOrder || cartItems.length === 0 || (isRazorpayPaymentMethod(paymentMethod) && totalsWithCoupon.finalTotal <= 0)}
-                  className="w-full mt-8 md:mt-10 bg-primary text-on-primary font-headline font-bold py-4 md:py-5 rounded-xl flex items-center justify-center gap-3 transition-transform active:scale-95 shadow-lg shadow-primary/20 text-sm md:text-base disabled:opacity-60 disabled:cursor-not-allowed"
+                  className="w-full mt-8 md:mt-10 bg-secondary text-white font-bold uppercase tracking-widest text-[11px] py-4 md:py-5 rounded-2xl flex items-center justify-center gap-3 transition-transform active:scale-95 shadow-md disabled:opacity-60 disabled:cursor-not-allowed"
                 >
                   {placingOrder
                     ? (isRazorpayPaymentMethod(paymentMethod) ? 'PROCESSING PAYMENT...' : 'PLACING ORDER...')
                     : (isRazorpayPaymentMethod(paymentMethod) ? 'PAY ONLINE WITH RAZORPAY' : 'PLACE COD ORDER')}
-                  <span className="material-symbols-outlined">arrow_forward</span>
+                  <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
                 </button>
 
                 <p className="mt-4 text-[11px] text-outline leading-relaxed">

@@ -4,9 +4,9 @@ export default function Contact() {
   const [form, setForm] = useState({ name: '', email: '', subject: 'Product Inquiry', message: '' });
 
   return (
-    <main className="pt-32 pb-24">
+    <main className="pt-32 md:pt-40 pb-24">
       {/* Hero */}
-      <section className="px-12 max-w-screen-2xl mx-auto mb-20">
+      <section className="px-6 md:px-12 max-w-screen-2xl mx-auto mb-20">
         <div className="grid grid-cols-12 gap-8 items-end">
           <div className="col-span-12 md:col-span-7">
             <h1 className="font-brand text-5xl md:text-7xl text-primary leading-none tracking-tighter mb-8">
@@ -29,11 +29,11 @@ export default function Contact() {
       </section>
 
       {/* Main Content */}
-      <section className="px-12 max-w-screen-2xl mx-auto">
-        <div className="grid grid-cols-12 gap-12">
+      <section className="px-6 md:px-12 max-w-screen-2xl mx-auto">
+        <div className="grid grid-cols-12 gap-8 lg:gap-12">
           {/* Contact Form */}
           <div className="col-span-12 lg:col-span-7 bg-surface-container-low p-8 md:p-12 rounded-xl">
-            <h2 className="font-headline text-3xl font-extrabold text-primary mb-10 tracking-tight">Send a Message</h2>
+            <h2 className="font-brand text-3xl font-extrabold text-primary mb-10 tracking-tight">Send a Message</h2>
             <form className="space-y-8" onSubmit={(e) => e.preventDefault()}>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 <div>
@@ -134,7 +134,7 @@ export default function Contact() {
       </section>
 
       {/* Trust Banner */}
-      <section className="mt-24 px-12 max-w-screen-2xl mx-auto">
+      <section className="mt-24 px-6 md:px-12 max-w-screen-2xl mx-auto">
         <div className="bg-primary text-on-primary rounded-xl p-12 grid grid-cols-12 items-center gap-8">
           <div className="col-span-12 md:col-span-8">
             <h2 className="font-brand text-3xl mb-4 text-secondary-container">Deeply Rooted Support</h2>

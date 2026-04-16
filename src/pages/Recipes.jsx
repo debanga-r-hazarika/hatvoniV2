@@ -139,7 +139,7 @@ export default function Recipes() {
     : pageConfig.default_pantry_essentials;
 
   return (
-    <main className="pt-32 pb-20 px-6 md:px-12 max-w-screen-2xl mx-auto">
+    <main className="pt-32 md:pt-40 pb-20 px-6 md:px-12 max-w-screen-2xl mx-auto">
       {error && (
         <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3 text-amber-800 text-sm font-headline">
           {error}
@@ -182,12 +182,12 @@ export default function Recipes() {
         <div className="lg:col-span-4 flex flex-col gap-8">
           <div className="bg-surface-container-highest p-8 rounded-xl flex-1 flex flex-col justify-center">
             <span className="material-symbols-outlined text-secondary text-4xl mb-4">temp_preferences_eco</span>
-            <h3 className="font-headline text-2xl font-bold text-primary mb-2">{pageConfig.story_title}</h3>
+            <h3 className="font-brand text-2xl font-bold text-primary mb-2">{pageConfig.story_title}</h3>
             <p className="text-on-surface-variant">{pageConfig.story_body}</p>
           </div>
           <div className="bg-primary text-on-primary p-8 rounded-xl flex-1 flex flex-col justify-center">
             <span className="material-symbols-outlined text-secondary-container text-4xl mb-4">inventory_2</span>
-            <h3 className="font-headline text-2xl font-bold mb-2">{pageConfig.pantry_title}</h3>
+            <h3 className="font-brand text-2xl font-bold mb-2">{pageConfig.pantry_title}</h3>
             <ul className="space-y-2 text-on-primary/80">
               {(pantryList || []).map((item) => (
                 <li key={item} className="flex items-center gap-2">
@@ -235,7 +235,7 @@ export default function Recipes() {
                       </div>
                     )}
                   </div>
-                  <h4 className="font-headline text-2xl font-bold text-primary mb-3">{recipe.title}</h4>
+                  <h4 className="font-brand text-2xl font-bold text-primary mb-3">{recipe.title}</h4>
                   <p className="text-on-surface-variant line-clamp-2 mb-4">{recipe.short_description}</p>
                   <div className="flex gap-2 mb-6 flex-wrap">
                     {(recipe.tags || []).map((tag) => (
@@ -302,7 +302,7 @@ export default function Recipes() {
               )}
 
               <div className="rounded-2xl border border-outline-variant/30 p-5 bg-surface">
-                <h4 className="font-headline text-lg font-bold text-primary mb-3">Pantry Essentials</h4>
+                <h4 className="font-brand text-lg font-bold text-primary mb-3">Pantry Essentials</h4>
                 <ul className="space-y-2 text-on-surface-variant">
                   {(selectedRecipe.pantry_essentials || []).map((item) => (
                     <li key={`${selectedRecipe.id}-pantry-${item}`} className="flex items-center gap-2">

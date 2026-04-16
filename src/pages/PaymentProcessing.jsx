@@ -72,14 +72,18 @@ export default function PaymentProcessing() {
     }
 
     const waitedMs = Date.now() - startedAtRef.current;
-    if (waitedMs >= MAX_WAIT_MS || attempt === 'cancelled' || attempt === 'failed' || attempt === 'error') {
+    // cancelled/failed are definitive — show failed immediately
+    // error means verify call failed but payment may have gone through — poll for up to 30s before giving up
+    const isDefinitiveFailure = attempt === 'cancelled' || attempt === 'failed';
+    const isErrorWithTimeout = attempt === 'error' && waitedMs >= 30000;
+    if (waitedMs >= MAX_WAIT_MS || isDefinitiveFailure || isErrorWithTimeout) {
       setViewState('failed');
       setStatusText('We could not confirm your payment.');
       return;
     }
 
     setViewState('processing');
-    setStatusText('We are still checking Razorpay confirmation...');
+    setStatusText(attempt === 'error' ? 'Verification had an issue — checking if payment went through...' : 'We are still checking Razorpay confirmation...');
   }, [attempt, id, navigate]);
 
   useEffect(() => {
@@ -291,7 +295,7 @@ export default function PaymentProcessing() {
     <main className="min-h-screen bg-background px-6 py-10 md:py-16">
       <div className="max-w-2xl mx-auto">
         <header className="mb-8 flex items-center justify-between gap-4">
-          <Link to="/" className="font-display text-xl md:text-2xl text-primary tracking-tighter">Hatvoni</Link>
+          <Link to="/" className="font-brand text-xl md:text-2xl text-primary tracking-tighter">Hatvoni</Link>
           <span className="text-[10px] md:text-xs font-bold uppercase tracking-[0.2em] text-outline">Secure Payment Check</span>
         </header>
 

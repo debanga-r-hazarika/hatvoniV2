@@ -8,7 +8,7 @@ const STATUS_OPTIONS = ['active', 'inactive', 'scheduled', 'expired'];
 
 export default function AdminCoupons() {
   const navigate = useNavigate();
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin, hasModule } = useAuth();
 
   const [coupons, setCoupons] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -37,12 +37,12 @@ export default function AdminCoupons() {
     is_stackable: false,
   });
 
-  // Check admin role
+  // Check admin or employee with coupons module
   useEffect(() => {
-    if (profile && !profile.is_admin) {
+    if (profile && !isAdmin && !hasModule('coupons')) {
       navigate('/');
     }
-  }, [profile, navigate]);
+  }, [profile, isAdmin, hasModule, navigate]);
 
   // Load coupons
   useEffect(() => {
@@ -233,9 +233,9 @@ export default function AdminCoupons() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-20">
+    <div className="min-h-screen bg-background pt-32 md:pt-40 pb-20">
       <header className="bg-surface-container-low sticky top-0 z-40 py-4 px-6 shadow-sm">
-        <h1 className="font-display text-2xl md:text-3xl text-primary">Coupon Management</h1>
+        <h1 className="font-brand text-2xl md:text-3xl text-primary">Coupon Management</h1>
         <p className="text-sm text-outline mt-1">Create and manage coupons and offers</p>
       </header>
 

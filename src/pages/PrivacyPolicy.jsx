@@ -8,7 +8,7 @@ export default function PrivacyPolicy() {
           <div className="inline-block px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-semibold mb-5 tracking-widest uppercase">
             Legal Clarity
           </div>
-          <h1 className="font-display text-4xl md:text-7xl text-primary leading-tight mb-6">
+          <h1 className="font-brand text-4xl md:text-7xl text-primary leading-tight mb-6">
             Privacy<br className="md:hidden" /> Policy
           </h1>
           <p className="text-base md:text-xl text-on-surface-variant font-light leading-relaxed max-w-2xl">
@@ -29,7 +29,7 @@ export default function PrivacyPolicy() {
           {/* Section 01 — Information We Collect */}
           <article>
             <div className="flex items-start gap-4 mb-6">
-              <span className="text-tertiary font-display text-2xl">01</span>
+              <span className="text-tertiary font-brand text-2xl">01</span>
               <h2 className="font-headline font-extrabold text-xl uppercase tracking-tight text-primary pt-1">
                 Information We Collect
               </h2>
@@ -60,7 +60,7 @@ export default function PrivacyPolicy() {
           {/* Section 02 — How We Use It */}
           <article>
             <div className="flex items-start gap-4 mb-6">
-              <span className="text-tertiary font-display text-2xl">02</span>
+              <span className="text-tertiary font-brand text-2xl">02</span>
               <h2 className="font-headline font-extrabold text-xl uppercase tracking-tight text-primary pt-1">
                 How We Use It
               </h2>
@@ -111,9 +111,9 @@ export default function PrivacyPolicy() {
           </article>
 
           {/* Section 03 — Your Rights */}
-          <article className="border-t border-outline-variant pt-12 md:pt-24">
+          <article className="border-t border-outline-variant pt-12 md:pt-32 md:pt-40">
             <div className="flex items-start gap-4 mb-8">
-              <span className="text-tertiary font-display text-2xl">03</span>
+              <span className="text-tertiary font-brand text-2xl">03</span>
               <h2 className="font-headline font-extrabold text-xl uppercase tracking-tight text-primary pt-1">
                 Your Rights
               </h2>

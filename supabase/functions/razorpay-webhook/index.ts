@@ -46,16 +46,6 @@ async function sha256Hex(value: string): Promise<string> {
     .join('');
 }
 
-async function triggerForwardOrder(orderId: string): Promise<void> {
-  const supabaseUrl = requireEnv('SUPABASE_URL');
-  const url = `${supabaseUrl}/functions/v1/forward-order-to-insider`;
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order_id: orderId }),
-  });
-}
-
 Deno.serve(async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -136,7 +126,7 @@ Deno.serve(async (req) => {
 
   const { data: order, error: orderError } = await adminClient
     .from('orders')
-    .select('id, payment_status, payment_metadata')
+    .select('id, payment_status, payment_metadata, refund_status, refund_amount')
     .eq('razorpay_order_id', razorpayOrderId)
     .maybeSingle();
 
@@ -154,8 +144,17 @@ Deno.serve(async (req) => {
     nextStatus = 'paid';
   } else if (eventType === 'payment.failed') {
     nextStatus = 'failed';
+  } else if (eventType === 'refund.processed' || eventType === 'refund.created') {
+    // Determine if this is a partial or full refund
+    const refundEntity = body?.payload?.refund?.entity || paymentEntity;
+    const refundAmount = refundEntity?.amount ? Number(refundEntity.amount) / 100 : null;
+    const orderTotal = order ? Number((order as any).total_amount || 0) : 0;
+    // If refund amount < order total → partial refund
+    const isPartial = refundAmount !== null && orderTotal > 0 && refundAmount < orderTotal;
+    nextStatus = isPartial ? 'partially_refunded' : 'refunded';
   } else if (eventType.startsWith('refund.')) {
-    nextStatus = 'refunded';
+    // Other refund events (refund.speed_changed etc.) — update refund_status only
+    nextStatus = currentStatus; // keep payment_status unchanged
   } else {
     return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'event_not_mapped' }), {
       status: 200,
@@ -186,6 +185,24 @@ Deno.serve(async (req) => {
     updatePayload.paid_at = new Date().toISOString();
   }
 
+  // Handle refund completion — mark refund_status = completed
+  if (eventType === 'refund.processed') {
+    updatePayload.refund_status = 'completed';
+    const refundEntity = body?.payload?.refund?.entity || paymentEntity;
+    if (refundEntity?.amount) {
+      updatePayload.refund_amount = Number(refundEntity.amount) / 100;
+    }
+  } else if (nextStatus === 'refunded' || nextStatus === 'partially_refunded') {
+    // refund.created — mark as initiated if not already completed
+    if (!['completed'].includes(String(order.refund_status || ''))) {
+      updatePayload.refund_status = 'initiated';
+    }
+    const refundEntity = body?.payload?.refund?.entity || paymentEntity;
+    if (refundEntity?.amount) {
+      updatePayload.refund_amount = Number(refundEntity.amount) / 100;
+    }
+  }
+
   const { error: updateError } = await adminClient
     .from('orders')
     .update(updatePayload)
@@ -197,10 +214,6 @@ Deno.serve(async (req) => {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
-  }
-
-  if (nextStatus === 'paid' && currentStatus !== 'paid') {
-    await triggerForwardOrder(order.id);
   }
 
   return new Response(JSON.stringify({ ok: true, order_id: order.id, status: nextStatus }), {

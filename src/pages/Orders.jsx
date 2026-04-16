@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
+import AccountSidebar from '../components/AccountSidebar';
 
 export default function Orders() {
   const [orders, setOrders] = useState([]);
@@ -34,7 +35,6 @@ export default function Orders() {
     }
     fetchOrders();
 
-    // Re-fetch whenever any of the user's orders are updated (e.g. status change from Insider).
     const channel = supabase
       .channel('orders-list-realtime')
       .on(
@@ -54,22 +54,22 @@ export default function Orders() {
 
   const getStatusStyle = (status) => {
     const styles = {
-      placed: { bg: 'bg-slate-100', text: 'text-slate-800', dot: 'bg-slate-500' },
-      processed: { bg: 'bg-amber-100', text: 'text-amber-800', dot: 'bg-amber-500' },
-      pending: { bg: 'bg-slate-100', text: 'text-slate-800', dot: 'bg-slate-500' },
-      processing: { bg: 'bg-amber-100', text: 'text-amber-800', dot: 'bg-amber-500' },
-      shipped: { bg: 'bg-blue-100', text: 'text-blue-800', dot: 'bg-blue-500' },
-      delivered: { bg: 'bg-primary/10', text: 'text-primary', dot: 'bg-primary' },
-      cancelled: { bg: 'bg-red-100', text: 'text-red-800', dot: 'bg-red-500' },
+      placed: { bg: 'bg-surface-container-low', text: 'text-on-surface-variant', border: 'border-outline-variant/30', icon: 'pending_actions' },
+      processed: { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200/50', icon: 'auto_awesome' },
+      pending: { bg: 'bg-surface-container-low', text: 'text-on-surface-variant', border: 'border-outline-variant/30', icon: 'pending_actions' },
+      processing: { bg: 'bg-amber-50', text: 'text-amber-800', border: 'border-amber-200/50', icon: 'settings_cinematic_blur' },
+      shipped: { bg: 'bg-blue-50', text: 'text-blue-800', border: 'border-blue-200/50', icon: 'local_shipping' },
+      delivered: { bg: 'bg-emerald-50', text: 'text-emerald-800', border: 'border-emerald-200/50', icon: 'done_all' },
+      cancelled: { bg: 'bg-red-50', text: 'text-red-800', border: 'border-red-200/50', icon: 'cancel' },
     };
     return styles[status] || styles.pending;
   };
 
   const getPaymentLabel = (order) => {
     const method = String(order.payment_method || order.shipping_address?.payment_method || 'cod').toLowerCase();
-    if (method === 'razorpay_upi') return 'Razorpay (UPI)';
-    if (method === 'razorpay_cards') return 'Razorpay (Cards/Netbanking)';
-    if (method === 'razorpay') return 'Razorpay (Online)';
+    if (method === 'razorpay_upi') return 'Razorpay UPI';
+    if (method === 'razorpay_cards') return 'Online Payment';
+    if (method === 'razorpay') return 'Online Payment';
     return 'Cash on Delivery';
   };
 
@@ -82,6 +82,14 @@ export default function Orders() {
     return 'Pending';
   };
 
+  const getDisplayStatus = (order) => String(order.order_status || order.status || '').toLowerCase();
+
+  const getStatusLabel = (order) => {
+    const displayStatus = getDisplayStatus(order);
+    if (displayStatus === 'placed') return 'Placed';
+    return displayStatus ? displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1) : 'Pending';
+  };
+
   const formatDate = (dateString) => {
     const date = new Date(dateString);
     const now = new Date();
@@ -92,12 +100,12 @@ export default function Orders() {
     } else if (diffDays === 1) {
       return 'Yesterday';
     }
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return date.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   };
 
   if (loading) {
     return (
-      <main className="pt-24 pb-20 min-h-screen">
+      <main className="pt-32 pb-24 md:pt-40 md:pb-16 min-h-screen bg-surface">
         <div className="max-w-screen-xl mx-auto px-6 md:px-12 py-8 md:py-12 flex items-center justify-center">
           <span className="material-symbols-outlined animate-spin text-secondary text-4xl">progress_activity</span>
         </div>
@@ -106,155 +114,117 @@ export default function Orders() {
   }
 
   return (
-    <main className="pt-24 pb-20">
-      <div className="max-w-screen-xl mx-auto px-6 md:px-12 py-8 md:py-12">
-        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8 md:gap-12">
-          <aside className="space-y-6 md:space-y-8">
-            <div>
-              <h2 className="font-brand text-xl md:text-2xl text-primary mb-4 md:mb-6">Account</h2>
-              <nav className="flex flex-row lg:flex-col gap-2 flex-wrap">
-                {[
-                  { label: 'My Profile', href: '/profile', icon: 'person', active: false },
-                  { label: 'My Orders', href: '/orders', icon: 'package_2', active: true },
-                  { label: 'Wishlist', href: '/wishlist', icon: 'favorite', active: false },
-                ].map(link => (
-                  <Link key={link.label} to={link.href}
-                    className={`group flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl transition-all text-sm md:text-base ${link.active ? 'bg-primary-container text-on-primary-container' : 'hover:bg-surface-container-high text-on-surface-variant'}`}>
-                    <span className="material-symbols-outlined text-lg md:text-xl" style={link.active ? { fontVariationSettings: "'FILL' 1" } : {}}>{link.icon}</span>
-                    <span className="font-headline font-semibold hidden sm:inline">{link.label}</span>
-                  </Link>
-                ))}
-                <div className="pt-2 mt-1 md:mt-2 border-t border-outline-variant/20 w-full">
-                  <button
-                    onClick={handleLogout}
-                    className="group flex items-center gap-3 md:gap-4 p-3 md:p-4 rounded-xl transition-all hover:bg-error-container/20 text-error w-full text-sm md:text-base"
-                  >
-                    <span className="material-symbols-outlined text-lg md:text-xl">logout</span>
-                    <span className="font-headline font-semibold hidden sm:inline">Logout</span>
-                  </button>
-                </div>
-              </nav>
-            </div>
-            <div className="bg-secondary-container p-5 md:p-6 rounded-2xl relative overflow-hidden hidden lg:block">
-              <div className="relative z-10">
-                <h4 className="font-headline font-bold text-on-secondary-container mb-2 text-sm">Need assistance?</h4>
-                <p className="text-xs text-on-secondary-container/80 mb-4 leading-relaxed">Our heritage experts are available to help with your traditional orders.</p>
-                <Link to="/contact">
-                  <button className="bg-primary text-on-primary px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider transition-transform active:scale-95">Contact Support</button>
-                </Link>
-              </div>
-              <span className="material-symbols-outlined absolute -right-4 -bottom-4 text-on-secondary-container/10 text-8xl rotate-12">help_center</span>
-            </div>
-          </aside>
+    <main className="pt-32 pb-24 md:pt-40 md:pb-16 bg-surface min-h-screen">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-10">
+          <AccountSidebar />
 
           <section className="min-w-0">
-            <header className="mb-8 md:mb-12">
-              <h1 className="font-brand text-4xl md:text-6xl text-primary tracking-tighter leading-none mb-3 md:mb-4">My Orders</h1>
-              <p className="text-on-surface-variant max-w-xl font-body leading-relaxed text-sm md:text-base">
+            <header className="mb-10 lg:mb-12 border-b border-outline-variant/20 pb-8">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-secondary mb-2 block">Order History</span>
+              <h1 className="font-brand text-5xl md:text-6xl text-primary tracking-tighter leading-[0.94] mb-4 uppercase">My Orders</h1>
+              <p className="text-on-surface-variant font-medium max-w-xl leading-relaxed">
                 A curated history of your journey through the authentic flavors and traditions of North East India.
               </p>
             </header>
 
             {orders.length === 0 ? (
-              <div className="text-center py-16 bg-surface-container-low rounded-2xl">
-                <span className="material-symbols-outlined text-8xl text-on-surface-variant/20">package_2</span>
-                <h2 className="mt-6 font-headline text-2xl font-bold text-primary">No orders yet</h2>
-                <p className="mt-2 text-on-surface-variant max-w-md mx-auto">
+              <div className="text-center py-20 bg-surface-container-lowest border-2 border-dashed border-outline-variant/30 rounded-3xl">
+                <span className="material-symbols-outlined text-8xl text-primary/10 mb-4">package_2</span>
+                <h2 className="font-brand text-4xl text-primary leading-[0.94] tracking-tight mb-2">No orders yet</h2>
+                <p className="text-on-surface-variant font-medium max-w-md mx-auto mb-8">
                   Start exploring our traditional products and place your first order.
                 </p>
                 <Link to="/products">
-                  <button className="mt-8 bg-secondary text-white px-8 py-4 rounded-xl font-headline font-bold hover:bg-secondary/90 transition-colors">
-                    Explore Products
+                  <button className="bg-secondary text-white px-8 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest hover:bg-secondary/90 transition-all shadow-md active:scale-95">
+                    Explore Heritage Collection
                   </button>
                 </Link>
               </div>
             ) : (
-              <div className="space-y-6 md:space-y-8">
+              <div className="space-y-8">
                 {orders.map(order => {
-                  const displayStatus = order.insider_order_status || order.status;
+                  const displayStatus = getDisplayStatus(order);
                   const statusStyle = getStatusStyle(displayStatus);
+                  const primaryItem = order.order_items?.[0];
+                  const itemCount = order.order_items?.length || 0;
                   return (
-                    <div key={order.id} className="bg-surface-container-low rounded-2xl md:rounded-[2rem] overflow-hidden transition-all duration-500 hover:shadow-lg">
-                      <div className="p-6 md:p-8 lg:p-10">
-                        <div className="flex flex-wrap items-start justify-between gap-4 md:gap-6 mb-6 md:mb-10 pb-6 md:pb-8 border-b border-outline-variant/30">
-                          <div className="space-y-1 min-w-[100px]">
-                            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-outline">Order Reference</p>
-                            <p className="font-brand text-lg md:text-xl text-primary">#{order.id.slice(0, 8)}</p>
-                          </div>
-                          <div className="space-y-1 min-w-[100px]">
-                            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-outline">Date Placed</p>
-                            <p className="font-headline font-bold text-sm md:text-base">{formatDate(order.created_at)}</p>
-                          </div>
-                          <div className="space-y-1 min-w-[100px]">
-                            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-outline">Total Amount</p>
-                            <p className="font-headline font-bold text-secondary text-lg md:text-xl">Rs. {Number(order.total_amount || 0).toLocaleString()}</p>
-                          </div>
-                          <div className="space-y-1 min-w-[120px]">
-                            <p className="text-[10px] uppercase tracking-[0.2em] font-bold text-outline">Payment</p>
-                            <p className="font-headline font-bold text-sm md:text-base">{getPaymentLabel(order)}</p>
-                            <p className="text-[10px] uppercase tracking-[0.18em] text-on-surface-variant font-bold">{getPaymentStatusLabel(order)}</p>
-                          </div>
-                          <span className={`${statusStyle.bg} ${statusStyle.text} px-3 md:px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest flex items-center gap-2 self-start`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${statusStyle.dot}`} />
-                            {displayStatus}
-                          </span>
-                        </div>
+                    <div key={order.id} className="group bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 shadow-sm overflow-hidden transition-all duration-300 hover:shadow-[0_12px_40px_rgba(0,123,71,0.04)] hover:-translate-y-1 relative">
+                       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10 group-hover:bg-primary/10 transition-colors"></div>
+                      <div className="p-6 md:p-8">
+                        <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-8">
+                          
+                          <div className="flex flex-col sm:flex-row gap-6 min-w-0 flex-1">
+                            {/* Product Image */}
+                            <div className="relative flex-shrink-0 w-full sm:w-40 md:w-48 aspect-square rounded-2xl overflow-hidden bg-surface-container border border-outline-variant/20 shadow-sm">
+                              <img
+                                className="w-full h-full object-cover"
+                                src={primaryItem?.lots?.image_url || primaryItem?.products?.image_url || 'https://via.placeholder.com/400'}
+                                alt={primaryItem?.lot_name || primaryItem?.products?.name || 'Order item'}
+                              />
+                              <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-3 py-1.5 rounded-full shadow-sm flex items-center gap-1.5">
+                                <span className="material-symbols-outlined text-[14px] text-primary">inventory_2</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-primary">{itemCount} {itemCount === 1 ? 'item' : 'items'}</span>
+                              </div>
+                            </div>
 
-                        {order.tracking_number && (
-                          <div className="mb-6 md:mb-8 p-3 md:p-4 bg-surface-container-highest rounded-xl border border-outline-variant/20 flex flex-wrap items-center gap-2 md:gap-3 text-xs">
-                            <span className="font-bold text-primary uppercase tracking-widest">Tracking</span>
-                            <span className="font-semibold text-on-surface">{order.shipment_provider || 'Carrier'}: {order.tracking_number}</span>
-                            {order.shipment_status && <span className="px-2 py-1 rounded-full bg-primary/10 text-primary font-semibold uppercase">{order.shipment_status}</span>}
-                          </div>
-                        )}
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12 items-center">
-                          <div className="flex gap-4 md:gap-6 overflow-x-auto pb-2">
-                            {order.order_items?.length > 0 ? (
-                              order.order_items.map(item => (
-                                <div key={item.id} className="flex-shrink-0 group">
-                                  <div className="w-24 h-24 md:w-32 md:h-32 rounded-xl md:rounded-2xl bg-surface-container-highest overflow-hidden mb-2 md:mb-3">
-                                    <img
-                                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
-                                      src={item.products?.image_url}
-                                      alt={item.products?.name}
-                                    />
-                                  </div>
-                                  <p className="text-xs font-bold leading-tight max-w-[96px] md:max-w-[128px]">{item.lot_name || item.lots?.lot_name || item.products?.name}</p>
-                                  <p className="text-[10px] text-outline">Qty: {item.quantity}</p>
-                                  {item.lot_snapshot?.length > 0 && (
-                                    <p className="text-[10px] text-on-surface-variant mt-1 line-clamp-2">
-                                      {item.lot_snapshot.map((bundleItem) => bundleItem.product_name).join(', ')}
-                                    </p>
-                                  )}
+                            {/* Order Details */}
+                            <div className="min-w-0 flex-1 space-y-6">
+                              <div className="flex flex-wrap items-start justify-between gap-4 border-b border-outline-variant/20 pb-5">
+                                <div>
+                                  <p className="text-[10px] font-bold tracking-[0.2em] uppercase text-on-surface-variant mb-1">Order #{order.id.slice(0, 8)}</p>
+                                  <h3 className="font-brand text-3xl text-primary leading-[0.9] tracking-tight">Placed {formatDate(order.created_at)}</h3>
                                 </div>
-                              ))
-                            ) : (
-                              <div className="text-sm text-on-surface-variant">No items</div>
-                            )}
+                                <div className={`px-4 py-2 rounded-xl flex items-center gap-2 border ${statusStyle.bg} ${statusStyle.border} ${statusStyle.text}`}>
+                                  <span className="material-symbols-outlined text-[16px]">{statusStyle.icon}</span>
+                                  <span className="text-[10px] font-bold uppercase tracking-widest">{getStatusLabel(order)}</span>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+                                <div>
+                                  <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-on-surface-variant mb-1">Total</p>
+                                  <p className="font-brand text-xl text-primary drop-shadow-sm">₹{Number(order.total_amount || 0).toLocaleString()}</p>
+                                </div>
+                                <div>
+                                  <p className="text-[10px] uppercase font-bold tracking-[0.2em] text-on-surface-variant mb-1">Payment</p>
+                                  <p className="text-sm font-semibold text-on-surface mb-0.5">{getPaymentLabel(order)}</p>
+                                  <p className={`text-[10px] font-bold uppercase tracking-widest ${order.payment_status === 'paid' ? 'text-emerald-600' : 'text-amber-600'}`}>{getPaymentStatusLabel(order)}</p>
+                                </div>
+                              </div>
+
+                              {order.tracking_number && (
+                                <div className="bg-surface-container-low border border-outline-variant/30 rounded-2xl px-5 py-4 flex flex-wrap items-center justify-between gap-4">
+                                  <div className="flex items-center gap-3">
+                                     <span className="material-symbols-outlined text-secondary">local_shipping</span>
+                                     <div>
+                                        <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant">Tracking AWB</p>
+                                        <p className="text-sm font-semibold text-primary font-mono tracking-wider">{order.tracking_number}</p>
+                                     </div>
+                                  </div>
+                                  <span className="bg-on-surface text-surface px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest">{order.shipment_provider || 'Carrier'}</span>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <div className="flex md:justify-end gap-3 md:gap-4 flex-wrap">
-                            {displayStatus === 'shipped' && (
-                              <button className="px-5 md:px-8 py-3 md:py-4 rounded-xl font-headline font-bold text-xs md:text-sm flex items-center gap-2 bg-primary text-on-primary hover:bg-primary-container shadow-lg shadow-primary/10 transition-all">
-                                {order.tracking_number ? `Track ${order.tracking_number}` : 'Track Package'}
-                              </button>
-                            )}
-                            {displayStatus === 'delivered' && (
-                              <button className="px-5 md:px-8 py-3 md:py-4 rounded-xl font-headline font-bold text-xs md:text-sm flex items-center gap-2 bg-surface-container-highest text-on-surface-variant hover:bg-outline-variant/20 transition-all">
-                                Invoice <span className="material-symbols-outlined text-sm">download</span>
-                              </button>
-                            )}
-                            {(displayStatus === 'pending' || displayStatus === 'processing' || displayStatus === 'placed' || displayStatus === 'processed') && (
-                              <button className="px-5 md:px-8 py-3 md:py-4 rounded-xl font-headline font-bold text-xs md:text-sm flex items-center gap-2 bg-surface-container-highest text-on-surface-variant opacity-50 cursor-not-allowed">
-                                Processing...
-                              </button>
-                            )}
-                            <Link to={`/order/${order.id}`}>
-                              <button className="px-5 md:px-8 py-3 md:py-4 rounded-xl font-headline font-bold text-xs md:text-sm flex items-center gap-2 bg-primary text-on-primary hover:bg-primary-container shadow-lg shadow-primary/10 transition-all">
-                                View Details
+
+                          {/* Action Buttons */}
+                          <div className="flex flex-col sm:flex-row xl:flex-col gap-3 min-w-[200px] border-t xl:border-t-0 xl:border-l border-outline-variant/20 pt-6 xl:pt-0 xl:pl-8">
+                            <Link to={`/order/${order.id}`} className="w-full">
+                              <button className="w-full px-6 py-4 rounded-xl bg-surface-container-low border border-outline-variant/30 text-on-surface-variant font-bold text-xs uppercase tracking-widest hover:bg-surface-container transition-all active:scale-95 flex items-center justify-center gap-2">
+                                <span className="material-symbols-outlined text-[18px]">receipt_long</span>
+                                Details
                               </button>
                             </Link>
+                            
+                            {(displayStatus === 'shipped' || displayStatus === 'delivered') && (
+                               <button className="w-full px-6 py-4 rounded-xl bg-secondary text-white font-bold text-xs uppercase tracking-widest hover:bg-secondary/90 shadow-md transition-all active:scale-95 flex items-center justify-center gap-2">
+                                  <span className="material-symbols-outlined text-[18px]">{displayStatus === 'shipped' ? 'location_on' : 'download'}</span>
+                                  {displayStatus === 'shipped' ? 'Track' : 'Invoice'}
+                               </button>
+                            )}
                           </div>
+
                         </div>
                       </div>
                     </div>
@@ -263,21 +233,19 @@ export default function Orders() {
               </div>
             )}
 
-            <div className="mt-12 md:mt-20 p-8 md:p-12 rounded-3xl bg-gradient-to-br from-primary to-primary-container text-on-primary flex flex-col md:flex-row items-center justify-between gap-6 md:gap-8 relative overflow-hidden">
-              <div className="relative z-10 max-w-md">
-                <h3 className="font-brand text-2xl md:text-3xl mb-3 md:mb-4 leading-tight">Missing something traditional?</h3>
-                <p className="text-on-primary-container/90 font-body text-xs md:text-sm leading-relaxed mb-5 md:mb-6">
-                  Explore our new collection of heritage spices and artisanal pantry staples from the heart of the hills.
-                </p>
-                <Link to="/products">
-                  <button className="bg-secondary-container text-on-secondary-container px-8 md:px-10 py-3 md:py-4 rounded-full font-headline font-bold text-sm transition-all hover:shadow-xl active:scale-95">
-                    Explore Collections
-                  </button>
-                </Link>
-              </div>
-              <div className="relative z-10 hidden md:block">
-                <span className="material-symbols-outlined text-[100px] md:text-[120px] opacity-20" style={{ fontVariationSettings: "'FILL' 1" }}>restaurant_menu</span>
-              </div>
+            <div className="mt-16 bg-surface-container-lowest border border-outline-variant/30 rounded-3xl p-8 md:p-12 text-center flex flex-col items-center relative overflow-hidden group">
+               <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-bl-[150px] -z-10 group-hover:scale-110 transition-transform"></div>
+               <span className="material-symbols-outlined text-5xl text-primary/20 mb-4">storefront</span>
+               <h3 className="font-brand text-4xl text-primary leading-[0.94] tracking-tight mb-3">Craving authentic flavors?</h3>
+               <p className="text-on-surface-variant font-medium mb-8 max-w-md leading-relaxed">
+                 Explore our latest collection of heritage spices and artisanal pantry staples curated fresh from North East India.
+               </p>
+               <Link to="/products">
+                 <button className="bg-primary text-white border-2 border-primary hover:bg-primary/90 px-8 py-3.5 rounded-2xl font-bold text-[11px] uppercase tracking-widest transition-all active:scale-95 shadow-md flex items-center gap-2">
+                    <span className="material-symbols-outlined text-[16px]">explore</span>
+                    Browse Staples
+                 </button>
+               </Link>
             </div>
           </section>
         </div>

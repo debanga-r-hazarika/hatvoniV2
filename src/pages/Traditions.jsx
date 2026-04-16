@@ -2,7 +2,7 @@ export default function Traditions() {
   return (
     <>
       {/* Hero */}
-      <header className="relative min-h-screen flex items-center justify-center pt-24 overflow-hidden">
+      <header className="relative min-h-screen flex items-center justify-center pt-32 md:pt-40 overflow-hidden">
         <div className="absolute inset-0 z-0">
           <img
             src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ9Bn0ilDIcpiNHjvV4DHZ8JhSpS7un6k_p227DaHE9fgxJofEdZIOLLdbIqoEj2ii1Tc__jqQrJVDRoY1CDXtXTN1mUp5DTQ2Qh0PPnWXayQMEC_YLFNWcBuB4bYOxjde5bOWx-ALhWc28YD_bGVSK1-rqReig-lxzNNX4Jyv7kBxSc5JxDI0zqGnS-OWQhbkvnqAdkHSX1MngthjwuxyhmpOQzMEJXn_Hrwc-_xhyFfuWZCEu3TQIyT3jIUFU0x3VRZeFMe5P-7I"
@@ -23,7 +23,7 @@ export default function Traditions() {
       </header>
 
       {/* Alchemy of Khar */}
-      <section className="py-24 px-12 max-w-screen-2xl mx-auto">
+      <section className="py-24 px-6 md:px-12 max-w-screen-2xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-16 items-center">
           <div className="md:col-span-7 relative">
             <div className="absolute -top-12 -left-12 w-64 h-64 bg-secondary-container/10 rounded-full blur-3xl" />
@@ -96,7 +96,7 @@ export default function Traditions() {
       </section>
 
       {/* Ethical Pillars */}
-      <section className="py-32 px-12">
+      <section className="py-32 px-6 md:px-12">
         <div className="max-w-screen-2xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-24 items-start">
             <div className="md:sticky top-32">

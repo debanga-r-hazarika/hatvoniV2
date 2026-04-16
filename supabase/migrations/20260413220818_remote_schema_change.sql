@@ -1,0 +1,3 @@
+-- Migration applied directly on remote on 2026-04-13 22:08:18.
+-- Pulled as stub to reconcile local migration history.
+-- Contents were applied to the remote database outside of local CLI workflow.

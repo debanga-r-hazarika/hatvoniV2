@@ -58,16 +58,6 @@ function timingSafeEqual(a: string, b: string): boolean {
   return out === 0;
 }
 
-async function triggerForwardOrder(orderId: string): Promise<void> {
-  const supabaseUrl = requireEnv('SUPABASE_URL');
-  const url = `${supabaseUrl}/functions/v1/forward-order-to-insider`;
-  await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order_id: orderId }),
-  });
-}
-
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { status: 200, headers: corsHeaders });
@@ -190,7 +180,7 @@ Deno.serve(async (req) => {
   }
 
   if (!alreadyPaid) {
-    await triggerForwardOrder(order.id);
+    // Order is now paid — admin panel will handle fulfillment from here.
   }
 
   return new Response(JSON.stringify({ ok: true, order_id: order.id, already_paid: alreadyPaid }), {

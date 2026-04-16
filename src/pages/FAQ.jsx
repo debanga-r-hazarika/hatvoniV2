@@ -44,7 +44,7 @@ export default function FAQ() {
       <header className="relative pt-28 pb-16 md:pt-32 md:pb-24 px-6 md:px-8 bg-surface overflow-hidden">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center gap-10 md:gap-16">
           <div className="flex-1 z-10">
-            <h1 className="font-display text-4xl md:text-7xl text-primary leading-none mb-4 uppercase tracking-tighter">
+            <h1 className="font-brand text-4xl md:text-7xl text-primary leading-none mb-4 uppercase tracking-tighter">
               Support<br />Center
             </h1>
             <p className="text-on-surface-variant font-headline font-medium text-base md:text-lg leading-relaxed max-w-md">
@@ -80,7 +80,7 @@ export default function FAQ() {
         <div className="max-w-4xl mx-auto">
           <div className="flex items-center gap-4 mb-8">
             <span className="w-12 h-1 bg-tertiary"></span>
-            <h2 className="font-display text-xl md:text-2xl text-primary">Common Questions</h2>
+            <h2 className="font-brand text-xl md:text-2xl text-primary">Common Questions</h2>
           </div>
           <div className="space-y-2 md:space-y-4">
             {faqs.map((faq, index) => (
