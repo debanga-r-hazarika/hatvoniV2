@@ -885,17 +885,23 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
         try {
           const { data: sessionData } = await supabase.auth.getSession();
           const token = sessionData?.session?.access_token;
-          await supabase.functions.invoke('process-order-refund', {
+          if (!token) throw new Error('No auth token');
+          const { data: refundData, error: refundErr } = await supabase.functions.invoke('process-order-refund', {
             body: {
               order_id: orderId,
               mode: action === 'reject_full' ? 'full' : 'partial',
               reason: reason || (action === 'reject_full' ? 'Order rejected by admin' : 'Partial fulfillment — rejected items refunded'),
             },
-            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            headers: { Authorization: `Bearer ${token}` },
           });
+          if (refundErr) throw refundErr;
+          if (refundData && !refundData.ok && !refundData.skipped) {
+            throw new Error(refundData.error || 'Refund failed');
+          }
         } catch (refundErr) {
           // Refund failure is non-blocking — order status already changed
-          console.warn('Auto-refund failed, admin can retry manually:', refundErr);
+          // Show a warning so admin knows to retry
+          onError(`Order status updated but refund failed: ${refundErr.message}. Please retry the refund manually.`);
         }
       }
 

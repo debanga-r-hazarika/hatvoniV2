@@ -133,6 +133,11 @@ export default function OrderDetail() {
     catch { return []; }
   }, [order]);
 
+  // Build a Set of rejected product_keys for fast lookup
+  const rejectedKeys = useMemo(() => {
+    return new Set(rejectedItems.map((r) => r.product_key).filter(Boolean));
+  }, [rejectedItems]);
+
   const isPartial    = order?.partial_fulfillment && rejectedItems.length > 0;
   const refundAmount = Number(order?.refund_amount || 0);
   const refundInfo   = order?.refund_status ? REFUND_LABELS[order.refund_status] : null;
@@ -370,8 +375,19 @@ export default function OrderDetail() {
                   <div className="flex-1">
                     <p className="text-sm font-bold text-amber-900 mb-0.5">Partial Fulfillment</p>
                     <p className="text-xs text-amber-800/70 mb-2">
-                      {rejectedItems.length} item{rejectedItems.length !== 1 ? 's' : ''} unavailable and removed. Remaining items are being processed.
+                      {rejectedItems.length} item{rejectedItems.length !== 1 ? 's were' : ' was'} unavailable and removed from your order. The remaining items are being processed.
                     </p>
+                    {/* Show rejected item keys */}
+                    {rejectedItems.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {rejectedItems.map((r, i) => (
+                          <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-red-100 text-red-800 text-[10px] font-bold border border-red-200">
+                            ✕ {r.product_key || `Item ${i + 1}`}
+                            {r.reason && <span className="font-normal opacity-70"> · {r.reason}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {isRazorpay && refundAmount > 0 && (
                       <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-white border border-amber-200 text-[10px] font-bold text-amber-900">
                         Partial Refund: {money(refundAmount)}
@@ -418,7 +434,11 @@ export default function OrderDetail() {
                     {items.map((item) => {
                       const name = item.lot_name || item.lots?.lot_name || item.products?.name || 'Item';
                       const img = item.lots?.image_url || item.products?.image_url || 'https://via.placeholder.com/400';
-                      const isVoid = isPartial && rejectedItems.some(r => r.name === item.products?.name || r.name === name);
+                      // Check if this item was rejected — match by product_key or order_item_id
+                      const isVoid = isPartial && (
+                        rejectedKeys.has(item.products?.key) ||
+                        rejectedItems.some((r) => r.order_item_id === item.id)
+                      );
                       const lineTotal = Number(item.price || 0) * Number(item.quantity || 0);
 
                       return (
