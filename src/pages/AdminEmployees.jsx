@@ -18,12 +18,13 @@ export const ALL_MODULES = [
 ];
 
 export default function AdminEmployees() {
-  const { isAdmin, loading } = useAuth();
+  const { isAdmin, loading, profile: adminProfile } = useAuth();
   const navigate = useNavigate();
 
   const [employees, setEmployees]       = useState([]);
   const [pageLoading, setPageLoading]   = useState(false);
   const [searchQuery, setSearchQuery]   = useState('');
+  const [adminProfiles, setAdminProfiles] = useState([]);
 
   // Customer search panel
   const [customerSearch, setCustomerSearch]     = useState('');
@@ -76,6 +77,23 @@ export default function AdminEmployees() {
   useEffect(() => {
     if (isAdmin) fetchEmployees();
   }, [isAdmin, fetchEmployees]);
+
+  // ── Fetch all admin profiles ─────────────────────────────────────────────
+  const fetchAdminProfiles = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, email, avatar_url')
+        .eq('is_admin', true);
+      setAdminProfiles(data || []);
+    } catch {
+      setAdminProfiles([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (isAdmin) fetchAdminProfiles();
+  }, [isAdmin, fetchAdminProfiles]);
 
   // ── Customer search ──────────────────────────────────────────────────────
   const searchCustomers = useCallback(async (q) => {
@@ -209,6 +227,13 @@ export default function AdminEmployees() {
     return name.includes(q) || (emp.profile?.email || '').toLowerCase().includes(q);
   });
 
+  const filteredAdmins = adminProfiles.filter((adm) => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return true;
+    const name = `${adm.first_name || ''} ${adm.last_name || ''}`.toLowerCase();
+    return name.includes(q) || (adm.email || '').toLowerCase().includes(q);
+  });
+
   const fullName = (p) =>
     [p?.first_name, p?.last_name].filter(Boolean).join(' ') || p?.email || 'Unknown';
 
@@ -234,7 +259,8 @@ export default function AdminEmployees() {
       {/* ── Stats bar ── */}
       <div className="bg-white border-b border-gray-100 px-6 py-3 flex items-center gap-6">
         {[
-          { label: 'Total', value: employees.length, color: 'text-gray-700' },
+          { label: 'Total', value: employees.length + adminProfiles.length, color: 'text-gray-700' },
+          { label: 'Admins', value: adminProfiles.length, color: 'text-amber-600' },
           { label: 'Active', value: employees.filter((e) => e.is_active).length, color: 'text-green-600' },
           { label: 'Inactive', value: employees.filter((e) => !e.is_active).length, color: 'text-gray-400' },
         ].map((s) => (
@@ -270,7 +296,7 @@ export default function AdminEmployees() {
             <div className="flex justify-center py-16">
               <span className="material-symbols-outlined text-4xl text-gray-300 animate-spin">progress_activity</span>
             </div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredAdmins.length === 0 ? (
             <div className="bg-white rounded-xl border border-dashed border-gray-300 py-14 text-center">
               <span className="material-symbols-outlined text-5xl text-gray-300 block mb-3">badge</span>
               <p className="text-gray-500 font-medium">No employees yet</p>
@@ -280,6 +306,49 @@ export default function AdminEmployees() {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* ── Admin entries (read-only) ── */}
+              {filteredAdmins.map((adm) => (
+                <div
+                  key={`admin-${adm.id}`}
+                  className="bg-amber-50 rounded-xl border border-amber-200 p-4"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {adm.avatar_url ? (
+                        <img src={adm.avatar_url} alt="" className="w-10 h-10 rounded-full object-cover flex-shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-amber-200 flex items-center justify-center text-amber-800 font-bold text-sm flex-shrink-0">
+                          {(adm.first_name?.[0] || adm.email?.[0] || '?').toUpperCase()}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-sm font-semibold text-gray-900">{fullName(adm)}</p>
+                          <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-200 text-amber-800">
+                            Admin
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500 truncate">{adm.email}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {/* All modules chip */}
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    <span className="inline-flex items-center gap-1 text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-medium">
+                      <span className="material-symbols-outlined text-xs">verified</span>
+                      All Modules
+                    </span>
+                    {ALL_MODULES.map((mod) => (
+                      <span key={mod.id} className="inline-flex items-center gap-1 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
+                        <span className="material-symbols-outlined text-xs">{mod.icon}</span>
+                        {mod.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+
+              {/* ── Employee entries ── */}
               {filtered.map((emp) => {
                 const modules = (emp.employee_modules || []).map((m) => m.module);
                 return (

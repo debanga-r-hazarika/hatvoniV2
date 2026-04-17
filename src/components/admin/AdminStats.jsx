@@ -89,6 +89,16 @@ export default function AdminStats({ stats, setActiveTab }) {
       textColor: 'text-cyan-700',
       bgOverride: 'bg-surface-container-lowest border border-outline-variant/30',
       action: () => navigate('/admin/logistics')
+    },
+    {
+      id: 'support',
+      label: 'Support',
+      value: 'Grievances & SLA',
+      icon: 'support_agent',
+      color: 'bg-amber-50',
+      textColor: 'text-amber-700',
+      bgOverride: 'bg-surface-container-lowest border border-outline-variant/30',
+      action: () => navigate('/admin/support')
     }
   ];
 

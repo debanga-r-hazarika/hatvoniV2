@@ -61,8 +61,10 @@ export const AuthProvider = ({ children }) => {
       if (error) {
         console.error('Error fetching profile:', error);
         setProfile(null);
-        setIsAdmin(false);
-        setIsSeller(false);
+        const meta = sessionUser?.user_metadata ?? {};
+        setIsAdmin(meta.is_admin === true || meta.role === 'admin');
+        setIsSeller(meta.is_seller === true || meta.role === 'seller');
+        await fetchEmployeeModules(userId);
         return;
       }
 
@@ -94,16 +96,28 @@ export const AuthProvider = ({ children }) => {
             setProfile(updated);
             setIsAdmin(updated.is_admin === true);
             setIsSeller(updated.is_seller === true);
-            if (!updated.is_admin) await fetchEmployeeModules(userId);
-            else { setIsEmployee(false); setEmployeeModules([]); }
+            if (!updated.is_admin) {
+              setIsEmployee(updated.is_employee === true);
+              await fetchEmployeeModules(userId);
+            } else {
+              setIsEmployee(false);
+              setEmployeeModules([]);
+            }
             return;
           }
         }
         setProfile(data);
         setIsAdmin(data.is_admin === true);
         setIsSeller(data.is_seller === true);
-        if (!data.is_admin) await fetchEmployeeModules(userId);
-        else { setIsEmployee(false); setEmployeeModules([]); }
+        if (!data.is_admin) {
+          // Set isEmployee from the profile flag immediately (fast),
+          // then fetch actual modules for hasModule() checks
+          setIsEmployee(data.is_employee === true);
+          await fetchEmployeeModules(userId);
+        } else {
+          setIsEmployee(false);
+          setEmployeeModules([]);
+        }
       } else {
         setProfile(null);
         setIsAdmin(false);
@@ -114,10 +128,10 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error('Exception fetching profile:', err);
       setProfile(null);
-      setIsAdmin(false);
-      setIsSeller(false);
-      setIsEmployee(false);
-      setEmployeeModules([]);
+      const meta = sessionUser?.user_metadata ?? {};
+      setIsAdmin(meta.is_admin === true || meta.role === 'admin');
+      setIsSeller(meta.is_seller === true || meta.role === 'seller');
+      await fetchEmployeeModules(userId);
     }
   };
 

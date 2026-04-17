@@ -46,9 +46,9 @@ export const supportService = {
   async getCustomerDeliveredOrders(userId) {
     const { data, error } = await supabase
       .from('orders')
-      .select('id, status, insider_order_status, created_at, total_amount')
+      .select('id, status, order_status, created_at, total_amount')
       .eq('user_id', userId)
-      .or('status.eq.delivered,insider_order_status.eq.delivered')
+      .or('status.eq.delivered,order_status.eq.delivered')
       .order('created_at', { ascending: false });
 
     if (error) throw error;

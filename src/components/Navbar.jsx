@@ -19,7 +19,7 @@ export default function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
   const [cartCount, setCartCount] = useState(() => cartService.getCartCount());
-  const { user, profile, isAdmin, isSeller, signOut } = useAuth();
+  const { user, profile, isAdmin, isEmployee, isSeller, signOut } = useAuth();
   const navigate = useNavigate();
 
   const lastScrollY = useRef(0);
@@ -132,29 +132,29 @@ export default function Navbar() {
         <div 
           className={`w-full transition-all duration-500 ${
             scrolled
-              ? 'bg-surface/90 backdrop-blur-md shadow-sm border-b border-outline-variant/30 py-2'
-              : 'bg-surface py-2 md:py-3'
+              ? 'bg-surface/90 backdrop-blur-md shadow-sm border-b border-outline-variant/30 py-3'
+              : 'bg-surface py-4 md:py-6'
           }`}
         >
-          <nav className="flex justify-between items-center px-4 md:px-8 xl:px-12 w-full max-w-screen-2xl mx-auto overflow-hidden">
+          <nav className="flex justify-between items-center px-4 md:px-8 xl:px-12 w-full max-w-screen-2xl mx-auto">
             {/* Logo */}
             <Link
               to="/"
-              className="flex items-center gap-2 hover:opacity-80 transition-opacity z-10 shrink-0"
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity z-10"
             >
-              <span className="text-2xl md:text-3xl xl:text-4xl font-bold tracking-tight font-brand text-primary leading-[0.9]">
+              <span className="text-2xl md:text-4xl font-bold tracking-tight font-brand text-primary leading-[0.9]">
                  Hatvoni
               </span>
             </Link>
 
             {/* Desktop nav links */}
-            <div className="hidden lg:flex flex-1 justify-center items-center gap-0.5 xl:gap-3 mx-2 xl:mx-4">
+            <div className="hidden lg:flex items-center gap-2 xl:gap-4 absolute left-1/2 -translate-x-1/2">
               {navLinks.map((link) => (
                 <NavLink
                   key={link.to}
                   to={link.to}
                   className={({ isActive }) =>
-                    `relative px-1.5 xl:px-3 py-2 rounded-full transition-all duration-300 text-[13px] xl:text-[15px] font-medium tracking-wide whitespace-nowrap ${
+                    `relative px-3 py-2 rounded-full transition-all duration-300 text-[14px] xl:text-[15px] font-medium tracking-wide ${
                       isActive
                         ? 'text-primary'
                         : 'text-primary/70 hover:text-primary hover:bg-primary/5'
@@ -175,21 +175,21 @@ export default function Navbar() {
             </div>
 
             {/* Icons & Utility */}
-            <div className="flex items-center space-x-1 md:space-x-2 xl:space-x-3 z-10 shrink-0">
-              <div className="hidden sm:flex space-x-1 xl:space-x-2">
+            <div className="flex items-center space-x-1 md:space-x-3 z-10">
+              <div className="hidden sm:flex space-x-2">
                 <Link
                   to="/wishlist"
-                  className="relative p-2 xl:p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
+                  className="relative p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
                   aria-label="Wishlist"
                 >
-                  <span className="material-symbols-outlined text-[22px] xl:text-[24px] transition-transform duration-300 group-hover:scale-110">favorite</span>
+                  <span className="material-symbols-outlined text-[24px] transition-transform duration-300 group-hover:scale-110">favorite</span>
                 </Link>
                 <Link
                   to="/cart"
-                  className="relative p-2 xl:p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
+                  className="relative p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
                   aria-label="Cart"
                 >
-                  <span className="material-symbols-outlined text-[22px] xl:text-[24px] transition-transform duration-300 group-hover:scale-110">shopping_cart</span>
+                  <span className="material-symbols-outlined text-[24px] transition-transform duration-300 group-hover:scale-110">shopping_cart</span>
                   {cartCount > 0 && (
                     <span className="absolute top-1.5 right-1.5 bg-secondary-container text-on-secondary-container text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-bold border-2 border-surface shadow-sm">
                       {cartCount}
@@ -201,19 +201,19 @@ export default function Navbar() {
               {/* User / Auth Section */}
               {user ? (
                 <>
-                  <div className="hidden md:flex items-center space-x-2 xl:space-x-4 ml-1 xl:ml-4 border-l border-outline-variant/40 pl-3 xl:pl-6">
-                    {isAdmin && (
+                  <div className="hidden md:flex items-center space-x-4 ml-4 border-l border-outline-variant/40 pl-6">
+                    {(isAdmin || isEmployee) && (
                       <Link
                         to="/admin"
-                        className="px-3 xl:px-4 py-1.5 xl:py-2 text-[10px] xl:text-xs font-semibold uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 rounded-full transition-all duration-300 shadow-sm hover:shadow active:scale-95 hidden xl:block"
+                        className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 rounded-full transition-all duration-300 shadow-sm hover:shadow active:scale-95 hidden xl:block"
                       >
-                        Admin
+                        {isAdmin ? 'Admin' : 'Staff'}
                       </Link>
                     )}
                     {isSeller && (
                       <Link
                         to="/seller"
-                        className="px-3 xl:px-4 py-1.5 xl:py-2 text-[10px] xl:text-xs font-semibold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-white rounded-full transition-all duration-300 active:scale-95 hidden xl:block"
+                        className="px-4 py-2 text-xs font-semibold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-white rounded-full transition-all duration-300 active:scale-95 hidden xl:block"
                       >
                         Seller
                       </Link>
@@ -221,16 +221,16 @@ export default function Navbar() {
                     <div className="relative group">
                       <Link
                         to="/profile"
-                        className="flex items-center gap-2 px-1 xl:px-1.5 py-1 xl:py-1.5 pr-2 xl:pr-4 hover:bg-primary/5 rounded-full border border-transparent hover:border-outline-variant/30 transition-all duration-300"
+                        className="flex items-center gap-2 px-1.5 py-1.5 pr-4 hover:bg-primary/5 rounded-full border border-transparent hover:border-outline-variant/30 transition-all duration-300"
                       >
                         {profile?.avatar_url ? (
-                          <img src={profile.avatar_url} alt="Profile" className="w-7 h-7 xl:w-8 xl:h-8 rounded-full object-cover shadow-sm" />
+                          <img src={profile.avatar_url} alt="Profile" className="w-8 h-8 rounded-full object-cover shadow-sm" />
                         ) : (
-                          <div className="w-7 h-7 xl:w-8 xl:h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary/70">
-                            <span className="material-symbols-outlined text-[18px] xl:text-[20px]">person</span>
+                          <div className="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary/70">
+                            <span className="material-symbols-outlined text-[20px]">person</span>
                           </div>
                         )}
-                        <span className="text-xs xl:text-sm font-medium text-primary hidden lg:block truncate max-w-[80px] xl:max-w-[120px]">{getUserDisplayName()}</span>
+                        <span className="text-sm font-medium text-primary hidden lg:block truncate max-w-[120px]">{getUserDisplayName()}</span>
                       </Link>
                     </div>
                   </div>
@@ -251,16 +251,16 @@ export default function Navbar() {
                   </div>
                 </>
               ) : (
-                <div className="hidden md:flex items-center space-x-1 xl:space-x-3 ml-2 xl:ml-4 border-l border-outline-variant/40 pl-3 xl:pl-6">
+                <div className="hidden md:flex items-center space-x-3 ml-4 border-l border-outline-variant/40 pl-6">
                   <Link
                      to="/login"
-                     className="text-xs xl:text-sm font-medium text-primary hover:text-primary/70 transition-colors duration-300 px-2 xl:px-3 py-2"
+                     className="text-sm font-medium text-primary hover:text-primary/70 transition-colors duration-300 px-3 py-2"
                   >
                      Log In
                   </Link>
                   <Link
                     to="/signup"
-                    className="px-3 xl:px-5 py-2 xl:py-2.5 text-xs xl:text-sm font-semibold bg-primary text-white hover:bg-primary/90 rounded-full transition-all duration-300 shadow-sm hover:shadow-md active:scale-95"
+                    className="px-5 py-2.5 text-sm font-semibold bg-primary text-white hover:bg-primary/90 rounded-full transition-all duration-300 shadow-sm hover:shadow-md active:scale-95"
                   >
                     Join Us
                   </Link>
@@ -269,12 +269,12 @@ export default function Navbar() {
 
               {/* Mobile Menu Toggle */}
               <button
-                className="lg:hidden p-2 text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 ml-1"
+                className="lg:hidden p-2 text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 ml-2"
                 onClick={toggleMenu}
                 aria-label="Toggle menu"
                 aria-expanded={menuOpen}
               >
-                <div className="w-[20px] xl:w-[22px] h-[14px] xl:h-[16px] flex flex-col justify-between items-end relative">
+                <div className="w-[22px] h-[16px] flex flex-col justify-between items-end relative">
                   <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? 'rotate-45 top-1/2 -translate-y-1/2' : 'top-0'}`} />
                   <span className={`h-[2px] bg-primary rounded-full transition-all duration-200 absolute w-[80%] top-1/2 -translate-y-1/2 ${menuOpen ? 'opacity-0 translate-x-2' : ''}`} />
                   <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? '-rotate-45 top-1/2 -translate-y-1/2' : 'bottom-0'}`} />
@@ -371,7 +371,7 @@ export default function Navbar() {
                 <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest px-4 mb-2">Account</div>
                 {user ? (
                   <>
-                    {isAdmin && (
+                    {(isAdmin || isEmployee) && (
                       <Link
                         to="/admin"
                         onClick={handleLinkClick}
@@ -379,7 +379,7 @@ export default function Navbar() {
                         style={{ animationDelay: '280ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
                       >
                         <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
-                        Admin Dashboard
+                        {isAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
                       </Link>
                     )}
                     {isSeller && (

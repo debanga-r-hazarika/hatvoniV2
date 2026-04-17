@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -18,7 +18,7 @@ import ConfirmDialog from '../components/admin/ConfirmDialog';
 import AdminFilters from '../components/admin/AdminFilters';
 
 export default function Admin() {
-  const { isAdmin, loading } = useAuth();
+  const { isAdmin, isEmployee, employeeModules, loading } = useAuth();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [data, setData] = useState([]);
@@ -49,10 +49,10 @@ export default function Admin() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
-    if (!loading && !isAdmin) {
+    if (!loading && !isAdmin && !isEmployee) {
       navigate('/');
     }
-  }, [isAdmin, loading, navigate]);
+  }, [isAdmin, isEmployee, loading, navigate]);
 
   // Scroll effect on tab change
   useEffect(() => {
@@ -409,7 +409,60 @@ export default function Admin() {
     </div>
   );
 
-  if (!isAdmin) return null;
+  // ── Employee staff dashboard ─────────────────────────────────────────────
+  if (!isAdmin && isEmployee) {
+    const MODULE_ROUTES = {
+      orders:    { path: '/admin/orders',    icon: 'package_2',        label: 'Orders' },
+      logistics: { path: '/admin/logistics', icon: 'local_shipping',   label: 'Logistics' },
+      support:   { path: '/admin/support',   icon: 'support_agent',    label: 'Support' },
+      inventory: { path: '/admin/inventory', icon: 'inventory_2',      label: 'Inventory' },
+      coupons:   { path: '/admin/coupons',   icon: 'sell',             label: 'Coupons' },
+      customers: { path: '/admin',           icon: 'group',            label: 'Customers' },
+      sellers:   { path: '/admin/sellers',   icon: 'storefront',       label: 'Sellers' },
+      products:  { path: '/admin',           icon: 'category',         label: 'Products' },
+      lots:      { path: '/admin',           icon: 'all_inclusive',    label: 'Lots' },
+      recipes:   { path: '/admin',           icon: 'restaurant_menu',  label: 'Recipes' },
+    };
+
+    return (
+      <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-20">
+        <div className="max-w-4xl mx-auto px-6 lg:px-8">
+          <header className="mb-10 animate-in fade-in slide-in-from-left-8 duration-700">
+            <span className="text-[10px] font-black uppercase tracking-[0.4em] text-secondary mb-2 block">Staff Portal</span>
+            <h1 className="font-brand text-5xl md:text-6xl text-primary tracking-tight leading-none">Staff Dashboard</h1>
+            <p className="text-on-surface-variant mt-4 font-body font-medium">Your assigned modules are listed below.</p>
+          </header>
+
+          {employeeModules.length === 0 ? (
+            <div className="bg-surface-container-low rounded-3xl border border-outline-variant/20 p-12 text-center">
+              <span className="material-symbols-outlined text-5xl text-on-surface-variant/30 block mb-4">lock</span>
+              <p className="font-brand text-xl text-primary mb-2">No modules assigned</p>
+              <p className="text-on-surface-variant font-body text-sm">Contact your administrator to get access to admin sections.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+              {employeeModules.map((mod) => {
+                const info = MODULE_ROUTES[mod];
+                if (!info) return null;
+                return (
+                  <Link
+                    key={mod}
+                    to={info.path}
+                    className="flex flex-col items-center gap-3 p-6 bg-surface-container-low rounded-3xl border border-outline-variant/20 hover:border-primary/30 hover:bg-primary/5 transition-all duration-300 group shadow-sm hover:shadow-md"
+                  >
+                    <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                      <span className="material-symbols-outlined text-2xl text-primary">{info.icon}</span>
+                    </div>
+                    <span className="font-brand font-bold text-primary text-sm text-center">{info.label}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-20">

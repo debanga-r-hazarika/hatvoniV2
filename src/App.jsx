@@ -34,6 +34,8 @@ import AdminInventory from './pages/AdminInventory';
 import AdminEmployees from './pages/AdminEmployees';
 import AdminSellers from './pages/AdminSellers';
 import AdminLogistics from './pages/AdminLogistics';
+import AdminSupport from './pages/AdminSupport';
+import Support from './pages/Support';
 import Seller from './pages/Seller';
 import SellerOrderDetail from './pages/SellerOrderDetail';
 import PaymentProcessing from './pages/PaymentProcessing';
@@ -82,6 +84,8 @@ export default function App() {
           <Route path="/admin/employees" element={<Layout path="/admin/employees"><AdminEmployees /></Layout>} />
           <Route path="/admin/sellers" element={<Layout path="/admin/sellers"><AdminSellers /></Layout>} />
           <Route path="/admin/logistics" element={<Layout path="/admin/logistics"><AdminLogistics /></Layout>} />
+          <Route path="/admin/support" element={<Layout path="/admin/support"><AdminSupport /></Layout>} />
+          <Route path="/support" element={<Layout path="/support"><Support /></Layout>} />
           <Route path="/seller" element={<Layout path="/seller"><Seller /></Layout>} />
           <Route path="/seller/orders/:id" element={<Layout path="/seller/orders/:id"><SellerOrderDetail /></Layout>} />
           <Route path="/order/:id" element={<Layout path="/order/:id"><OrderDetail /></Layout>} />
