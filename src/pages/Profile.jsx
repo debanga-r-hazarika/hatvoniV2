@@ -221,10 +221,23 @@ export default function Profile() {
   const isAdmin = profile?.is_admin === true;
   const isSeller = profile?.is_seller === true;
 
-  // For employees: link to their first assigned module, or generic admin page
-  const employeeAdminLink = employeeModules.length > 0
-    ? `/admin/${employeeModules[0]}`
-    : '/admin/orders';
+  const employeeModuleRoutes = {
+    orders: '/admin/orders',
+    support: '/admin/support',
+    inventory: '/admin/inventory',
+    coupons: '/admin/coupons',
+    logistics: '/admin/logistics',
+    sellers: '/admin/sellers',
+    customers: '/admin',
+    products: '/admin',
+    lots: '/admin',
+    recipes: '/admin',
+  };
+
+  const employeeAdminLink = employeeModules.reduce((route, moduleName) => {
+    if (route) return route;
+    return employeeModuleRoutes[String(moduleName || '').trim().toLowerCase()] || null;
+  }, null) || '/admin';
 
   const sidebarLinks = [
     { label: 'Personal Details', href: '/profile', icon: 'person', active: true },
