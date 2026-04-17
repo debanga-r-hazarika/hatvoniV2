@@ -91,55 +91,54 @@ export default function Cart() {
               <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-[2rem] p-4 md:p-8 shadow-sm">
                 <div className="space-y-6 md:space-y-8">
                   {items.map((item, index) => (
-                    <article key={item.id} className={`group flex flex-col sm:flex-row gap-5 md:gap-8 items-start pb-6 md:pb-8 ${index !== items.length - 1 ? 'border-b border-outline-variant/20' : ''}`}>
-                      <Link to={item.item_type === 'lot' ? `/lots/${item.entity_id || item.lot_id}` : `/products/${item.entity_id || item.product_id}`} className="w-full sm:w-36 md:w-44 aspect-square overflow-hidden rounded-2xl bg-surface-container relative shrink-0">
+                    <article key={item.id} className={`group flex flex-row gap-4 md:gap-6 items-start pb-5 md:pb-6 ${index !== items.length - 1 ? 'border-b border-outline-variant/20' : ''}`}>
+                      <Link to={item.item_type === 'lot' ? `/lots/${item.entity_id || item.lot_id}` : `/products/${item.entity_id || item.product_id}`} className="w-20 md:w-24 aspect-square overflow-hidden rounded-xl bg-surface-container relative shrink-0">
                         <img className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src={item.image_url || 'https://via.placeholder.com/400'} alt={item.name} />
                         <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
                       </Link>
 
-                      <div className="flex-1 w-full flex flex-col h-full justify-between">
+                      <div className="flex-1 w-full flex flex-col h-full justify-between py-1">
                         <div>
                           <div className="flex justify-between items-start gap-4">
                             <div>
-                              <p className="text-[10px] font-bold tracking-[0.2em] text-secondary uppercase mb-1">{item.item_type === 'lot' ? 'Heritage Bundle' : (item.category || 'Traditional Staple')}</p>
-                              <h3 className="font-brand text-2xl md:text-3xl text-primary leading-[0.94] group-hover:text-secondary transition-colors">{item.name}</h3>
+                              <p className="text-[9px] md:text-[10px] font-bold tracking-[0.2em] text-secondary uppercase mb-0.5">{item.item_type === 'lot' ? 'Heritage Bundle' : (item.category || 'Traditional Staple')}</p>
+                              <h3 className="font-brand text-lg md:text-xl text-primary leading-snug group-hover:text-secondary transition-colors line-clamp-2 md:line-clamp-none">{item.name}</h3>
                             </div>
-                            <span className="font-bold text-xl md:text-2xl text-primary whitespace-nowrap">₹{(Number(item.price || 0) * item.qty).toLocaleString()}</span>
+                            <span className="font-bold text-base md:text-lg text-primary whitespace-nowrap">₹{(Number(item.price || 0) * item.qty).toLocaleString()}</span>
                           </div>
 
                           {item.description && (
-                            <p className="text-on-surface-variant font-medium leading-relaxed italic text-xs md:text-sm mt-3 hidden md:block line-clamp-2 max-w-md">{item.description}</p>
+                            <p className="text-on-surface-variant font-medium leading-relaxed italic text-xs mt-1.5 hidden md:block line-clamp-1 max-w-md">{item.description}</p>
                           )}
 
                           {(item.lot_items || []).length > 0 && (
-                            <div className="mt-4 rounded-xl bg-surface-container-lowest border border-outline-variant/20 p-3 text-xs space-y-1.5 shadow-sm">
-                              <p className="text-[9px] font-bold uppercase tracking-widest text-on-surface-variant/70 mb-2">Bundle Contents</p>
-                              {(item.lot_items || []).slice(0, 4).map((bundleItem) => (
-                                <div key={`${item.id}-${bundleItem.product_key || bundleItem.id}`} className="flex items-center justify-between gap-3 text-on-surface-variant">
-                                  <span className="font-bold">{bundleItem.products?.name || bundleItem.product_name || bundleItem.product_key}</span>
-                                  <span className="text-[10px]">×{bundleItem.quantity}</span>
+                            <div className="mt-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/20 p-2.5 text-[10px] md:text-xs shadow-sm">
+                              {(item.lot_items || []).slice(0, 3).map((bundleItem) => (
+                                <div key={`${item.id}-${bundleItem.product_key || bundleItem.id}`} className="flex items-center justify-between gap-3 text-on-surface-variant mb-1 last:mb-0">
+                                  <span className="font-bold truncate">{bundleItem.products?.name || bundleItem.product_name || bundleItem.product_key}</span>
+                                  <span className="text-[9px] shrink-0">×{bundleItem.quantity}</span>
                                 </div>
                               ))}
-                              {item.lot_items?.length > 4 && (
-                                <div className="text-[10px] font-bold text-secondary tracking-wider pt-1.5 border-t border-outline-variant/20 mt-2">+ {item.lot_items.length - 4} more items</div>
+                              {item.lot_items?.length > 3 && (
+                                <div className="text-[9px] font-bold text-secondary tracking-wider pt-1 border-t border-outline-variant/20 mt-1">+ {item.lot_items.length - 3} more</div>
                               )}
                             </div>
                           )}
                         </div>
 
-                        <div className="flex flex-wrap items-center justify-between pt-6 mt-auto gap-4">
-                          <div className="flex items-center bg-surface-container border border-outline-variant/30 rounded-2xl px-4 py-2 shadow-sm">
-                            <button onClick={() => updateQty(item.id, -1)} className="w-8 h-8 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Decrease quantity">
-                              <span className="material-symbols-outlined text-[16px]">remove</span>
+                        <div className="flex flex-wrap items-center justify-between pt-3 mt-auto gap-4">
+                          <div className="flex items-center bg-surface-container border border-outline-variant/30 rounded-xl px-2 py-1 shadow-sm">
+                            <button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Decrease quantity">
+                              <span className="material-symbols-outlined text-[14px]">remove</span>
                             </button>
-                            <span className="font-bold text-sm md:text-base w-10 text-center tracking-widest">{item.qty}</span>
-                            <button onClick={() => updateQty(item.id, 1)} className="w-8 h-8 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Increase quantity">
-                              <span className="material-symbols-outlined text-[16px]">add</span>
+                            <span className="font-bold text-xs md:text-sm w-8 text-center tracking-widest">{item.qty}</span>
+                            <button onClick={() => updateQty(item.id, 1)} className="w-6 h-6 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Increase quantity">
+                              <span className="material-symbols-outlined text-[14px]">add</span>
                             </button>
                           </div>
 
-                          <button onClick={() => removeItem(item.id)} className="text-on-surface-variant font-bold text-[10px] uppercase tracking-widest flex items-center gap-2 hover:text-red-600 transition-colors bg-surface-container-low px-4 py-2.5 rounded-xl border border-transparent hover:border-red-100 hover:bg-red-50">
-                            <span className="material-symbols-outlined text-[16px]">delete</span>
+                          <button onClick={() => removeItem(item.id)} className="text-on-surface-variant font-bold text-[9px] md:text-[10px] uppercase tracking-widest flex items-center gap-1.5 hover:text-red-600 transition-colors bg-surface-container-low px-3 py-1.5 rounded-lg border border-transparent hover:border-red-100 hover:bg-red-50">
+                            <span className="material-symbols-outlined text-[14px]">delete</span>
                             Remove
                           </button>
                         </div>

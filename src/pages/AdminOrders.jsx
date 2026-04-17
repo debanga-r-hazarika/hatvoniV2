@@ -452,7 +452,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
   }, [items, sellerDecisions, adminApprovals]);
 
   return (
-    <section className="bg-surface-container-lowest rounded-3xl p-6 lg:p-8 border border-outline-variant/30 shadow-[0_10px_40px_rgba(0,123,71,0.03)]">
+    <section className="bg-surface-container-lowest rounded-[2rem] p-6 lg:p-8 border border-outline-variant/30 shadow-sm">
       <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-primary mb-2 flex items-center gap-2">
         <span className="material-symbols-outlined">fact_check</span> Item-Level Approval
       </h2>
@@ -620,7 +620,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
       {/* Admin Decide Modal — inventory-aware for sync_with_insider items */}
       {adminDecideTarget && (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-surface-container-lowest rounded-3xl max-w-md w-full p-8 shadow-2xl border border-outline-variant/20">
+          <div className="bg-surface-container-lowest rounded-[2rem] max-w-md w-full p-8 shadow-2xl border border-outline-variant/20">
 
             <h3 className="font-brand text-2xl text-primary mb-1">
               {adminDecideTarget.isSyncItem && adminDecision === 'approved' ? 'Insider Inventory Check' : 'Admin Item Decision'}
@@ -886,22 +886,30 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
           const { data: sessionData } = await supabase.auth.getSession();
           const token = sessionData?.session?.access_token;
           if (!token) throw new Error('No auth token');
-          const { data: refundData, error: refundErr } = await supabase.functions.invoke('process-order-refund', {
-            body: {
+
+          // Use fetch directly to avoid supabase-js client auth header conflicts
+          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+          const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+          const refundRes = await fetch(`${supabaseUrl}/functions/v1/process-order-refund`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+              'apikey': supabaseAnonKey,
+            },
+            body: JSON.stringify({
               order_id: orderId,
               mode: action === 'reject_full' ? 'full' : 'partial',
               reason: reason || (action === 'reject_full' ? 'Order rejected by admin' : 'Partial fulfillment — rejected items refunded'),
-            },
-            headers: { Authorization: `Bearer ${token}` },
+            }),
           });
-          if (refundErr) throw refundErr;
-          if (refundData && !refundData.ok && !refundData.skipped) {
-            throw new Error(refundData.error || 'Refund failed');
+          const refundData = await refundRes.json();
+          if (!refundRes.ok && !refundData?.skipped) {
+            throw new Error(refundData?.error || `Refund HTTP ${refundRes.status}`);
           }
         } catch (refundErr) {
           // Refund failure is non-blocking — order status already changed
-          // Show a warning so admin knows to retry
-          onError(`Order status updated but refund failed: ${refundErr.message}. Please retry the refund manually.`);
+          onError(`Order status updated but refund failed: ${refundErr.message}. Use the "Issue Partial Refund" button to retry.`);
         }
       }
 
@@ -1227,12 +1235,172 @@ function WorkflowLog({ orderId }) {
 // ─── ShippingPanel ────────────────────────────────────────────────────────────
 
 function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
+  // 'manual' | 'velocity'
+  const [shippingMode, setShippingMode] = useState('manual');
+
+  // ── Manual mode state ──
   const [editTracking, setEditTracking] = useState(order?.tracking_number || '');
   const [editProvider, setEditProvider] = useState(order?.shipment_provider || '');
   const [editNotes, setEditNotes] = useState(order?.order_notes || '');
   const [editStatus, setEditStatus] = useState(order?.status || '');
   const [saving, setSaving] = useState(false);
+
+  // ── Velocity mode state ──
+  const [velStep, setVelStep] = useState('idle'); // idle | checking | ready | creating | done | error
+  const [velServiceability, setVelServiceability] = useState(null); // { serviceable, carriers, zone, payment_mode }
+  const [velCarrierId, setVelCarrierId] = useState('');
+  const [velLength, setVelLength] = useState('15');
+  const [velBreadth, setVelBreadth] = useState('15');
+  const [velHeight, setVelHeight] = useState('10');
+  const [velWeight, setVelWeight] = useState('0.5');
+  const [velResult, setVelResult] = useState(null); // shipment creation result
+  const [velError, setVelError] = useState('');
+  const [pickupLocations, setPickupLocations] = useState([]);
+  const [pickupLocationId, setPickupLocationId] = useState('');
+
+  const [retryingRefund, setRetryingRefund] = useState(false);
   const isPartialOrder = order?.partial_fulfillment === true;
+  const isRazorpay = ['razorpay', 'razorpay_upi', 'razorpay_cards'].includes(order?.payment_method);
+  const isPaid = order?.payment_status === 'paid';
+  const alreadyShippedViaVelocity = !!(order?.velocity_shipment_id);
+  // Show retry button when refund is pending (was set by admin_finalize_order but edge fn wasn't deployed)
+  const needsRefundRetry = isPartialOrder && isRazorpay && isPaid && order?.refund_status === 'pending';
+
+  useEffect(() => {
+    let active = true;
+    const loadPickupLocations = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('seller_pickup_locations')
+          .select('id, warehouse_name, pincode, is_default, velocity_warehouse_id')
+          .order('is_default', { ascending: false })
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        if (!active) return;
+        const rows = data || [];
+        setPickupLocations(rows);
+        const firstSynced = rows.find((r) => r.velocity_warehouse_id)?.id || '';
+        setPickupLocationId(firstSynced);
+      } catch {
+        if (!active) return;
+        setPickupLocations([]);
+        setPickupLocationId('');
+      }
+    };
+
+    if (shippingMode === 'velocity') loadPickupLocations();
+    return () => { active = false; };
+  }, [shippingMode]);
+
+  const toUserError = (err, fallback = 'Something went wrong. Please try again.') => {
+    const msg = String(err?.message || err || '').trim();
+    if (!msg) return fallback;
+    const lower = msg.toLowerCase();
+    if (lower.includes('invalid or expired token') || lower.includes('no auth token') || lower.includes('unauthorized')) {
+      return 'Your session expired. Please sign in again and retry.';
+    }
+    if (lower.includes('order not found')) return 'Order details could not be found. Please refresh and try again.';
+    if (lower.includes('not serviceable')) return 'This delivery pincode is currently not serviceable.';
+    if (lower.includes('missing required env var') || lower.includes('server misconfiguration')) {
+      return 'Shipping service is not configured yet. Please contact support.';
+    }
+    if (lower.includes('http 5')) return 'Shipping service is temporarily unavailable. Please retry in a moment.';
+    if (lower.includes('http 4')) return 'Request could not be processed. Please verify the shipping details and retry.';
+    return msg;
+  };
+
+  // ── Helper to call velocity-orchestrator edge function ──
+  const callVelocityFn = async (body) => {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    if (!token) throw new Error('No auth token — please sign in again');
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const res = await fetch(`${supabaseUrl}/functions/v1/velocity-orchestrator`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'apikey': supabaseAnonKey,
+      },
+      body: JSON.stringify({
+        action: body.action,
+        payload: { order_id: orderId, ...body.payload },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+    return data?.data || {};
+  };
+
+  // ── Step 1: check serviceability ──
+  const checkServiceability = async () => {
+    setVelStep('checking');
+    setVelError('');
+    setVelServiceability(null);
+    try {
+      const data = await callVelocityFn({ action: 'check_serviceability' });
+      setVelServiceability(data);
+      setVelStep(data.serviceable ? 'ready' : 'error');
+      if (!data.serviceable) setVelError('This delivery pincode is not serviceable by Velocity Shipping.');
+    } catch (e) {
+      setVelStep('error');
+      setVelError(toUserError(e, 'Could not check serviceability. Please try again.'));
+    }
+  };
+
+  // ── Step 2: create shipment ──
+  const createVelocityShipment = async () => {
+    setVelStep('creating');
+    setVelError('');
+    try {
+      const data = await callVelocityFn({
+        action: 'create_order',
+        payload: {
+          carrier_id: velCarrierId || '',
+          pickup_location_id: pickupLocationId || undefined,
+          length: parseFloat(velLength) || 15,
+          breadth: parseFloat(velBreadth) || 15,
+          height: parseFloat(velHeight) || 10,
+          weight: parseFloat(velWeight) || 0.5,
+        },
+      });
+      setVelResult(data);
+      setVelStep('done');
+      onNotice(`Shipment created via Velocity. AWB: ${data.awb_code || 'Generated'}${data.courier_name ? ` — ${data.courier_name}` : ''}`);
+      await onRefresh();
+    } catch (e) {
+      setVelStep('error');
+      setVelError(toUserError(e, 'Shipment could not be created. Please try again.'));
+    }
+  };
+
+  const retryRefund = async () => {
+    setRetryingRefund(true);
+    onError('');
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('No auth token — please sign in again');
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const res = await fetch(`${supabaseUrl}/functions/v1/process-order-refund`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`, 'apikey': supabaseAnonKey },
+        body: JSON.stringify({ order_id: orderId, mode: 'partial', reason: 'Partial fulfillment — rejected items refunded' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      if (data?.skipped) { onNotice(`Refund skipped: ${data.reason}`); }
+      else if (data?.ok) { onNotice(`Partial refund of ${fmt(data.refund_amount)} initiated successfully.`); }
+      else { throw new Error(data?.error || 'Refund failed'); }
+      await onRefresh();
+    } catch (err) {
+      onError(toUserError(err, 'Refund could not be initiated right now.'));
+    } finally {
+      setRetryingRefund(false);
+    }
+  };
 
   const saveChanges = async () => {
     setSaving(true);
@@ -1246,17 +1414,11 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         admin_updated_at: now,
         updated_at: now,
       };
-
       if (editStatus !== order.status) {
-        // ShippingPanel only handles post-processing transitions.
-        // pending → processing is handled exclusively by admin_finalize_order().
-        const allowedTransitions = {
-          processing: ['shipped', 'cancelled'],
-          shipped:    ['delivered', 'cancelled'],
-        };
+        const allowedTransitions = { processing: ['shipped', 'cancelled'], shipped: ['delivered', 'cancelled'] };
         const allowed = allowedTransitions[order.status] || [];
         if (!allowed.includes(editStatus)) {
-          throw new Error(`Cannot change status from "${order.status}" to "${editStatus}" here. Use the Order Decision panel for approval actions.`);
+          throw new Error(`Cannot change status from "${order.status}" to "${editStatus}" here.`);
         }
         patch.status = editStatus;
         if (editStatus === 'shipped' && !order.shipped_at) patch.shipped_at = now;
@@ -1264,73 +1426,291 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         if (editStatus === 'shipped') patch.shipment_status = 'in_transit';
         if (editStatus === 'delivered') patch.shipment_status = 'delivered';
       }
-
       const { error } = await supabase.from('orders').update(patch).eq('id', orderId);
       if (error) throw error;
       onNotice('Shipping details updated.');
       await onRefresh();
     } catch (err) {
-      onError(err.message || 'Failed to save');
+      onError(toUserError(err, 'Could not save shipping details. Please try again.'));
     } finally {
       setSaving(false);
     }
   };
 
   // Only show statuses that are valid next steps from the current status.
-  // 'processing' is set by admin_finalize_order — never by this panel.
-  const nextStatuses = {
-    processing: ['processing', 'shipped', 'cancelled'],
-    shipped:    ['shipped', 'delivered', 'cancelled'],
-  };
+  const nextStatuses = { processing: ['processing', 'shipped', 'cancelled'], shipped: ['shipped', 'delivered', 'cancelled'] };
   const shippingStatuses = nextStatuses[order?.status] || [order?.status].filter(Boolean);
 
   return (
     <section className="bg-surface-container-lowest rounded-3xl p-6 lg:p-8 border border-outline-variant/30 shadow-[0_10px_40px_rgba(0,123,71,0.03)] relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10"></div>
+      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10" />
       <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-primary mb-1 flex items-center gap-2">
-        <span className="material-symbols-outlined">local_shipping</span> Shipping & Fulfillment
+        <span className="material-symbols-outlined">local_shipping</span> Shipping &amp; Fulfillment
       </h2>
+      <p className="text-xs text-on-surface-variant mb-4">
+        Choose how to create the shipment — manually enter details or use Velocity Shipping to generate an AWB automatically.
+      </p>
+
       {isPartialOrder && (
         <p className="text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2 mb-4">
           ⚠ Partial order — only approved items should be shipped. Rejected items have been removed.
         </p>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
-        <div>
-          <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Order Status</label>
-          <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)}
-            className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm font-semibold text-primary focus:ring-2 focus:ring-secondary">
-            {shippingStatuses.map((s) => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-            ))}
-          </select>
+      {/* Existing Velocity shipment banner */}
+      {alreadyShippedViaVelocity && (
+        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <span className="material-symbols-outlined text-blue-600 text-2xl shrink-0">verified</span>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold text-blue-800">Velocity shipment active</p>
+            <p className="text-xs text-blue-700 mt-0.5">
+              AWB: <span className="font-mono font-bold">{order.tracking_number || order.velocity_awb}</span>
+              {order.velocity_carrier_name && <span className="ml-2">· {order.velocity_carrier_name}</span>}
+            </p>
+            {order.velocity_label_url && (
+              <a href={order.velocity_label_url} target="_blank" rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1.5 text-xs font-bold text-blue-700 hover:text-blue-900 underline underline-offset-2">
+                <span className="material-symbols-outlined text-sm">download</span>
+                Download shipping label
+              </a>
+            )}
+          </div>
         </div>
-        <div>
-          <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Shipment Provider</label>
-          <input type="text" value={editProvider} onChange={(e) => setEditProvider(e.target.value)}
-            placeholder="e.g. Delhivery, India Post"
-            className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary" />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Tracking Number</label>
-          <input type="text" value={editTracking} onChange={(e) => setEditTracking(e.target.value)}
-            placeholder="AWB / Tracking Number"
-            className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary font-mono placeholder:font-body" />
-        </div>
-        <div>
-          <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Note to Customer</label>
-          <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
-            placeholder="Dispatch details visible to customer..."
-            className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary" />
-        </div>
-      </div>
+      )}
 
-      <button onClick={saveChanges} disabled={saving}
-        className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-secondary text-white font-bold tracking-wide hover:bg-secondary/90 transition-all active:scale-95 disabled:opacity-70 shadow-md">
-        {saving ? <span className="material-symbols-outlined text-xl animate-spin">progress_activity</span> : <span className="material-symbols-outlined text-xl">save</span>}
-        {saving ? 'SAVING...' : 'SAVE CHANGES'}
-      </button>
+      {/* Mode tabs — hide Velocity tab if already shipped via Velocity */}
+      {!alreadyShippedViaVelocity && order.status === 'processing' && (
+        <div className="flex gap-2 mb-6 bg-surface-container-low rounded-xl p-1">
+          {[
+            { key: 'manual', label: 'Manual Entry', icon: 'edit' },
+            { key: 'velocity', label: 'Velocity Shipping', icon: 'electric_bolt' },
+          ].map((tab) => (
+            <button key={tab.key} onClick={() => { setShippingMode(tab.key); setVelStep('idle'); setVelError(''); }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-bold transition-all ${
+                shippingMode === tab.key
+                  ? 'bg-surface-container-lowest shadow-sm text-primary border border-outline-variant/30'
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`}>
+              <span className="material-symbols-outlined text-base">{tab.icon}</span>
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Manual mode ─────────────────────────────────────────────────────── */}
+      {(shippingMode === 'manual' || alreadyShippedViaVelocity || order.status !== 'processing') && (
+        <div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
+            <div>
+              <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Order Status</label>
+              <select value={editStatus} onChange={(e) => setEditStatus(e.target.value)}
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm font-semibold text-primary focus:ring-2 focus:ring-secondary">
+                {shippingStatuses.map((s) => (
+                  <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Shipment Provider</label>
+              <input type="text" value={editProvider} onChange={(e) => setEditProvider(e.target.value)}
+                placeholder="e.g. Delhivery, India Post"
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Tracking Number / AWB</label>
+              <input type="text" value={editTracking} onChange={(e) => setEditTracking(e.target.value)}
+                placeholder="AWB / Tracking Number"
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary font-mono placeholder:font-body" />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-on-surface-variant uppercase tracking-wider mb-2">Note to Customer</label>
+              <input type="text" value={editNotes} onChange={(e) => setEditNotes(e.target.value)}
+                placeholder="Dispatch details visible to customer..."
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary" />
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3 items-center">
+            <button onClick={saveChanges} disabled={saving}
+              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-secondary text-white font-bold tracking-wide hover:bg-secondary/90 transition-all active:scale-95 disabled:opacity-70 shadow-md">
+              {saving ? <span className="material-symbols-outlined text-xl animate-spin">progress_activity</span> : <span className="material-symbols-outlined text-xl">save</span>}
+              {saving ? 'SAVING...' : 'SAVE CHANGES'}
+            </button>
+            {needsRefundRetry && (
+              <button onClick={retryRefund} disabled={retryingRefund}
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl border-2 border-orange-400 bg-orange-50 text-orange-800 font-bold hover:bg-orange-100 transition-all active:scale-95 disabled:opacity-70">
+                {retryingRefund
+                  ? <><span className="material-symbols-outlined text-xl animate-spin">progress_activity</span>Processing...</>
+                  : <><span className="material-symbols-outlined text-xl">currency_exchange</span>Issue Partial Refund</>}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Velocity Shipping mode ─────────────────────────────────────────── */}
+      {shippingMode === 'velocity' && !alreadyShippedViaVelocity && order.status === 'processing' && (
+        <div className="space-y-5">
+
+          {/* Step 1 — Serviceability */}
+          {velStep === 'idle' && (
+            <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5">
+              <p className="text-sm font-bold text-on-surface mb-1 flex items-center gap-2">
+                <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">1</span>
+                Check Serviceability
+              </p>
+              <p className="text-xs text-on-surface-variant ml-8 mb-4">
+                Verify the customer's pincode is covered by Velocity Shipping.
+              </p>
+              <button onClick={checkServiceability}
+                className="ml-8 inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-bold hover:bg-primary/90 transition-all active:scale-95">
+                <span className="material-symbols-outlined text-base">pin_drop</span>
+                Check Serviceability
+              </button>
+            </div>
+          )}
+
+          {velStep === 'checking' && (
+            <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5 flex items-center gap-3">
+              <span className="material-symbols-outlined animate-spin text-secondary text-2xl">progress_activity</span>
+              <p className="text-sm text-on-surface-variant">Checking serviceability with Velocity Shipping...</p>
+            </div>
+          )}
+
+          {/* Error state */}
+          {velStep === 'error' && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 p-5">
+              <p className="text-sm font-bold text-red-800 flex items-center gap-2">
+                <span className="material-symbols-outlined text-red-600">error</span>
+                {velError}
+              </p>
+              <button onClick={() => { setVelStep('idle'); setVelError(''); }}
+                className="mt-3 text-xs font-bold text-red-700 underline underline-offset-2">
+                Try again
+              </button>
+            </div>
+          )}
+
+          {/* Step 2 — Configure & Create (shown after serviceability passes) */}
+          {(velStep === 'ready' || velStep === 'creating') && velServiceability && (
+            <>
+              {/* Serviceability result */}
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-center gap-3">
+                <span className="material-symbols-outlined text-emerald-600 text-xl shrink-0">check_circle</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-emerald-800">Route is serviceable</p>
+                  <p className="text-xs text-emerald-700">
+                    Zone: <span className="font-bold uppercase">{velServiceability.zone || '—'}</span>
+                    · Payment: <span className="font-bold uppercase">{velServiceability.payment_mode}</span>
+                    · {velServiceability.carriers?.length || 0} couriers available
+                  </p>
+                </div>
+              </div>
+
+              {/* Carrier selector */}
+              <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5">
+                <p className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">2</span>
+                  Select Courier (optional)
+                </p>
+                <div className="ml-8">
+                  <select value={velCarrierId} onChange={(e) => setVelCarrierId(e.target.value)}
+                    className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary">
+                    <option value="">Auto-assign (recommended)</option>
+                    {(velServiceability.carriers || []).map((c) => (
+                      <option key={c.carrier_id} value={c.carrier_id}>{c.carrier_name}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-on-surface-variant mt-1.5">Leave blank to let Velocity pick the best courier based on your shipping rules.</p>
+                </div>
+              </div>
+
+              {/* Pickup location selector */}
+              <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5">
+                <p className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">3</span>
+                  Pickup Location
+                </p>
+                <div className="ml-8">
+                  <select
+                    value={pickupLocationId}
+                    onChange={(e) => setPickupLocationId(e.target.value)}
+                    className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary"
+                  >
+                    <option value="">Use default warehouse configuration</option>
+                    {pickupLocations.map((loc) => (
+                      <option key={loc.id} value={loc.id} disabled={!loc.velocity_warehouse_id}>
+                        {loc.warehouse_name} ({loc.pincode}){!loc.velocity_warehouse_id ? ' - not synced' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-on-surface-variant mt-1.5">
+                    Select a synced warehouse for this shipment. Unsynced locations are shown but disabled.
+                  </p>
+                </div>
+              </div>
+
+              {/* Dimensions */}
+              <div className="rounded-2xl border border-outline-variant/30 bg-surface p-5">
+                <p className="text-sm font-bold text-on-surface mb-3 flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">4</span>
+                  Package Dimensions
+                </p>
+                <div className="ml-8 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Length (cm)', value: velLength, setter: setVelLength },
+                    { label: 'Breadth (cm)', value: velBreadth, setter: setVelBreadth },
+                    { label: 'Height (cm)', value: velHeight, setter: setVelHeight },
+                    { label: 'Weight (kg)', value: velWeight, setter: setVelWeight },
+                  ].map(({ label, value, setter }) => (
+                    <div key={label}>
+                      <label className="block text-[10px] font-bold text-on-surface-variant uppercase tracking-wider mb-1.5">{label}</label>
+                      <input type="number" min="0.1" step="0.1" value={value} onChange={(e) => setter(e.target.value)}
+                        className="w-full px-3 py-2.5 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Create button */}
+              <button onClick={createVelocityShipment} disabled={velStep === 'creating'}
+                className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-primary text-on-primary font-bold text-sm hover:bg-primary/90 transition-all active:scale-[0.99] disabled:opacity-70 shadow-md">
+                {velStep === 'creating'
+                  ? <><span className="material-symbols-outlined animate-spin text-xl">progress_activity</span>Creating shipment on Velocity...</>
+                  : <><span className="material-symbols-outlined text-xl">electric_bolt</span>Create Velocity Shipment &amp; Generate AWB</>}
+              </button>
+            </>
+          )}
+
+          {/* Done state */}
+          {velStep === 'done' && velResult && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5">
+              <p className="text-sm font-bold text-emerald-800 flex items-center gap-2 mb-3">
+                <span className="material-symbols-outlined text-emerald-600">check_circle</span>
+                Shipment created successfully!
+              </p>
+              <div className="space-y-1.5 text-xs text-emerald-800 ml-7">
+                <p>AWB: <span className="font-mono font-bold">{velResult.awb_code}</span></p>
+                <p>Courier: <span className="font-bold">{velResult.courier_name}</span></p>
+                {velResult.charges?.frwd_charges && (
+                  <p>Shipping: <span className="font-bold">₹{velResult.charges.frwd_charges.shipping_charges}</span>
+                    {Number(velResult.charges.frwd_charges.cod_charges) > 0 &&
+                      <span> + ₹{velResult.charges.frwd_charges.cod_charges} COD</span>}
+                  </p>
+                )}
+              </div>
+              {velResult.label_url && (
+                <a href={velResult.label_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 mt-3 ml-7 px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors">
+                  <span className="material-symbols-outlined text-sm">download</span>
+                  Download Shipping Label
+                </a>
+              )}
+            </div>
+          )}
+
+        </div>
+      )}
     </section>
   );
 }
@@ -1504,7 +1884,7 @@ function OrderDetail({ orderId, onBack }) {
 
             {/* Audit log */}
             {showLog && (
-              <section className="bg-surface-container-lowest rounded-3xl p-6 border border-outline-variant/30 shadow-sm">
+              <section className="bg-surface-container-lowest rounded-[2rem] p-6 border border-outline-variant/30 shadow-sm">
                 <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-primary mb-4 flex items-center gap-2">
                   <span className="material-symbols-outlined">history</span> Workflow Audit Log
                 </h2>
@@ -1547,7 +1927,7 @@ function OrderDetail({ orderId, onBack }) {
             )}
 
             {/* Order items summary */}
-            <section className="bg-surface-container-lowest rounded-3xl p-6 lg:p-8 border border-outline-variant/30 shadow-sm">
+            <section className="bg-surface-container-lowest rounded-[2rem] p-6 lg:p-8 border border-outline-variant/30 shadow-sm">
               <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-primary mb-6 flex items-center gap-2">
                 <span className="material-symbols-outlined">receipt_long</span> Order Items
               </h2>
@@ -1631,7 +2011,7 @@ function OrderDetail({ orderId, onBack }) {
           {/* Right sidebar */}
           <div className="space-y-6">
 
-            <div className="bg-surface-container-lowest rounded-3xl p-6 border border-outline-variant/30 shadow-sm">
+            <div className="bg-surface-container-lowest rounded-[2rem] p-6 border border-outline-variant/30 shadow-sm">
               <h3 className="text-[11px] font-bold tracking-[0.2em] text-on-surface-variant uppercase mb-4">Customer</h3>
               <p className="text-xl font-brand text-primary leading-tight">{customerName}</p>
               <div className="mt-3 space-y-2">
@@ -1647,7 +2027,7 @@ function OrderDetail({ orderId, onBack }) {
             </div>
 
             {order?.shipping_address && (
-              <div className="bg-surface-container-lowest rounded-3xl p-6 border border-outline-variant/30 shadow-sm">
+              <div className="bg-surface-container-lowest rounded-[2rem] p-6 border border-outline-variant/30 shadow-sm">
                 <h3 className="text-[11px] font-bold tracking-[0.2em] text-on-surface-variant uppercase mb-4">Delivery Address</h3>
                 <div className="text-sm text-on-surface-variant leading-relaxed space-y-0.5">
                   <p className="font-bold text-primary">{order.shipping_address.first_name} {order.shipping_address.last_name}</p>
@@ -1659,7 +2039,7 @@ function OrderDetail({ orderId, onBack }) {
               </div>
             )}
 
-            <div className="bg-surface-container-lowest rounded-3xl p-6 border border-outline-variant/30 shadow-sm">
+            <div className="bg-surface-container-lowest rounded-[2rem] p-6 border border-outline-variant/30 shadow-sm">
               <h3 className="text-[11px] font-bold tracking-[0.2em] text-on-surface-variant uppercase mb-4">Payment</h3>
               <div className="bg-surface-container-low px-4 py-2 rounded-2xl border border-outline-variant/20">
                 <Row label="Method" value={(order?.payment_method || '').toUpperCase()} />
@@ -1671,7 +2051,7 @@ function OrderDetail({ orderId, onBack }) {
               </div>
             </div>
 
-            <div className="bg-surface-container-lowest rounded-3xl p-6 border border-outline-variant/30 shadow-sm">
+            <div className="bg-surface-container-lowest rounded-[2rem] p-6 border border-outline-variant/30 shadow-sm">
               <h3 className="text-[11px] font-bold tracking-[0.2em] text-on-surface-variant uppercase mb-4">Timeline</h3>
               <div className="relative pl-5 space-y-5 before:absolute before:inset-y-0 before:left-[9px] before:w-[2px] before:bg-outline-variant/30">
                 <div className="relative">

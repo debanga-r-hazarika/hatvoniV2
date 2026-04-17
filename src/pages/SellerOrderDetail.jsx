@@ -84,7 +84,7 @@ export default function SellerOrderDetail() {
 
       const { data: orderData, error: oErr } = await supabase
         .from('orders')
-        .select('id, user_id, status, total_amount, payment_method, payment_status, created_at, updated_at')
+        .select('id, user_id, status, seller_status, partial_fulfillment, rejected_items, total_amount, payment_method, payment_status, created_at, updated_at')
         .eq('id', id).maybeSingle();
       if (oErr) throw oErr;
       if (!orderData) throw new Error('Order not found');
@@ -261,24 +261,24 @@ export default function SellerOrderDetail() {
     <main className="pb-16 md:pb-24 px-4 md:px-10 max-w-3xl mx-auto pt-28 md:pt-32">
 
       {/* Header */}
-      <div className="mb-6">
-        <Link to="/seller" className="inline-flex items-center gap-1.5 text-xs text-on-surface-variant hover:text-primary mb-4 transition-colors">
-          <span className="material-symbols-outlined text-sm">arrow_back</span>
+      <div className="mb-8">
+        <Link to="/seller" className="inline-flex items-center gap-1.5 text-[10px] font-bold tracking-widest uppercase text-on-surface-variant hover:text-primary mb-6 transition-colors">
+          <span className="material-symbols-outlined text-[14px]">arrow_back</span>
           Back to Seller Panel
         </Link>
-        <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-6 pb-6 border-b border-outline-variant/20">
           <div>
             <p className="text-[10px] font-bold tracking-[0.2em] text-secondary uppercase mb-1">Seller Order</p>
-            <h1 className="font-brand text-3xl text-primary tracking-tight">#{order.id.slice(0, 8)}</h1>
-            <p className="text-sm text-on-surface-variant mt-1">
+            <h1 className="font-brand text-4xl text-primary tracking-tight">#{order.id.slice(0, 8)}</h1>
+            <p className="text-xs text-on-surface-variant mt-2 font-medium">
               {new Date(order.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
             </p>
-            <p className="text-sm text-on-surface-variant mt-0.5">{customerName}{profile?.email ? ` · ${profile.email}` : ''}</p>
+            <p className="text-xs text-on-surface-variant mt-0.5 font-medium">{customerName}{profile?.email ? ` · ${profile.email}` : ''}</p>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-on-surface-variant uppercase tracking-wider font-semibold">Your share</p>
-            <p className="text-3xl font-brand text-primary">{formatCurrency(sellerSubtotal)}</p>
-            <p className="text-xs text-on-surface-variant mt-0.5">of {formatCurrency(order.total_amount)} order total</p>
+          <div className="text-right bg-surface-container-lowest p-4 rounded-2xl border border-outline-variant/20 shadow-sm">
+            <p className="text-[10px] text-on-surface-variant uppercase tracking-widest font-bold">Your share</p>
+            <p className="text-3xl font-brand text-primary my-0.5">{formatCurrency(sellerSubtotal)}</p>
+            <p className="text-[10px] text-on-surface-variant/70 font-medium tracking-wide">of {formatCurrency(order.total_amount)} total</p>
           </div>
         </div>
 
@@ -369,17 +369,28 @@ export default function SellerOrderDetail() {
               {/* Item header row */}
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-semibold text-on-surface text-sm leading-tight">{item.product_name || 'Product'}</p>
-                  <p className="text-xs text-on-surface-variant font-mono mt-0.5">{item.product_key}</p>
+                  <p className="font-headline text-on-surface text-sm md:text-base font-bold leading-tight">{item.product_name || 'Product'}</p>
+                  <p className="text-[10px] text-on-surface-variant uppercase tracking-widest mt-1">Ref: {item.product_key}</p>
                 </div>
                 <StatusBadge decision={item.seller_decision} />
               </div>
 
               {/* Financials row */}
-              <div className="flex items-center gap-4 mt-3 text-xs text-on-surface-variant">
-                <span>Qty: <strong className="text-on-surface">{item.quantity}</strong></span>
-                <span>Unit: <strong className="text-on-surface">{formatCurrency(item.unit_price)}</strong></span>
-                <span className="ml-auto font-semibold text-sm text-primary">{formatCurrency(item.line_total)}</span>
+              <div className="flex items-center justify-between mt-4 pb-3 border-b border-outline-variant/10">
+                <div className="flex gap-4">
+                  <div className="bg-surface-container/50 px-3 py-1.5 rounded-lg border border-outline-variant/10">
+                    <span className="text-[10px] text-on-surface-variant uppercase tracking-widest block font-bold">Qty</span>
+                    <span className="text-sm font-bold text-on-surface">{item.quantity}</span>
+                  </div>
+                  <div className="bg-surface-container/50 px-3 py-1.5 rounded-lg border border-outline-variant/10">
+                    <span className="text-[10px] text-on-surface-variant uppercase tracking-widest block font-bold">Unit</span>
+                    <span className="text-sm font-bold text-on-surface">{formatCurrency(item.unit_price)}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[10px] text-on-surface-variant uppercase tracking-widest block font-bold">Total</span>
+                  <span className="font-brand text-lg text-primary">{formatCurrency(item.line_total)}</span>
+                </div>
               </div>
 
               {/* Decided info */}
@@ -472,6 +483,41 @@ export default function SellerOrderDetail() {
           );
         })}
       </div>
+
+      {/* Admin-rejected items notice — shown when admin rejected some of this seller's items */}
+      {(() => {
+        if (!order?.rejected_items) return null;
+        const rejected = Array.isArray(order.rejected_items)
+          ? order.rejected_items
+          : (() => { try { return JSON.parse(order.rejected_items); } catch { return []; } })();
+        // Filter to only this seller's rejected items
+        const myRejected = rejected.filter((r) =>
+          sellerItems.some((si) => si.product_key === r.product_key || si.source_order_item_id === r.order_item_id)
+        );
+        if (myRejected.length === 0) return null;
+        return (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="material-symbols-outlined text-red-600 text-lg">cancel</span>
+              <p className="text-sm font-bold text-red-800">
+                {myRejected.length} of your item{myRejected.length !== 1 ? 's were' : ' was'} rejected by admin
+              </p>
+            </div>
+            <div className="space-y-2">
+              {myRejected.map((r, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-white border border-red-100 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
+                    <span className="font-mono font-semibold text-red-800">{r.product_key || `Item ${i + 1}`}</span>
+                  </div>
+                  {r.reason && <span className="text-red-600 italic truncate max-w-[160px]">{r.reason}</span>}
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-red-700 mt-2">These items will not be fulfilled. No action required from you.</p>
+          </div>
+        );
+      })()}
 
       {/* Subtotal */}
       <div className="mt-4 px-4 py-3 rounded-xl bg-surface-container border border-outline-variant/20 flex items-center justify-between">

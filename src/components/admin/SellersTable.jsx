@@ -1,6 +1,14 @@
 import React from 'react';
 
-export default function SellersTable({ data, sellerProductCounts, onToggleBan, onToggleOwnSeller }) {
+export default function SellersTable({
+  data,
+  sellerProductCounts,
+  sellerPickupLocationCounts = {},
+  sellerDefaultPickupLocationTitles = {},
+  onToggleBan,
+  onToggleOwnSeller,
+  onManagePickupLocations,
+}) {
   if (data.length === 0) {
     return (
       <div className="text-center py-20 bg-surface-container-lowest rounded-3xl border border-outline-variant/30">
@@ -24,6 +32,7 @@ export default function SellersTable({ data, sellerProductCounts, onToggleBan, o
               <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Management Type</th>
               <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Product Stats</th>
               <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Performance</th>
+              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Pickup Locations</th>
               <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Status</th>
               <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Actions</th>
             </tr>
@@ -36,6 +45,8 @@ export default function SellersTable({ data, sellerProductCounts, onToggleBan, o
               const initials = (seller.first_name?.[0] || seller.email?.[0] || '?').toUpperCase();
               const joinDate = new Date(seller.created_at);
               const productCount = sellerProductCounts[seller.id] || 0;
+              const pickupCount = sellerPickupLocationCounts[seller.id] || 0;
+              const defaultPickupTitle = sellerDefaultPickupLocationTitles[seller.id] || null;
 
               return (
                 <tr key={seller.id} className="hover:bg-primary/[0.02] transition-colors group">
@@ -96,16 +107,16 @@ export default function SellersTable({ data, sellerProductCounts, onToggleBan, o
                   </td>
 
                   <td className="px-6 py-5">
-                     <div className="space-y-1">
-                        <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
-                           <span className="material-symbols-outlined text-[14px] text-secondary">trending_up</span>
-                           Orders: <span className="font-bold text-primary">N/A</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
-                           <span className="material-symbols-outlined text-[14px] text-secondary">payments</span>
-                           Earned: <span className="font-bold text-primary">₹0</span>
-                        </div>
-                     </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[14px] text-secondary">place</span>
+                        Total: <span className="font-bold text-primary">{pickupCount}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+                        <span className="material-symbols-outlined text-[14px] text-secondary">flag</span>
+                        Default: <span className="font-bold text-primary">{defaultPickupTitle || 'None'}</span>
+                      </div>
+                    </div>
                   </td>
 
                   <td className="px-6 py-5">
@@ -134,10 +145,11 @@ export default function SellersTable({ data, sellerProductCounts, onToggleBan, o
                       </button>
                       
                       <button 
+                        onClick={() => onManagePickupLocations?.(seller)}
                         className="w-10 h-10 rounded-xl bg-surface-container-low text-primary hover:bg-primary hover:text-white transition-all active:scale-95 flex items-center justify-center shadow-sm border border-outline-variant/20"
-                        title="View Full Sales Report"
+                        title="Manage Pickup Locations"
                       >
-                        <span className="material-symbols-outlined text-[18px]">analytics</span>
+                        <span className="material-symbols-outlined text-[18px]">pin_drop</span>
                       </button>
                     </div>
                   </td>

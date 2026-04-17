@@ -6,6 +6,124 @@ import { supabase } from '../lib/supabase';
 const COUPON_TYPES = ['FIXED', 'PERCENTAGE', 'FREE_SHIPPING', 'BOGO'];
 const STATUS_OPTIONS = ['active', 'inactive', 'scheduled', 'expired'];
 
+const createEmptyFormData = () => ({
+  code: '',
+  display_name: '',
+  description: '',
+  type: 'FIXED',
+  status: 'active',
+  discount_amount: '',
+  discount_percentage: '',
+  max_discount_amount: '',
+  bogo_buy_qty: 1,
+  bogo_get_qty: 1,
+  minimum_cart_value: '',
+  valid_from: '',
+  valid_till: '',
+  max_uses: '',
+  max_uses_per_user: 1,
+  is_stackable: false,
+  auto_apply: false,
+  applicable_product_ids: [],
+  applicable_categories: [],
+  exclude_product_ids: [],
+  exclude_categories: [],
+});
+
+const normalizeArrayField = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+};
+
+function SelectableMultiField({
+  label,
+  options,
+  selectedValues,
+  onChange,
+  emptyText,
+  selectPlaceholder = 'Select an option',
+}) {
+  const [pendingValue, setPendingValue] = useState('');
+
+  const addSelectedValue = () => {
+    if (!pendingValue) return;
+    if (selectedValues.includes(pendingValue)) {
+      setPendingValue('');
+      return;
+    }
+
+    onChange([...selectedValues, pendingValue]);
+    setPendingValue('');
+  };
+
+  const removeSelectedValue = (value) => {
+    onChange(selectedValues.filter((item) => item !== value));
+  };
+
+  return (
+    <div>
+      <label className="block text-sm font-semibold mb-2 text-on-surface">{label}</label>
+
+      <div className="flex gap-2">
+        <select
+          value={pendingValue}
+          onChange={(e) => setPendingValue(e.target.value)}
+          className="flex-1 px-3 py-2 border border-outline-variant rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+          disabled={options.length === 0}
+        >
+          <option value="">{options.length > 0 ? selectPlaceholder : emptyText}</option>
+          {options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+
+        <button
+          type="button"
+          onClick={addSelectedValue}
+          disabled={!pendingValue}
+          className="px-4 py-2 bg-primary text-on-primary font-semibold rounded-lg hover:bg-primary/90 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Add
+        </button>
+      </div>
+
+      {selectedValues.length > 0 ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {selectedValues.map((value) => {
+            const option = options.find((item) => item.value === value);
+            return (
+              <span
+                key={value}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded bg-primary/10 text-primary text-xs font-medium"
+              >
+                {option?.label || value}
+                <button
+                  type="button"
+                  onClick={() => removeSelectedValue(value)}
+                  className="text-primary/70 hover:text-primary"
+                  aria-label={`Remove ${option?.label || value}`}
+                >
+                  ✕
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-xs text-outline">No selection yet.</p>
+      )}
+    </div>
+  );
+}
+
 export default function AdminCoupons() {
   const navigate = useNavigate();
   const { user, profile, isAdmin, hasModule } = useAuth();
@@ -17,25 +135,11 @@ export default function AdminCoupons() {
   const [editingId, setEditingId] = useState(null);
   const [selectedCoupon, setSelectedCoupon] = useState(null);
   const [showStats, setShowStats] = useState(false);
+  const [targetOptionsLoading, setTargetOptionsLoading] = useState(false);
+  const [targetProductOptions, setTargetProductOptions] = useState([]);
+  const [targetCategoryOptions, setTargetCategoryOptions] = useState([]);
 
-  const [formData, setFormData] = useState({
-    code: '',
-    display_name: '',
-    description: '',
-    type: 'FIXED',
-    status: 'active',
-    discount_amount: '',
-    discount_percentage: '',
-    max_discount_amount: '',
-    bogo_buy_qty: 1,
-    bogo_get_qty: 1,
-    minimum_cart_value: '',
-    valid_from: '',
-    valid_till: '',
-    max_uses: '',
-    max_uses_per_user: 1,
-    is_stackable: false,
-  });
+  const [formData, setFormData] = useState(createEmptyFormData);
 
   // Check admin or employee with coupons module
   useEffect(() => {
@@ -48,7 +152,53 @@ export default function AdminCoupons() {
   useEffect(() => {
     if (!user) return;
     loadCoupons();
+    loadTargetOptions();
   }, [user]);
+
+  const loadTargetOptions = async () => {
+    setTargetOptionsLoading(true);
+    try {
+      const [productsResult, lotsResult] = await Promise.all([
+        supabase
+          .from('products')
+          .select('id, name, key, category')
+          .order('name', { ascending: true }),
+        supabase
+          .from('lots')
+          .select('id, lot_name')
+          .order('lot_name', { ascending: true }),
+      ]);
+
+      const products = productsResult.error ? [] : (productsResult.data || []);
+      const lots = lotsResult.error ? [] : (lotsResult.data || []);
+
+      const productOptions = [
+        ...products.map((item) => ({
+          value: item.id,
+          label: `Product: ${item.name || item.key || item.id}`,
+        })),
+        ...lots.map((item) => ({
+          value: item.id,
+          label: `Lot: ${item.lot_name || item.id}`,
+        })),
+      ];
+
+      const categories = Array.from(
+        new Set(products.map((item) => item.category).filter(Boolean))
+      )
+        .map((category) => ({ value: category, label: category }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+
+      setTargetProductOptions(productOptions);
+      setTargetCategoryOptions(categories);
+    } catch (err) {
+      console.error('Error loading target options:', err);
+      setTargetProductOptions([]);
+      setTargetCategoryOptions([]);
+    } finally {
+      setTargetOptionsLoading(false);
+    }
+  };
 
   const loadCoupons = async () => {
     setLoading(true);
@@ -73,24 +223,7 @@ export default function AdminCoupons() {
   };
 
   const handleReset = () => {
-    setFormData({
-      code: '',
-      display_name: '',
-      description: '',
-      type: 'FIXED',
-      status: 'active',
-      discount_amount: '',
-      discount_percentage: '',
-      max_discount_amount: '',
-      bogo_buy_qty: 1,
-      bogo_get_qty: 1,
-      minimum_cart_value: '',
-      valid_from: '',
-      valid_till: '',
-      max_uses: '',
-      max_uses_per_user: 1,
-      is_stackable: false,
-    });
+    setFormData(createEmptyFormData());
     setEditingId(null);
   };
 
@@ -132,6 +265,11 @@ export default function AdminCoupons() {
         max_uses: formData.max_uses ? parseInt(formData.max_uses) : null,
         max_uses_per_user: parseInt(formData.max_uses_per_user),
         is_stackable: formData.is_stackable,
+        auto_apply: formData.auto_apply,
+        applicable_product_ids: normalizeArrayField(formData.applicable_product_ids),
+        applicable_categories: normalizeArrayField(formData.applicable_categories),
+        exclude_product_ids: normalizeArrayField(formData.exclude_product_ids),
+        exclude_categories: normalizeArrayField(formData.exclude_categories),
       };
 
       if (editingId) {
@@ -174,6 +312,11 @@ export default function AdminCoupons() {
       max_uses: coupon.max_uses || '',
       max_uses_per_user: coupon.max_uses_per_user || 1,
       is_stackable: coupon.is_stackable || false,
+      auto_apply: coupon.auto_apply || false,
+      applicable_product_ids: normalizeArrayField(coupon.applicable_product_ids),
+      applicable_categories: normalizeArrayField(coupon.applicable_categories),
+      exclude_product_ids: normalizeArrayField(coupon.exclude_product_ids),
+      exclude_categories: normalizeArrayField(coupon.exclude_categories),
     });
     setEditingId(coupon.id);
     setShowForm(true);
@@ -486,6 +629,61 @@ export default function AdminCoupons() {
                   Allow combining with other coupons
                 </label>
               </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="autoApply"
+                  checked={formData.auto_apply}
+                  onChange={(e) => handleFormChange('auto_apply', e.target.checked)}
+                  className="rounded"
+                />
+                <label htmlFor="autoApply" className="text-sm font-medium text-on-surface">
+                  Auto-apply when criteria match
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <SelectableMultiField
+                  label="Applicable Products / Lots"
+                  options={targetProductOptions}
+                  selectedValues={formData.applicable_product_ids}
+                  onChange={(values) => handleFormChange('applicable_product_ids', values)}
+                  emptyText={targetOptionsLoading ? 'Loading options...' : 'No product or lot options found'}
+                  selectPlaceholder="Select product or lot"
+                />
+
+                <SelectableMultiField
+                  label="Applicable Categories"
+                  options={targetCategoryOptions}
+                  selectedValues={formData.applicable_categories}
+                  onChange={(values) => handleFormChange('applicable_categories', values)}
+                  emptyText={targetOptionsLoading ? 'Loading options...' : 'No categories found'}
+                  selectPlaceholder="Select category"
+                />
+
+                <SelectableMultiField
+                  label="Excluded Products / Lots"
+                  options={targetProductOptions}
+                  selectedValues={formData.exclude_product_ids}
+                  onChange={(values) => handleFormChange('exclude_product_ids', values)}
+                  emptyText={targetOptionsLoading ? 'Loading options...' : 'No product or lot options found'}
+                  selectPlaceholder="Select product or lot to exclude"
+                />
+
+                <SelectableMultiField
+                  label="Excluded Categories"
+                  options={targetCategoryOptions}
+                  selectedValues={formData.exclude_categories}
+                  onChange={(values) => handleFormChange('exclude_categories', values)}
+                  emptyText={targetOptionsLoading ? 'Loading options...' : 'No categories found'}
+                  selectPlaceholder="Select category to exclude"
+                />
+              </div>
+
+              <p className="text-xs text-outline -mt-2">
+                Admin can now pick targeting values from prefilled lists instead of typing UUIDs manually.
+              </p>
 
               {/* Buttons */}
               <div className="flex gap-3">

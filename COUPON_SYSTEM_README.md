@@ -1,5 +1,116 @@
 # Professional Coupon/Offer System
 
+This project includes a database-backed coupon system with admin management, checkout validation, usage tracking, targeted discounts, and auto-apply support.
+
+## What It Supports
+
+- FIXED coupons for flat discounts
+- PERCENTAGE coupons with optional max caps
+- FREE_SHIPPING coupons
+- BOGO coupons
+- Product-specific coupons
+- Category-specific coupons
+- Excluded products and categories
+- Stackable coupons
+- Auto-apply coupons
+- Usage limits per coupon and per user
+
+## How Auto-Apply Works
+
+- Admin can mark a coupon as `auto_apply`
+- Checkout checks active auto-apply coupons against the cart
+- If several coupons qualify, the system picks the best `apply_priority`, then the larger discount
+- Users can remove an auto-applied coupon manually
+
+## Targeted Discounts
+
+Coupons can be limited to specific products or categories using:
+
+- `applicable_product_ids`
+- `applicable_categories`
+- `exclude_product_ids`
+- `exclude_categories`
+
+For targeted coupons, the discount is calculated only against matching cart items.
+
+## Database Notes
+
+The coupons table includes fields such as:
+
+- `code`
+- `type`
+- `status`
+- `discount_amount`
+- `discount_percentage`
+- `max_discount_amount`
+- `minimum_cart_value`
+- `valid_from`
+- `valid_till`
+- `max_uses`
+- `max_uses_per_user`
+- `is_stackable`
+- `auto_apply`
+- `apply_priority`
+- `applicable_product_ids`
+- `applicable_categories`
+- `exclude_product_ids`
+- `exclude_categories`
+
+Coupon validation is performed through the PostgreSQL function `validate_coupon_code`.
+
+## Admin Screen
+
+The admin coupon page at `/admin/coupons` lets admins:
+
+- Create and edit coupons
+- Set auto-apply behavior
+- Limit coupons to products or categories
+- Set usage limits and validity windows
+- View coupon usage statistics
+
+## Checkout Behavior
+
+- Customers can still enter a coupon manually
+- Auto-applied coupons are shown in checkout and can be removed
+- If multiple coupons are valid, the system chooses the highest-priority auto-applied coupon
+
+## Example Auto-Apply Coupon
+
+```javascript
+{
+  code: "WELCOME100",
+  type: "FIXED",
+  discount_amount: 100,
+  minimum_cart_value: 999,
+  auto_apply: true,
+  is_stackable: false,
+  display_name: "Welcome Offer"
+}
+```
+
+## Example Targeted Coupon
+
+```javascript
+{
+  code: "RICE25",
+  type: "FIXED",
+  discount_amount: 100,
+  applicable_categories: ["Rice", "Grains"],
+  minimum_cart_value: 500,
+  display_name: "Rice & Grains - Rs. 100 Off"
+}
+```
+
+## Recommendation
+
+For production use, keep the coupon-selection rule simple:
+
+1. If a coupon is not stackable, treat it as exclusive.
+2. If multiple auto-apply coupons qualify, choose the highest-priority one.
+3. If two coupons share the same priority, choose the larger discount.
+4. If the user removes an auto-applied coupon, do not reapply it immediately.
+# Professional Coupon/Offer System
+
 A comprehensive, production-ready coupon and offer management system for your e-commerce platform. Supports multiple coupon types, complex eligibility conditions, and detailed usage tracking.
 
 ## Features
@@ -19,6 +130,7 @@ A comprehensive, production-ready coupon and offer management system for your e-
 - ✅ Category-specific coupons
 - ✅ Exclude specific products/categories
 - ✅ Stackable coupons flag
+- ✅ Auto-apply coupons when criteria match
 - ✅ Maximum discount cap for percentage-based offers
 
 ### Advanced Features
@@ -28,6 +140,11 @@ A comprehensive, production-ready coupon and offer management system for your e-
 - 💾 Database-backed validation (PostgreSQL functions)
 - 🛡️ Row-level security (RLS) policies
 - 🎯 Real-time availability display to customers
+
+### Auto-Apply Rules
+- Coupons marked `auto_apply` are selected automatically when they match the cart
+- If multiple auto-apply coupons qualify, the system picks the best `apply_priority`, then the larger discount
+- Users can remove an auto-applied coupon manually
 
 ---
 
@@ -76,15 +193,7 @@ CREATE TABLE coupons (
   is_stackable boolean,
   applies_to_shipping boolean,
   created_by uuid REFERENCES auth.users,
-  created_at timestamptz,
-  updated_at timestamptz
-);
-```
-
-#### `coupon_usage` (Track coupon redemptions)
-```sql
-CREATE TABLE coupon_usage (
-  id uuid PRIMARY KEY,
+   - ✅ Auto-apply coupons when criteria match
   coupon_id uuid REFERENCES coupons,
   user_id uuid REFERENCES auth.users,
   order_id uuid REFERENCES orders,
@@ -105,6 +214,318 @@ CREATE TABLE coupon_audit_log (
   created_at timestamptz
 );
 ```
+
+### Key Indexes
+- `idx_coupons_code` - Fast coupon lookup by code
+- `idx_coupons_status` - Filter by status
+- `idx_coupon_usage_coupon_id` - Track coupon usage
+- `idx_coupon_usage_user_id` - User's coupon history
+
+---
+
+## Services
+
+### `couponService` (`src/services/couponService.js`)
+
+#### `validateCoupon(couponCode, userId, cartValue, cartItems)`
+Validates a coupon code and returns details if valid.
+
+**Parameters:**
+- `couponCode` (string) - The coupon code to validate
+- `userId` (uuid) - User attempting to use the coupon
+- `cartValue` (number) - Current cart subtotal
+- `cartItems` (array) - Array of cart items with `lot_id`, `category`, `price`, `qty`
+
+**Returns:**
+```javascript
+{
+  valid: true,
+  coupon_id: "uuid",
+  code: "SUMMER20",
+  type: "PERCENTAGE",
+  display_name: "Summer Sale",
+  description: "20% off all products",
+  discount_percentage: 20,
+  max_discount_amount: 500,
+  is_stackable: false,
+  auto_apply: false
+}
+```
+
+**Error Response:**
+```javascript
+{
+  valid: false,
+  error: "Coupon has expired",
+  code: "COUPON_EXPIRED"
+}
+```
+
+#### `calculateDiscount(coupon, cartValue, shippingCost)`
+Calculates the actual discount amount based on coupon type.
+
+```javascript
+const discount = couponService.calculateDiscount(
+  validatedCoupon,
+  2000,  // cartValue
+  79    // shippingCost
+);
+
+// Returns: {
+//   discountAmount: 400,
+//   discountType: "PERCENTAGE",
+//   couponCode: "SUMMER20",
+//   breakdown: {...}
+// }
+```
+
+#### `recordCouponUsage(couponCode, userId, orderId, discountApplied, cartValue)`
+Records coupon usage in the database.
+
+```javascript
+await couponService.recordCouponUsage(
+  "SUMMER20",
+  user.id,
+  order.id,
+  400,    // discount applied
+  2000    // cart value
+);
+```
+
+#### `getAvailableCoupons()`
+Fetch all currently active coupons for display to customers.
+
+```javascript
+const coupons = await couponService.getAvailableCoupons();
+// [
+//   {
+//     id: "uuid",
+//     code: "SUMMER20",
+//     display_name: "Summer Sale",
+//     type: "PERCENTAGE",
+//     discount_percentage: 20,
+//     valid_till: "2026-08-31T23:59:59Z"
+//   },
+//   ...
+// ]
+```
+
+#### `getUserCouponHistory(userId)`
+Get user's coupon usage history.
+
+#### `getCouponDetailsForAdmin(couponCode)`
+Get full coupon details with usage statistics (admin only).
+
+---
+
+## Components
+
+### `CouponInput` (`src/components/CouponInput.jsx`)
+
+Ready-to-use coupon input component with validation feedback.
+
+**Props:**
+```jsx
+<CouponInput
+  appliedCoupon={coupon}              // Currently applied coupon
+  onCouponApplied={handleApply}       // Callback when coupon applied
+  onCouponRemoved={handleRemove}      // Callback when coupon removed
+  cartValue={2000}                    // Cart subtotal
+  cartItems={items}                   // Cart items array
+  userId={user?.id}                   // Current user ID
+  showAvailableCoupons={true}         // Show available coupons list
+  disabled={false}                    // Disable input
+/>
+```
+
+**Features:**
+- ✅ Auto-formatted coupon code input (uppercase)
+- ✅ Real-time validation feedback
+- ✅ Display available coupons for selection
+- ✅ Success/error messaging
+- ✅ Coupon removal functionality
+- ✅ Responsive design with dark mode support
+
+---
+
+## Checkout Integration
+
+The coupon system is fully integrated into the checkout flow:
+
+```jsx
+import { couponService } from '../services/couponService';
+import CouponInput from '../components/CouponInput';
+
+export default function Checkout() {
+  const [appliedCoupon, setAppliedCoupon] = useState(null);
+  const [couponDiscount, setCouponDiscount] = useState(0);
+
+  // Calculate totals with coupon discount
+  const totalsWithCoupon = useMemo(() => {
+    let discount = 0;
+    if (appliedCoupon?.valid) {
+      const calc = couponService.calculateDiscount(
+        appliedCoupon,
+        subtotal,
+        shipping
+      );
+      discount = calc.discountAmount;
+    }
+    return {
+      ...totals,
+      discount,
+      finalTotal: totals.total - discount
+    };
+  }, [totals, appliedCoupon]);
+
+  // Record coupon usage after order creation
+  if (appliedCoupon?.valid) {
+    await couponService.recordCouponUsage(
+      appliedCoupon.code,
+      user.id,
+      order.id,
+      couponDiscount,
+      subtotal
+    );
+  }
+
+  return (
+    <>
+      {/* Coupon input in order summary */}
+      <CouponInput
+        appliedCoupon={appliedCoupon}
+        onCouponApplied={setAppliedCoupon}
+        onCouponRemoved={() => setAppliedCoupon(null)}
+        cartValue={totals.subtotal}
+        cartItems={cartItems}
+        userId={user?.id}
+        showAvailableCoupons={true}
+      />
+
+      {/* Display discount in totals */}
+      {couponDiscount > 0 && (
+        <div className="flex justify-between">
+          <span>Coupon Discount</span>
+          <span>-Rs. {couponDiscount.toLocaleString()}</span>
+        </div>
+      )}
+
+      {/* Final total */}
+      <strong>Rs. {totalsWithCoupon.finalTotal}</strong>
+    </>
+  );
+}
+```
+
+---
+
+## Admin Interface
+
+Access the admin coupon management page at `/admin/coupons` (requires admin role).
+
+### Capabilities
+
+#### ✅ Create Coupons
+- Set coupon code, type, and discount value
+- Configure validity dates
+- Set usage limits (global and per-user)
+- Optional product/category targeting
+
+#### ✅ Edit Coupons
+- Modify all coupon settings except code
+- Update status (active/inactive/scheduled/expired)
+- Adjust discount amounts
+
+#### ✅ View Statistics
+- Total uses and remaining quota
+- Total discount given
+- Average discount per use
+- Detailed usage history with timestamps
+
+#### ✅ Delete Coupons
+- Remove coupons from system
+- Audit trail preserved
+
+---
+
+## Examples
+
+### Example 1: Fixed Amount Discount
+```javascript
+{
+  code: "WELCOME50",
+  type: "FIXED",
+  discount_amount: 50,
+  minimum_cart_value: 200,
+  max_uses_per_user: 1,
+  valid_till: "2026-12-31",
+  display_name: "Welcome Discount - Rs. 50 Off"
+}
+```
+
+### Example 2: Percentage Discount with Cap
+```javascript
+{
+  code: "SUMMER20",
+  type: "PERCENTAGE",
+  discount_percentage: 20,
+  max_discount_amount: 500,           // Max Rs. 500 off
+  minimum_cart_value: 1000,
+  max_uses: 1000,                     // 1000 global uses
+  max_uses_per_user: 3,
+  valid_from: "2026-06-01",
+  valid_till: "2026-08-31"
+}
+```
+
+### Example 3: Free Shipping
+```javascript
+{
+  code: "FREESHIP",
+  type: "FREE_SHIPPING",
+  minimum_cart_value: 500,
+  max_uses_per_user: 1,
+  valid_till: "2026-06-30"
+}
+```
+
+### Example 4: BOGO (Buy 2 Get 1)
+```javascript
+{
+  code: "BOGO2GET1",
+  type: "BOGO",
+  discount_amount: 500,               // Value of 1 item
+  bogo_buy_qty: 2,
+  bogo_get_qty: 1,
+  max_uses: 100
+}
+```
+
+### Example 5: Category-Specific
+```javascript
+{
+  code: "RICE25",
+  type: "FIXED",
+  discount_amount: 100,
+  applicable_categories: ["Rice", "Grains"],
+  minimum_cart_value: 500,
+  display_name: "Rice & Grains - Rs. 100 Off"
+}
+```
+
+### Example 6: Auto-Apply Coupon
+```javascript
+{
+  code: "WELCOME100",
+  type: "FIXED",
+  discount_amount: 100,
+  minimum_cart_value: 999,
+  auto_apply: true,
+  is_stackable: false,
+  display_name: "Welcome Offer"
+}
+```
+
 
 ### Key Indexes
 - `idx_coupons_code` - Fast coupon lookup by code
@@ -176,9 +597,6 @@ Records coupon usage in the database.
 await couponService.recordCouponUsage(
   "SUMMER20",
   user.id,
-  order.id,
-  400,    // discount applied
-  2000    // cart value
 );
 ```
 

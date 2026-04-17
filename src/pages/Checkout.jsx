@@ -650,20 +650,20 @@ export default function Checkout() {
                   Order Summary
                 </h3>
 
-                <div className="space-y-4 md:space-y-5 max-h-[360px] overflow-auto pr-1">
+                <div className="space-y-3 max-h-[360px] overflow-auto pr-1">
                   {cartItems.map((item) => (
-                    <div key={item.id} className="flex gap-3 md:gap-4">
-                      <div className="w-16 h-20 md:w-20 md:h-24 rounded-lg bg-surface-container-highest flex-shrink-0 overflow-hidden">
+                    <div key={item.id} className="flex gap-3 md:gap-4 items-center">
+                      <div className="w-12 h-12 md:w-16 md:h-16 rounded-lg bg-surface-container-highest flex-shrink-0 overflow-hidden">
                         <img className="w-full h-full object-cover" src={item.image_url || 'https://images.unsplash.com/photo-1542838132-92c53300491e?auto=format&fit=crop&w=900&q=80'} alt={item.name} />
                       </div>
-                      <div className="flex flex-col justify-between py-1 flex-1">
+                      <div className="flex flex-col justify-center py-1 flex-1">
                         <div>
-                          <h4 className="font-headline text-xs md:text-sm font-bold text-on-surface">{item.name}</h4>
-                          <p className="text-xs text-outline mt-1">{item.category || 'Heritage Product'}</p>
+                          <h4 className="font-headline text-xs md:text-sm font-bold text-on-surface line-clamp-1">{item.name}</h4>
+                          <p className="text-[10px] text-outline mt-0.5">{item.category || 'Heritage Product'}</p>
                         </div>
-                        <div className="flex justify-between items-end w-full">
-                          <span className="text-xs font-bold text-primary bg-primary-fixed-dim/20 px-2 py-1 rounded">Qty: {item.qty}</span>
-                          <span className="font-headline font-bold text-on-surface text-sm md:text-base">Rs. {(Number(item.price || 0) * item.qty).toLocaleString()}</span>
+                        <div className="flex justify-between items-center w-full mt-1">
+                          <span className="text-[10px] font-bold text-primary bg-primary-fixed-dim/20 px-2 py-0.5 rounded">Qty: {item.qty}</span>
+                          <span className="font-headline font-bold text-on-surface text-xs md:text-sm">Rs. {(Number(item.price || 0) * item.qty).toLocaleString()}</span>
                         </div>
                       </div>
                     </div>

@@ -32,6 +32,8 @@ import AdminCoupons from './pages/AdminCoupons';
 import AdminOrders from './pages/AdminOrders';
 import AdminInventory from './pages/AdminInventory';
 import AdminEmployees from './pages/AdminEmployees';
+import AdminSellers from './pages/AdminSellers';
+import AdminLogistics from './pages/AdminLogistics';
 import Seller from './pages/Seller';
 import SellerOrderDetail from './pages/SellerOrderDetail';
 import PaymentProcessing from './pages/PaymentProcessing';
@@ -78,6 +80,8 @@ export default function App() {
           <Route path="/admin/orders/:orderId" element={<Layout path="/admin/orders/:orderId"><AdminOrders /></Layout>} />
           <Route path="/admin/inventory" element={<Layout path="/admin/inventory"><AdminInventory /></Layout>} />
           <Route path="/admin/employees" element={<Layout path="/admin/employees"><AdminEmployees /></Layout>} />
+          <Route path="/admin/sellers" element={<Layout path="/admin/sellers"><AdminSellers /></Layout>} />
+          <Route path="/admin/logistics" element={<Layout path="/admin/logistics"><AdminLogistics /></Layout>} />
           <Route path="/seller" element={<Layout path="/seller"><Seller /></Layout>} />
           <Route path="/seller/orders/:id" element={<Layout path="/seller/orders/:id"><SellerOrderDetail /></Layout>} />
           <Route path="/order/:id" element={<Layout path="/order/:id"><OrderDetail /></Layout>} />

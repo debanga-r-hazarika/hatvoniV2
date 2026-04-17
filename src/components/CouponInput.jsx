@@ -127,11 +127,16 @@ export default function CouponInput({
         <div className="mb-4 p-4 bg-green-50 border border-green-200 rounded-lg">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h4 className="font-semibold text-green-800">Coupon Applied</h4>
+              <h4 className="font-semibold text-green-800">
+                {appliedCoupon.auto_applied ? 'Auto-applied Offer' : 'Coupon Applied'}
+              </h4>
               <p className="text-sm text-green-700 font-semibold mt-1">
                 {appliedCoupon.display_name || appliedCoupon.code}
               </p>
               <p className="text-xs text-green-600">Code: {appliedCoupon.code}</p>
+              {appliedCoupon.auto_applied && (
+                <p className="text-xs text-green-600 mt-0.5">This offer was applied automatically and can be removed.</p>
+              )}
               {appliedCoupon.description && (
                 <p className="text-xs text-green-600 mt-0.5">{appliedCoupon.description}</p>
               )}

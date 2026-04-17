@@ -26,6 +26,13 @@ const DEFAULT_APPLY_PRIORITY_BY_TYPE = {
   FREE_SHIPPING: 40,
 };
 
+const hasCouponTargetScope = (coupon) => {
+  return Boolean(
+    (coupon?.applicable_product_ids && coupon.applicable_product_ids.length > 0) ||
+    (coupon?.applicable_categories && coupon.applicable_categories.length > 0)
+  );
+};
+
 const getCouponApplyPriority = (coupon) => {
   const explicitPriority = Number(coupon?.apply_priority);
   if (Number.isFinite(explicitPriority)) return explicitPriority;
@@ -61,6 +68,20 @@ const isCouponApplicableToItem = (coupon, item) => {
     (!coupon?.exclude_categories || !coupon.exclude_categories.includes(itemCategory));
 
   return (matchesProduct || matchesCategory) && isNotExcluded;
+};
+
+const getEligibleCartSubtotal = (coupon, cartItems = [], fallbackSubtotal = 0) => {
+  if (!hasCouponTargetScope(coupon)) {
+    return Math.max(0, Number(fallbackSubtotal || 0));
+  }
+
+  return (cartItems || []).reduce((sum, item) => {
+    if (!isCouponApplicableToItem(coupon, item)) {
+      return sum;
+    }
+
+    return sum + (Math.max(0, Number(item?.price || 0)) * Math.max(0, Number(item?.qty || 0)));
+  }, 0);
 };
 
 const calculateBogoDiscount = (coupon, cartItems = []) => {
@@ -232,21 +253,30 @@ export const calculateDiscount = (coupon, cartValue, shippingCost = 0, cartItems
   }
 
   let discountAmount = 0;
+  const eligibleCartSubtotal = getEligibleCartSubtotal(coupon, cartItems, cartValue);
   const breakdown = {
     type: coupon.type,
     couponCode: coupon.code,
     originalAmount: coupon.discount_amount,
     originalPercentage: coupon.discount_percentage,
+    eligibleSubtotal: eligibleCartSubtotal,
+    appliesToShipping: Boolean(coupon.applies_to_shipping),
   };
 
   switch (coupon.type) {
     case COUPON_TYPES.FIXED:
-      discountAmount = coupon.discount_amount || 0;
+      discountAmount = Math.min(Number(coupon.discount_amount || 0), eligibleCartSubtotal);
       breakdown.appliedAmount = discountAmount;
       break;
 
     case COUPON_TYPES.PERCENTAGE:
-      discountAmount = (cartValue * (coupon.discount_percentage || 0)) / 100;
+      {
+        const discountBase = coupon.applies_to_shipping
+          ? eligibleCartSubtotal + Math.max(0, Number(shippingCost || 0))
+          : eligibleCartSubtotal;
+
+        discountAmount = (discountBase * (coupon.discount_percentage || 0)) / 100;
+      }
       // Cap by max_discount_amount if specified
       if (coupon.max_discount_amount) {
         discountAmount = Math.min(discountAmount, coupon.max_discount_amount);
@@ -347,6 +377,51 @@ export const calculateMultiCouponDiscount = (coupons = [], cartValue = 0, shippi
 };
 
 /**
+ * Select the best auto-applied coupon from a set of validated coupons.
+ * Lower apply_priority wins first, then larger discount, then code for deterministic tie-breaking.
+ */
+export const selectBestAutoAppliedCoupon = (coupons = [], cartValue = 0, shippingCost = 0, cartItems = []) => {
+  const eligibleCoupons = (coupons || []).filter((coupon) => coupon?.valid && coupon?.auto_apply);
+
+  if (eligibleCoupons.length === 0) {
+    return null;
+  }
+
+  const rankedCoupons = eligibleCoupons
+    .map((coupon) => {
+      const calculation = calculateDiscount(coupon, cartValue, shippingCost, cartItems);
+
+      return {
+        coupon,
+        discountAmount: Number(calculation.discountAmount || 0),
+        calculation,
+      };
+    })
+    .filter((entry) => entry.discountAmount > 0)
+    .sort((a, b) => {
+      const priorityDiff = getCouponApplyPriority(a.coupon) - getCouponApplyPriority(b.coupon);
+      if (priorityDiff !== 0) return priorityDiff;
+
+      const discountDiff = Number(b.discountAmount || 0) - Number(a.discountAmount || 0);
+      if (discountDiff !== 0) return discountDiff;
+
+      return String(a.coupon?.code || '').localeCompare(String(b.coupon?.code || ''));
+    });
+
+  const bestCoupon = rankedCoupons[0];
+  if (!bestCoupon) {
+    return null;
+  }
+
+  return {
+    ...bestCoupon.coupon,
+    auto_applied: true,
+    auto_apply_discount: bestCoupon.discountAmount,
+    auto_apply_breakdown: bestCoupon.calculation.breakdown,
+  };
+};
+
+/**
  * Record coupon usage in the database
  * @param {string} couponCode - The coupon code used
  * @param {uuid} userId - User ID
@@ -430,7 +505,7 @@ export const getAvailableCoupons = async () => {
     const now = Date.now();
     const { data, error } = await supabase
       .from('coupons')
-      .select('id, code, display_name, description, type, discount_amount, discount_percentage, valid_from, valid_till, apply_priority')
+      .select('id, code, display_name, description, type, discount_amount, discount_percentage, valid_from, valid_till, apply_priority, auto_apply, applicable_product_ids, applicable_categories, exclude_product_ids, exclude_categories, applies_to_shipping')
       .eq('status', 'active')
       .limit(50);
 

@@ -21,7 +21,7 @@ export default function AdminStats({ stats, setActiveTab }) {
       icon: 'storefront', 
       color: 'bg-emerald-600/10', 
       textColor: 'text-emerald-700',
-      action: () => setActiveTab('sellers')
+      action: () => navigate('/admin/sellers')
     },
     { 
       id: 'products', 
@@ -79,6 +79,16 @@ export default function AdminStats({ stats, setActiveTab }) {
       textColor: 'text-on-surface-variant',
       bgOverride: 'bg-surface-container-lowest border border-outline-variant/30',
       action: () => navigate('/admin/coupons')
+    },
+    {
+      id: 'logistics',
+      label: 'Logistics',
+      value: 'Velocity Hub',
+      icon: 'local_shipping',
+      color: 'bg-cyan-50',
+      textColor: 'text-cyan-700',
+      bgOverride: 'bg-surface-container-lowest border border-outline-variant/30',
+      action: () => navigate('/admin/logistics')
     }
   ];
 
@@ -101,6 +111,7 @@ export default function AdminStats({ stats, setActiveTab }) {
       ))}
       
       {/* Page Layout / Shop Layout / Employees */}
+        {/* Page Layout / Shop Layout / Employees */}
       <div onClick={() => setActiveTab('recipe-page')} className="bg-surface-container-lowest rounded-2xl p-5 flex items-center gap-5 cursor-pointer hover:-translate-y-1 hover:shadow-md border border-outline-variant/30 transition-all group">
          <div className="w-14 h-14 rounded-2xl bg-surface-variant flex items-center justify-center group-hover:scale-105 transition-all">
             <span className="material-symbols-outlined text-on-surface-variant text-2xl">web</span>

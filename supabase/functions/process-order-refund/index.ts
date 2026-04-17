@@ -1,27 +1,3 @@
-/**
- * process-order-refund
- *
- * Handles item-level and full-order refunds for Razorpay payments.
- * Called by admin after:
- *   - reject_full  → full refund of paid amount
- *   - proceed_partial → partial refund for rejected items only
- *
- * Admin-only endpoint. Validates JWT + is_admin.
- *
- * Body:
- *   { order_id: string, mode: 'full' | 'partial', reason?: string }
- *
- * For 'partial' mode, the function:
- *   1. Reads rejected_items from the order
- *   2. Calculates the refund amount from order_items prices
- *   3. Issues a partial refund via Razorpay API
- *   4. Updates order.refund_amount, refund_status, payment_status
- *
- * For 'full' mode:
- *   1. Refunds the full paid amount
- *   2. Updates order accordingly
- */
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 
 const corsHeaders = {
@@ -30,14 +6,14 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-function requireEnv(name: string): string {
-  const v = Deno.env.get(name);
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
+function getEnv(name: string): string | null {
+  return Deno.env.get(name) ?? null;
 }
 
 function createAdminClient() {
-  return createClient(requireEnv('SUPABASE_URL'), requireEnv('SUPABASE_SERVICE_ROLE_KEY'), {
+  const url = getEnv('SUPABASE_URL')!;
+  const key = getEnv('SUPABASE_SERVICE_ROLE_KEY')!;
+  return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
@@ -63,45 +39,62 @@ async function razorpayRefund(
     },
     body: JSON.stringify({ amount: amountPaise, notes }),
   });
-
   const raw = await res.text();
   let data: any;
   try { data = JSON.parse(raw); } catch { data = null; }
-
   if (!res.ok || !data?.id) {
-    throw new Error(data?.error?.description || `Razorpay refund failed: ${raw}`);
+    throw new Error(data?.error?.description || `Razorpay refund failed (${res.status}): ${raw}`);
   }
   return data;
 }
 
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  // Always handle CORS preflight first — before any env reads
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const supabase = createAdminClient();
-  const razorpayKeyId = requireEnv('RAZORPAY_KEY_ID');
-  const razorpayKeySecret = requireEnv('RAZORPAY_KEY_SECRET');
+  // Read env vars inside handler so missing vars return 500 instead of crashing boot
+  const supabaseUrl = getEnv('SUPABASE_URL');
+  const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+  const razorpayKeyId = getEnv('RAZORPAY_KEY_ID');
+  const razorpayKeySecret = getEnv('RAZORPAY_KEY_SECRET');
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return new Response(JSON.stringify({ error: 'Server misconfiguration: missing Supabase env vars' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+  if (!razorpayKeyId || !razorpayKeySecret) {
+    return new Response(JSON.stringify({ error: 'Server misconfiguration: missing Razorpay env vars' }), {
+      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const adminClient = createAdminClient();
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   const token = getBearerToken(req);
   if (!token) {
-    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+    return new Response(JSON.stringify({ error: 'Unauthorized — no token provided' }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const { data: { user }, error: authErr } = await supabase.auth.getUser(token);
+  const { data: { user }, error: authErr } = await adminClient.auth.getUser(token);
   if (authErr || !user) {
-    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+    return new Response(JSON.stringify({ error: 'Invalid or expired token', detail: authErr?.message }), {
       status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
 
-  const { data: profile } = await supabase
+  const { data: profile } = await adminClient
     .from('profiles').select('is_admin').eq('id', user.id).maybeSingle();
   if (!profile?.is_admin) {
     return new Response(JSON.stringify({ error: 'Admin access required' }), {
@@ -112,7 +105,7 @@ Deno.serve(async (req: Request) => {
   // ── Parse body ────────────────────────────────────────────────────────────
   let body: { order_id?: string; mode?: string; reason?: string };
   try { body = await req.json(); } catch {
-    return new Response(JSON.stringify({ error: 'Invalid JSON' }), {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
       status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
@@ -125,9 +118,9 @@ Deno.serve(async (req: Request) => {
   }
 
   // ── Load order ────────────────────────────────────────────────────────────
-  const { data: order, error: orderErr } = await supabase
+  const { data: order, error: orderErr } = await adminClient
     .from('orders')
-    .select('id, status, payment_method, payment_status, razorpay_payment_id, total_amount, refund_status, rejected_items, billing_breakdown')
+    .select('id, status, payment_method, payment_status, razorpay_payment_id, total_amount, refund_status, rejected_items')
     .eq('id', order_id)
     .maybeSingle();
 
@@ -137,26 +130,23 @@ Deno.serve(async (req: Request) => {
     });
   }
 
-  // ── Validate refund eligibility ───────────────────────────────────────────
+  // ── Validate eligibility ──────────────────────────────────────────────────
   const isRazorpay = ['razorpay', 'razorpay_upi', 'razorpay_cards'].includes(order.payment_method);
   if (!isRazorpay) {
-    return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'COD orders do not require refund processing' }), {
+    return new Response(JSON.stringify({ ok: true, skipped: true, reason: 'COD — no refund required' }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
   if (order.payment_status !== 'paid') {
     return new Response(JSON.stringify({ ok: true, skipped: true, reason: `Payment status is ${order.payment_status}, not paid` }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
   if (['initiated', 'completed'].includes(order.refund_status)) {
     return new Response(JSON.stringify({ ok: true, skipped: true, reason: `Refund already ${order.refund_status}` }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }
-
   if (!order.razorpay_payment_id) {
     return new Response(JSON.stringify({ error: 'No Razorpay payment ID on order — cannot refund' }), {
       status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -169,7 +159,6 @@ Deno.serve(async (req: Request) => {
   if (mode === 'full') {
     refundAmountRupees = Number(order.total_amount || 0);
   } else {
-    // Partial: sum up rejected items from order_items
     const rejectedItems: Array<{ order_item_id: string; product_key: string }> =
       Array.isArray(order.rejected_items) ? order.rejected_items : [];
 
@@ -179,39 +168,44 @@ Deno.serve(async (req: Request) => {
       });
     }
 
-    // Load order items to calculate prices
-    const { data: orderItems } = await supabase
+    const { data: orderItems, error: itemsErr } = await adminClient
       .from('order_items')
       .select('id, quantity, price, lot_snapshot')
       .eq('order_id', order_id);
+
+    if (itemsErr) {
+      return new Response(JSON.stringify({ error: 'Failed to load order items: ' + itemsErr.message }), {
+        status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
 
     const itemMap = new Map((orderItems || []).map((i: any) => [i.id, i]));
 
     for (const rejected of rejectedItems) {
       const item = itemMap.get(rejected.order_item_id);
-      if (!item) continue;
+      if (!item) { console.warn(`Item ${rejected.order_item_id} not found`); continue; }
 
       if (Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0) {
-        // Find the specific product in the lot snapshot
         const snap = item.lot_snapshot.find((s: any) => s.product_key === rejected.product_key);
         if (snap) {
-          const qty = Number(snap.quantity || 0) * Number(item.quantity || 0);
-          refundAmountRupees += Number(snap.unit_price || 0) * qty;
+          refundAmountRupees += Number(snap.unit_price || 0) * Number(snap.quantity || 0) * Number(item.quantity || 0);
         }
       } else {
-        // Direct product
         refundAmountRupees += Number(item.price || 0) * Number(item.quantity || 0);
       }
     }
 
     if (refundAmountRupees <= 0) {
-      return new Response(JSON.stringify({ error: 'Calculated refund amount is zero' }), {
+      return new Response(JSON.stringify({
+        error: `Calculated refund is ₹0. Check rejected_items match order_items. Rejected: ${JSON.stringify(rejectedItems)}`,
+      }), {
         status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
   }
 
   const refundAmountPaise = Math.round(refundAmountRupees * 100);
+  console.log(`Refund: ${mode} | ₹${refundAmountRupees} | ${refundAmountPaise} paise | order ${order_id}`);
 
   // ── Issue Razorpay refund ─────────────────────────────────────────────────
   let refundResult: { id: string; amount: number; status: string };
@@ -229,12 +223,10 @@ Deno.serve(async (req: Request) => {
       razorpayKeySecret,
     );
   } catch (err: any) {
-    // Mark refund as failed
-    await supabase.from('orders').update({
+    await adminClient.from('orders').update({
       refund_status: 'failed',
       updated_at: new Date().toISOString(),
     }).eq('id', order_id);
-
     return new Response(JSON.stringify({ error: err.message || 'Razorpay refund failed' }), {
       status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -242,17 +234,16 @@ Deno.serve(async (req: Request) => {
 
   // ── Update order ──────────────────────────────────────────────────────────
   const newPaymentStatus = mode === 'full' ? 'refunded' : 'partially_refunded';
-  const newRefundStatus = 'initiated';
 
-  await supabase.from('orders').update({
-    refund_status: newRefundStatus,
+  await adminClient.from('orders').update({
+    refund_status: 'initiated',
     refund_amount: refundAmountRupees,
     payment_status: newPaymentStatus,
     updated_at: new Date().toISOString(),
   }).eq('id', order_id);
 
-  // ── Write workflow log ────────────────────────────────────────────────────
-  await supabase.from('order_workflow_log').insert({
+  // ── Audit log ─────────────────────────────────────────────────────────────
+  await adminClient.from('order_workflow_log').insert({
     order_id,
     event_type: mode === 'full' ? 'full_refund_initiated' : 'partial_refund_initiated',
     actor_id: user.id,
@@ -262,7 +253,7 @@ Deno.serve(async (req: Request) => {
       refund_amount_rupees: refundAmountRupees,
       refund_amount_paise: refundAmountPaise,
       mode,
-      reason,
+      reason: reason || null,
     },
   });
 
@@ -270,7 +261,7 @@ Deno.serve(async (req: Request) => {
     ok: true,
     refund_id: refundResult.id,
     refund_amount: refundAmountRupees,
-    refund_status: newRefundStatus,
+    refund_status: 'initiated',
     payment_status: newPaymentStatus,
   }), {
     status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
