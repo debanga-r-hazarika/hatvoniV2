@@ -1,6 +1,17 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import Paper from '@mui/material/Paper';
+import Container from '@mui/material/Container';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import Grid from '@mui/material/Grid';
+import { alpha, useTheme } from '@mui/material/styles';
+
 const faqs = [
   {
     question: "Where do your ingredients come from?",
@@ -29,124 +40,257 @@ const faqs = [
 ];
 
 const categories = [
-  { icon: 'local_shipping', label: 'Shipping', color: 'bg-surface-container-low' },
-  { icon: 'verified', label: 'Quality', color: 'bg-primary-container text-on-primary-container' },
-  { icon: 'payments', label: 'Refunds', color: 'bg-secondary-container text-on-secondary-container' },
-  { icon: 'eco', label: 'Organic', color: 'bg-surface-container-highest' },
+  { icon: 'local_shipping', label: 'Shipping' },
+  { icon: 'verified', label: 'Quality' },
+  { icon: 'payments', label: 'Refunds' },
+  { icon: 'eco', label: 'Organic' },
 ];
 
 export default function FAQ() {
-  const [openIndex, setOpenIndex] = useState(0);
+  const theme = useTheme();
+  const [expanded, setExpanded] = useState(0);
+
+  const handleChange = (index) => (_, isExpanded) => {
+    setExpanded(isExpanded ? index : -1);
+  };
 
   return (
-    <main className="min-h-screen">
-      {/* Hero — stack on mobile, side-by-side on desktop */}
-      <header className="relative pt-28 pb-16 md:pt-32 md:pb-24 px-6 md:px-8 bg-surface overflow-hidden">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-start md:items-center gap-10 md:gap-16">
-          <div className="flex-1 z-10">
-            <h1 className="font-brand text-4xl md:text-7xl text-primary leading-none mb-4 uppercase tracking-tighter">
-              Support<br />Center
-            </h1>
-            <p className="text-on-surface-variant font-headline font-medium text-base md:text-lg leading-relaxed max-w-md">
-              How can we help you preserve the heritage of North East India today?
-            </p>
-          </div>
-          <div className="flex-1 relative w-full">
-            <img
-              alt="Traditional Spices"
-              className="rounded-xl w-full h-56 md:h-[400px] object-cover shadow-lg"
-              src="https://lh3.googleusercontent.com/aida-public/AB6AXuDGr7HIijnnNV-0RmTt_qJ4bLaIzxzjFI1ZurtgJVEDBu6EmKa8X0m1q0mi5XFsoT8SqVYtUYpGDc3dPpUWCIyWkHNeURaEz_OCCkWBPkGaCBB0sK4SYYDUoXPM1y1-To3yan1IydYxekRku4e9bIczlpL4YZuQk5rSQ0ySZyLPxrssHmb-PvxP592t6j0pBKM_0XDPhvFp4GKOGbS6Dfmh3Tdp9CsFA1Y2Ib1Jc4wfg6aJ8kIf3He4ixIy953Fd11vga2K4FskWEZA"
-            />
-          </div>
-        </div>
-      </header>
+    <Box component="main" sx={{ minHeight: '100vh' }}>
+      {/* Hero */}
+      <Box
+        component="header"
+        sx={{
+          position: 'relative',
+          pt: { xs: 14, md: 16 },
+          pb: { xs: 8, md: 12 },
+          px: { xs: 3, md: 4 },
+          bgcolor: theme.palette.hatvoni.surface,
+          overflow: 'hidden',
+        }}
+      >
+        <Container maxWidth="lg">
+          <Box
+            sx={{
+              display: 'flex',
+              flexDirection: { xs: 'column', md: 'row' },
+              alignItems: { xs: 'flex-start', md: 'center' },
+              gap: { xs: 5, md: 8 },
+            }}
+          >
+            <Box sx={{ flex: 1, position: 'relative', zIndex: 10 }}>
+              <Typography
+                variant="h1"
+                sx={{
+                  color: 'primary.main',
+                  fontSize: { xs: '2.5rem', md: '4.5rem' },
+                  textTransform: 'uppercase',
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1,
+                  mb: 2,
+                }}
+              >
+                Support<br />Center
+              </Typography>
+              <Typography variant="body1" sx={{ color: 'text.secondary', fontWeight: 500, maxWidth: 420, fontSize: { xs: '1rem', md: '1.125rem' } }}>
+                How can we help you preserve the heritage of North East India today?
+              </Typography>
+            </Box>
+            <Box sx={{ flex: 1, width: '100%' }}>
+              <Box
+                component="img"
+                alt="Traditional Spices"
+                src="https://lh3.googleusercontent.com/aida-public/AB6AXuDGr7HIijnnNV-0RmTt_qJ4bLaIzxzjFI1ZurtgJVEDBu6EmKa8X0m1q0mi5XFsoT8SqVYtUYpGDc3dPpUWCIyWkHNeURaEz_OCCkWBPkGaCBB0sK4SYYDUoXPM1y1-To3yan1IydYxekRku4e9bIczlpL4YZuQk5rSQ0ySZyLPxrssHmb-PvxP592t6j0pBKM_0XDPhvFp4GKOGbS6Dfmh3Tdp9CsFA1Y2Ib1Jc4wfg6aJ8kIf3He4ixIy953Fd11vga2K4FskWEZA"
+                sx={{
+                  borderRadius: 3,
+                  width: '100%',
+                  height: { xs: 220, md: 400 },
+                  objectFit: 'cover',
+                  boxShadow: theme.shadows[4],
+                }}
+              />
+            </Box>
+          </Box>
+        </Container>
+      </Box>
 
-      {/* Category Chips — 2-col grid on mobile */}
-      <section className="px-6 md:px-8 py-8 bg-surface-container-low">
-        <div className="max-w-4xl mx-auto">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-0">
-            {categories.map((cat) => (
-              <div key={cat.label} className={`${cat.color} p-5 rounded-xl flex flex-col items-center text-center active:scale-95 transition-transform cursor-pointer`}>
-                <span className="material-symbols-outlined text-3xl mb-2">{cat.icon}</span>
-                <p className="font-headline font-bold text-xs uppercase tracking-wider">{cat.label}</p>
-              </div>
+      {/* Category Chips */}
+      <Box sx={{ px: { xs: 3, md: 4 }, py: 4, bgcolor: theme.palette.hatvoni.surfaceContainerLow }}>
+        <Container maxWidth="md">
+          <Grid container spacing={1.5}>
+            {categories.map((cat, i) => (
+              <Grid size={{ xs: 6, md: 3 }} key={cat.label}>
+                <Paper
+                  elevation={0}
+                  sx={{
+                    p: 2.5,
+                    borderRadius: 3,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    bgcolor: i === 1
+                      ? theme.palette.hatvoni.primaryContainer
+                      : i === 2
+                      ? theme.palette.hatvoni.secondaryContainer
+                      : theme.palette.hatvoni.surfaceContainerLow,
+                    color: i === 1
+                      ? theme.palette.hatvoni.onPrimaryContainer
+                      : i === 2
+                      ? theme.palette.hatvoni.onSecondaryContainer
+                      : 'text.primary',
+                    '&:active': { transform: 'scale(0.95)' },
+                    '&:hover': { boxShadow: theme.shadows[2] },
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 32, marginBottom: 8 }}>{cat.icon}</span>
+                  <Typography variant="overline" sx={{ fontWeight: 700 }}>{cat.label}</Typography>
+                </Paper>
+              </Grid>
             ))}
-          </div>
-        </div>
-      </section>
+          </Grid>
+        </Container>
+      </Box>
 
       {/* FAQ Accordion */}
-      <section className="py-12 md:py-20 px-6 md:px-8 bg-surface-container-low">
-        <div className="max-w-4xl mx-auto">
-          <div className="flex items-center gap-4 mb-8">
-            <span className="w-12 h-1 bg-tertiary"></span>
-            <h2 className="font-brand text-xl md:text-2xl text-primary">Common Questions</h2>
-          </div>
-          <div className="space-y-2 md:space-y-4">
+      <Box sx={{ py: { xs: 6, md: 10 }, px: { xs: 3, md: 4 }, bgcolor: theme.palette.hatvoni.surfaceContainerLow }}>
+        <Container maxWidth="md">
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 4 }}>
+            <Box sx={{ width: 48, height: 4, bgcolor: theme.palette.hatvoni.tertiary, borderRadius: 1 }} />
+            <Typography variant="h5" sx={{ color: 'primary.main' }}>Common Questions</Typography>
+          </Box>
+
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 1, md: 1.5 } }}>
             {faqs.map((faq, index) => (
-              <div key={index} className="bg-surface rounded-xl overflow-hidden border border-outline-variant/10">
-                <button
-                  onClick={() => setOpenIndex(openIndex === index ? -1 : index)}
-                  className="w-full flex justify-between items-center p-5 md:p-6 text-left focus:outline-none hover:bg-surface-container transition-colors"
+              <Accordion
+                key={index}
+                expanded={expanded === index}
+                onChange={handleChange(index)}
+                sx={{
+                  bgcolor: theme.palette.hatvoni.surface,
+                  '&.Mui-expanded': { boxShadow: theme.shadows[1] },
+                }}
+              >
+                <AccordionSummary
+                  expandIcon={
+                    <span className="material-symbols-outlined" style={{ color: theme.palette.primary.main }}>expand_more</span>
+                  }
+                  sx={{
+                    minHeight: { xs: 56, md: 64 },
+                    '& .MuiAccordionSummary-content': { my: { xs: 1.5, md: 2 } },
+                  }}
                 >
-                  <span className="font-headline font-bold text-base md:text-lg text-on-surface pr-4">{faq.question}</span>
-                  <span
-                    className="material-symbols-outlined text-primary transition-transform duration-300 flex-shrink-0"
-                    style={{ transform: openIndex === index ? 'rotate(180deg)' : 'rotate(0)' }}
-                  >
-                    expand_more
-                  </span>
-                </button>
-                <div className={`px-5 md:px-6 overflow-hidden transition-all duration-300 ${openIndex === index ? 'max-h-48 pb-6' : 'max-h-0'}`}>
-                  <p className="text-on-surface-variant leading-relaxed text-sm md:text-base">{faq.answer}</p>
-                </div>
-              </div>
+                  <Typography sx={{ fontFamily: '"Plus Jakarta Sans", sans-serif', fontWeight: 700, fontSize: { xs: '1rem', md: '1.125rem' }, pr: 2 }}>
+                    {faq.question}
+                  </Typography>
+                </AccordionSummary>
+                <AccordionDetails sx={{ px: 3, pb: 3 }}>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', lineHeight: 1.8 }}>
+                    {faq.answer}
+                  </Typography>
+                </AccordionDetails>
+              </Accordion>
             ))}
-          </div>
-        </div>
-      </section>
+          </Box>
+        </Container>
+      </Box>
 
-      {/* Contact / Support CTA */}
-      <section className="px-6 md:px-8 py-12 md:py-20 bg-surface">
-        <div className="max-w-4xl mx-auto">
-          <div className="bg-surface-container-low p-8 md:p-12 rounded-3xl text-center relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-24 h-24 bg-tertiary-container/10 rounded-bl-full"></div>
-            <span className="material-symbols-outlined text-secondary text-5xl mb-4 inline-block">support_agent</span>
-            <h3 className="font-headline font-bold text-xl md:text-2xl text-on-surface mb-3">Still have questions?</h3>
-            <p className="text-on-surface-variant mb-8 text-sm">Our heritage consultants are available Monday to Friday to assist you.</p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <a
+      {/* Contact CTA */}
+      <Box sx={{ px: { xs: 3, md: 4 }, py: { xs: 6, md: 10 }, bgcolor: theme.palette.hatvoni.surface }}>
+        <Container maxWidth="md">
+          <Paper
+            elevation={0}
+            sx={{
+              p: { xs: 4, md: 6 },
+              borderRadius: 6,
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+              bgcolor: theme.palette.hatvoni.surfaceContainerLow,
+            }}
+          >
+            <Box sx={{ position: 'absolute', top: 0, right: 0, width: 96, height: 96, bgcolor: alpha(theme.palette.hatvoni.tertiaryContainer, 0.1), borderBottomLeftRadius: '100%' }} />
+            <span className="material-symbols-outlined" style={{ fontSize: 48, color: theme.palette.secondary.main, marginBottom: 16, display: 'block' }}>support_agent</span>
+            <Typography variant="h5" sx={{ fontWeight: 700, color: 'text.primary', mb: 1.5 }}>
+              Still have questions?
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mb: 4 }}>
+              Our heritage consultants are available Monday to Friday to assist you.
+            </Typography>
+            <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 1.5, justifyContent: 'center' }}>
+              <Button
                 href="mailto:support@hatvoni.com"
-                className="bg-primary-container text-on-primary-container py-4 px-8 rounded-xl font-headline font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:opacity-90 active:scale-95 transition-all"
+                variant="contained"
+                startIcon={<span className="material-symbols-outlined" style={{ fontSize: 16 }}>mail</span>}
+                sx={{
+                  bgcolor: theme.palette.hatvoni.primaryContainer,
+                  color: theme.palette.hatvoni.onPrimaryContainer,
+                  py: 1.5,
+                  px: 4,
+                  borderRadius: 3,
+                  fontWeight: 700,
+                  letterSpacing: '0.15em',
+                  textTransform: 'uppercase',
+                  fontSize: '0.75rem',
+                  '&:hover': { bgcolor: 'primary.main', color: 'white' },
+                }}
               >
-                <span className="material-symbols-outlined text-sm">mail</span>
                 Email Support
-              </a>
-              <Link
+              </Button>
+              <Button
+                component={Link}
                 to="/contact"
-                className="bg-surface border border-outline-variant/30 py-4 px-8 rounded-xl font-headline font-bold uppercase tracking-widest text-xs flex items-center justify-center gap-2 hover:bg-surface-variant active:scale-95 transition-all"
+                variant="outlined"
+                startIcon={<span className="material-symbols-outlined" style={{ fontSize: 16 }}>chat_bubble</span>}
+                sx={{
+                  py: 1.5,
+                  px: 4,
+                  borderRadius: 3,
+                  fontWeight: 700,
+                  letterSpacing: '0.15em',
+                  textTransform: 'uppercase',
+                  fontSize: '0.75rem',
+                  borderColor: alpha(theme.palette.hatvoni.outlineVariant, 0.3),
+                  color: 'text.primary',
+                  '&:hover': { bgcolor: theme.palette.hatvoni.surfaceVariant, borderColor: theme.palette.hatvoni.outlineVariant },
+                }}
               >
-                <span className="material-symbols-outlined text-sm">chat_bubble</span>
                 Live Chat
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
+              </Button>
+            </Box>
+          </Paper>
+        </Container>
+      </Box>
 
-      {/* Gallery Grid — 2-col on mobile, 4-col on desktop */}
-      <section className="pb-16 md:pb-24 px-6 md:px-8 bg-surface">
-        <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-          {[
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuCKGJAn3VEEpv9kx37BvdmTq6ksp5oBLGNGkz7-oj082mrxotOr8BWVsg95N5EIop_kfOyMOuf-iDDXaXA4dLfxudKn3cK73AJfcU96BhBOyHS7FAiXXgMPhE1GazgJELDDAkiCTMFhRDr0PHiR8xFk4cUkr1YWlzFPP9jObpi9eNm_tCFoNPitcJCT5P4cs0eLuY3yiJY8FDhZ2fcYwy7KzEZU0odw_-4-QRXWmNHki_VSDIFa0MZAQXfTOoZxeAAH6lQclL8JTRGi",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuCPbh_4MQtxen0yvIhC9DEvuMhRkp11cwvmuH-cDn1MnKuDCu8y3w54Z12uf5HD6u6YSy706-CT1gpLlC9AxPvnEG3Ko6gMQAAARTgHxtLn99cxCppUAAc7PaB6EmnB-5DuLN9Sjn4tfso_jVRqcrBi7YEL8Chbm4DZ9G01nXo-LOHPMj1zd7RM6qPZVVXhckv1OKlg-CpeJzql5rsXb3YW4eMGfyAcPT73y_nm3JoV9tpsPhj3DIlyarB6g6TQlrXsjBsIkXcx50fG",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuDnvzFxItcUPIGjp4RuS2x38mUkwJ7dzsQMYvXisYM25i7mB-s-IpK3nVjkXz1z68V6qCQgqRDu_HjgrVS1XPy3EV8Cfe4043rTX499ZWg4VJmSxddytGSmPOsSunKV5ymPArILljnWUr5moUam7tasw_tLztcpSrVjSKFbWjYjL5E69krAwGgKacVNXUrEOdAlxrZrsmaQ8ZFjTfERGpGs0ryJe_l5F9SHtmvBO3Pvm15hK_V5Lc9EnGBKppz2_A00NNYPhCgQldXk",
-            "https://lh3.googleusercontent.com/aida-public/AB6AXuBoeo56mGbqbflKRBCv7VDFAObStQgWPnkREsLE71anqkjGUg3BqV1kRvpBIORop9_evRouAJ0I79orqLwUnwqgDfLcdnjgsecK6PqE4jpAUSVhnZ-sC4eSX73IC-JlgVetrjfotc7FUbI_HxxVp7VHn5ZQSNDlP78xOEcDVzMxOQamWYtJCjI2JFDRppSXxHvNmgNbd4Q1nB0iqxpwf53tuV7p6ZKqRdpp5LI3OTCdPWzQWf0BdEBaIPRscWgm9O41P_enJUTz_UW4",
-          ].map((src, i) => (
-            <img key={i} className={`w-full h-40 md:h-64 object-cover rounded-lg ${i % 2 !== 0 ? 'mt-4 md:mt-16' : ''}`} alt={`Heritage ${i}`} src={src} />
-          ))}
-        </div>
-      </section>
-    </main>
+      {/* Gallery Grid */}
+      <Box sx={{ pb: { xs: 8, md: 12 }, px: { xs: 3, md: 4 }, bgcolor: theme.palette.hatvoni.surface }}>
+        <Container maxWidth="lg">
+          <Grid container spacing={{ xs: 1.5, md: 2 }}>
+            {[
+              "https://lh3.googleusercontent.com/aida-public/AB6AXuCKGJAn3VEEpv9kx37BvdmTq6ksp5oBLGNGkz7-oj082mrxotOr8BWVsg95N5EIop_kfOyMOuf-iDDXaXA4dLfxudKn3cK73AJfcU96BhBOyHS7FAiXXgMPhE1GazgJELDDAkiCTMFhRDr0PHiR8xFk4cUkr1YWlzFPP9jObpi9eNm_tCFoNPitcJCT5P4cs0eLuY3yiJY8FDhZ2fcYwy7KzEZU0odw_-4-QRXWmNHki_VSDIFa0MZAQXfTOoZxeAAH6lQclL8JTRGi",
+              "https://lh3.googleusercontent.com/aida-public/AB6AXuCPbh_4MQtxen0yvIhC9DEvuMhRkp11cwvmuH-cDn1MnKuDCu8y3w54Z12uf5HD6u6YSy706-CT1gpLlC9AxPvnEG3Ko6gMQAAARTgHxtLn99cxCppUAAc7PaB6EmnB-5DuLN9Sjn4tfso_jVRqcrBi7YEL8Chbm4DZ9G01nXo-LOHPMj1zd7RM6qPZVVXhckv1OKlg-CpeJzql5rsXb3YW4eMGfyAcPT73y_nm3JoV9tpsPhj3DIlyarB6g6TQlrXsjBsIkXcx50fG",
+              "https://lh3.googleusercontent.com/aida-public/AB6AXuDnvzFxItcUPIGjp4RuS2x38mUkwJ7dzsQMYvXisYM25i7mB-s-IpK3nVjkXz1z68V6qCQgqRDu_HjgrVS1XPy3EV8Cfe4043rTX499ZWg4VJmSxddytGSmPOsSunKV5ymPArILljnWUr5moUam7tasw_tLztcpSrVjSKFbWjYjL5E69krAwGgKacVNXUrEOdAlxrZrsmaQ8ZFjTfERGpGs0ryJe_l5F9SHtmvBO3Pvm15hK_V5Lc9EnGBKppz2_A00NNYPhCgQldXk",
+              "https://lh3.googleusercontent.com/aida-public/AB6AXuBoeo56mGbqbflKRBCv7VDFAObStQgWPnkREsLE71anqkjGUg3BqV1kRvpBIORop9_evRouAJ0I79orqLwUnwqgDfLcdnjgsecK6PqE4jpAUSVhnZ-sC4eSX73IC-JlgVetrjfotc7FUbI_HxxVp7VHn5ZQSNDlP78xOEcDVzMxOQamWYtJCjI2JFDRppSXxHvNmgNbd4Q1nB0iqxpwf53tuV7p6ZKqRdpp5LI3OTCdPWzQWf0BdEBaIPRscWgm9O41P_enJUTz_UW4",
+            ].map((src, i) => (
+              <Grid size={{ xs: 6, md: 3 }} key={i}>
+                <Box
+                  component="img"
+                  src={src}
+                  alt={`Heritage ${i}`}
+                  sx={{
+                    width: '100%',
+                    height: { xs: 160, md: 260 },
+                    objectFit: 'cover',
+                    borderRadius: 2,
+                    mt: i % 2 !== 0 ? { xs: 2, md: 8 } : 0,
+                  }}
+                />
+              </Grid>
+            ))}
+          </Grid>
+        </Container>
+      </Box>
+    </Box>
   );
 }

@@ -29,89 +29,96 @@ const calculateLotPriceFromItems = (lotItems, catalogProducts = []) => {
 };
 
 export default function LotsTable({ data, catalogProducts, onToggleStatus, onEdit, onDelete }) {
-  if (data.length === 0) return <div className="text-center py-16 bg-surface-container-lowest rounded-3xl border border-outline-variant/30 text-on-surface-variant font-medium">No lots found.</div>;
-  
+  if (data.length === 0) return <div className="text-center py-16 bg-white rounded-xl border border-[#bec9bf]/20 text-sm text-[#3f4942]/60">No lots found.</div>;
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-      {data.map((lot) => {
-        const calculatedPrice = calculateLotPriceFromItems(lot.lot_items || [], catalogProducts);
-        return (
-          <article key={lot.id} className="bg-surface-container-lowest border border-outline-variant/30 rounded-[2.5rem] p-7 shadow-sm hover:shadow-xl transition-all flex flex-col relative overflow-hidden group">
-            <div className="absolute top-0 right-0 w-40 h-40 bg-secondary/5 rounded-bl-[100px] -z-10 group-hover:scale-110 transition-transform"></div>
-            
-            <div className="mb-6">
-              <div className="flex items-center justify-between mb-2">
-                 <span className="text-[10px] font-black uppercase tracking-[0.25em] text-secondary">Curated Collection</span>
-                 <div className="flex -space-x-2">
-                    {lot.lot_items?.slice(0, 3).map((item, idx) => (
-                      <div key={idx} className="w-8 h-8 rounded-full border-2 border-white bg-surface-container flex items-center justify-center overflow-hidden shadow-sm">
-                         {item.products?.image_url ? (
-                           <img src={item.products.image_url} alt="" className="w-full h-full object-cover" />
-                         ) : (
-                           <span className="material-symbols-outlined text-[14px]">inventory_2</span>
-                         )}
-                      </div>
-                    ))}
-                    {lot.lot_items?.length > 3 && (
-                      <div className="w-8 h-8 rounded-full border-2 border-white bg-secondary text-white flex items-center justify-center text-[10px] font-bold shadow-sm">
-                         +{lot.lot_items.length - 3}
-                      </div>
-                    )}
-                 </div>
-              </div>
-              <h3 className="font-brand font-bold text-primary text-2xl leading-tight mb-3 line-clamp-2 tracking-tight">{lot.lot_name}</h3>
-              <p className="text-sm text-on-surface-variant/80 line-clamp-2 font-medium leading-relaxed mb-4">{lot.description || 'A thoughtfully assembled collection of Hatvoni premium products.'}</p>
-            </div>
+    <div className="bg-white rounded-xl border border-[#bec9bf]/20 overflow-hidden shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead>
+            <tr className="bg-[#f5f4eb]/60 border-b border-[#bec9bf]/20">
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Lot</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Items</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Value</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Status</th>
+              <th className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#bec9bf]/10">
+            {data.map((lot) => {
+              const totalValue = calculateLotPriceFromItems(lot.lot_items || [], catalogProducts);
+              const itemCount = lot.lot_items?.length || 0;
 
-            <div className="bg-surface-container-low rounded-[2rem] p-5 border border-outline-variant/10 mb-6 relative overflow-hidden group-hover:bg-secondary/5 transition-colors">
-               <div className="absolute -right-4 -bottom-4 opacity-[0.03] rotate-12 group-hover:rotate-0 transition-transform duration-700">
-                  <span className="material-symbols-outlined text-[120px]">all_inclusive</span>
-               </div>
-               <div className="flex items-end justify-between relative z-10">
-                  <div>
-                    <span className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/50 block mb-1">Lot Total Value</span>
-                    <span className="text-2xl font-brand font-bold text-primary tracking-tighter">₹{calculatedPrice.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[9px] font-black uppercase tracking-widest text-on-surface-variant/50 block mb-1">Configuration</span>
-                    <span className="text-sm font-bold text-secondary uppercase tracking-tighter">{lot.lot_items?.length || 0} unique items</span>
-                  </div>
-               </div>
-            </div>
+              return (
+                <tr key={lot.id} className="hover:bg-[#004a2b]/[0.01] transition-colors group">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className="flex -space-x-1.5 flex-shrink-0">
+                        {lot.lot_items?.slice(0, 3).map((item, idx) => (
+                          <div key={idx} className="w-7 h-7 rounded-md border border-white bg-[#f5f4eb] flex items-center justify-center overflow-hidden shadow-sm">
+                            {item.products?.image_url ? (
+                              <img src={item.products.image_url} alt="" className="w-full h-full object-cover" />
+                            ) : (
+                              <span className="material-symbols-outlined text-[10px] text-[#3f4942]/20">inventory_2</span>
+                            )}
+                          </div>
+                        ))}
+                        {itemCount > 3 && (
+                          <div className="w-7 h-7 rounded-md border border-white bg-[#815500] text-white flex items-center justify-center text-[8px] font-bold shadow-sm">
+                            +{itemCount - 3}
+                          </div>
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold text-[#004a2b] truncate leading-tight">{lot.lot_name}</p>
+                        <p className="text-[10px] text-[#3f4942]/50 truncate max-w-[200px]">{lot.description || 'No description'}</p>
+                      </div>
+                    </div>
+                  </td>
 
-            <div className="mt-auto border-t border-outline-variant/10 pt-5 flex items-center justify-between gap-3">
-              <button
-                onClick={() => onToggleStatus(lot)}
-                className={`flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border ${
-                  lot.status === 'active' 
-                    ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-500 hover:text-white hover:border-green-500 shadow-sm' 
-                    : 'bg-red-50 text-red-700 border-red-100 hover:bg-red-500 hover:text-white hover:border-red-500 shadow-sm'
-                }`}
-              >
-                 <span className="material-symbols-outlined text-[16px]">{lot.status === 'active' ? 'check_circle' : 'do_not_disturb_on'}</span>
-                 {lot.status === 'active' ? 'Active' : 'Archived'}
-              </button>
-              
-              <div className="flex gap-2">
-                 <button 
-                  onClick={() => onEdit(lot)} 
-                  className="w-10 h-10 rounded-xl bg-surface-container text-primary hover:bg-primary hover:text-white transition-all active:scale-95 flex items-center justify-center shadow-sm border border-outline-variant/10" 
-                  title="Edit Bundle"
-                >
-                   <span className="material-symbols-outlined text-[20px]">edit</span>
-                 </button>
-                 <button 
-                  onClick={() => onDelete(lot)} 
-                  className="w-10 h-10 rounded-xl bg-red-50 text-red-500 hover:bg-red-600 hover:text-white transition-all active:scale-95 flex items-center justify-center shadow-sm border border-red-100" 
-                  title="Delete Lot"
-                >
-                   <span className="material-symbols-outlined text-[20px]">delete_sweep</span>
-                 </button>
-              </div>
-            </div>
-          </article>
-        );
-      })}
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-bold text-[#004a2b]">{itemCount}</span>
+                    <span className="text-[10px] text-[#3f4942]/40 ml-1">items</span>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <span className="text-xs font-bold text-[#004a2b]">₹{totalValue.toLocaleString('en-IN')}</span>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => onToggleStatus(lot)}
+                      className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-semibold uppercase transition-all border ${
+                        lot.status === 'active'
+                          ? 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100'
+                          : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span className="material-symbols-outlined text-xs">{lot.status === 'active' ? 'check_circle' : 'do_not_disturb_on'}</span>
+                      {lot.status === 'active' ? 'Active' : 'Archived'}
+                    </button>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => onEdit(lot)} className="w-7 h-7 rounded-md bg-[#f5f4eb] text-[#004a2b] hover:bg-[#004a2b] hover:text-white transition-all flex items-center justify-center" title="Edit">
+                        <span className="material-symbols-outlined text-sm">edit</span>
+                      </button>
+                      <button onClick={() => onDelete(lot)} className="w-7 h-7 rounded-md bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center" title="Delete">
+                        <span className="material-symbols-outlined text-sm">delete</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="px-4 py-2.5 border-t border-[#bec9bf]/15 bg-[#f5f4eb]/30 text-[10px] text-[#3f4942]/40 font-medium">
+        {data.length} lots · {data.filter(l => l.status === 'active').length} active
+      </div>
     </div>
   );
 }

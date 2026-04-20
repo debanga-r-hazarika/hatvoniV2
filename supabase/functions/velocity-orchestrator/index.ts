@@ -46,6 +46,137 @@ function safeJsonParse(text: string): unknown {
   }
 }
 
+/** Safe to return to admins in health probes — strips JWTs and common secret fields. */
+function redactVelocityText(input: string, maxLen = 400): string {
+  let s = String(input).slice(0, maxLen);
+  s = s.replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9._-]{10,}\.[A-Za-z0-9._-]{10,}/g, '[jwt_redacted]');
+  s = s.replace(/"password"\s*:\s*"[^"]*"/gi, '"password":"[redacted]"');
+  s = s.replace(/"token"\s*:\s*"[^"]*"/gi, '"token":"[redacted]"');
+  s = s.replace(/"access_token"\s*:\s*"[^"]*"/gi, '"access_token":"[redacted]"');
+  s = s.replace(/"accessToken"\s*:\s*"[^"]*"/gi, '"accessToken":"[redacted]"');
+  return s;
+}
+
+/**
+ * Live checks against Velocity from the edge runtime (same network path as real calls).
+ * Helps tell: wrong base URL / outage, bad auth credentials, vs. downstream API quirks.
+ */
+async function buildVelocityUpstreamProbe(
+  baseUrlTrimmed: string,
+  username: string,
+  password: string,
+): Promise<Record<string, unknown>> {
+  const endpoints = getEndpointMap(baseUrlTrimmed);
+  const report: Record<string, unknown> = {
+    base_url: baseUrlTrimmed,
+    checked_at: nowIso(),
+  };
+
+  const pingStart = Date.now();
+  try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 12000);
+    const r = await fetch(baseUrlTrimmed, { method: 'GET', redirect: 'follow', signal: ac.signal });
+    clearTimeout(timer);
+    report.base_http = {
+      ok: r.status > 0 && r.status < 600,
+      status: r.status,
+      ms: Date.now() - pingStart,
+    };
+  } catch (e) {
+    report.base_http = {
+      ok: false,
+      error: String((e as Error)?.name === 'AbortError' ? 'timeout' : (e as Error)?.message || e),
+      ms: Date.now() - pingStart,
+    };
+  }
+
+  const authUrl = `${baseUrlTrimmed}/custom/api/v1/auth-token`;
+  const authStart = Date.now();
+  try {
+    const acAuth = new AbortController();
+    const authTimer = setTimeout(() => acAuth.abort(), 15000);
+    let res: Response;
+    try {
+      res = await fetch(authUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+        signal: acAuth.signal,
+      });
+    } finally {
+      clearTimeout(authTimer);
+    }
+    const raw = await res.text();
+    const parsed = safeJsonParse(raw);
+    const token = extractVelocityAuthToken(parsed);
+    const keys = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? Object.keys(parsed as Record<string, unknown>).slice(0, 28)
+      : [];
+
+    report.auth_token = {
+      endpoint: authUrl,
+      http_status: res.status,
+      ms: Date.now() - authStart,
+      token_received: Boolean(token),
+      response_top_level_keys: keys,
+      body_preview: redactVelocityText(raw),
+    };
+
+    if (!token) {
+      report.summary =
+        (report.base_http as { ok?: boolean } | undefined)?.ok === false
+          ? 'Velocity base URL is not reachable from the shipping service (network, DNS, TLS, or wrong host). That can look like “API problems” on their side or a typo in VELOCITY_BASE_URL.'
+          : 'The auth-token endpoint responded but no token field was found — usually wrong VELOCITY_USERNAME / VELOCITY_PASSWORD for this environment, wrong VELOCITY_BASE_URL (staging vs prod), or Velocity changed the auth JSON shape.';
+      return report;
+    }
+
+    const smokeStart = Date.now();
+    const smokePayload = {
+      from: '110001',
+      to: '560001',
+      payment_mode: 'prepaid',
+      shipment_type: 'forward',
+    };
+    const svc = await callVelocityApi(
+      'check_serviceability',
+      endpoints.check_serviceability,
+      token,
+      smokePayload,
+    );
+    const inv = hasVelocityInvalidCredentials(svc.data);
+    report.serviceability_smoke = {
+      endpoint: endpoints.check_serviceability,
+      http_status: svc.status,
+      ok: svc.ok,
+      invalid_credentials: inv,
+      ms: Date.now() - smokeStart,
+      response_preview: redactVelocityText(JSON.stringify(svc.data)),
+    };
+
+    if (inv) {
+      report.summary =
+        'Auth-token returned a token, but serviceability responded with INVALID_CREDENTIALS. That often means the Authorization header format does not match what this Velocity tenant expects (try VELOCITY_AUTHORIZATION_HEADER), a bad cached token (clear velocity_token_cache), or an upstream Velocity inconsistency — worth opening a ticket with Velocity including `checked_at`.';
+    } else if (!svc.ok) {
+      report.summary =
+        'Auth works; the smoke serviceability call did not succeed. This points away from “wrong password” and toward payload rules, account permissions, or a partial Velocity outage on that route.';
+    } else {
+      report.summary =
+        'Auth-token and a minimal serviceability call both succeeded from this deployment. Velocity’s API is responding; remaining failures are likely order/pincode-specific or a different endpoint.';
+    }
+  } catch (e) {
+    report.auth_token = {
+      endpoint: authUrl,
+      ok: false,
+      error: String((e as Error)?.message || e),
+      ms: Date.now() - authStart,
+    };
+    report.summary = 'Probe failed before or during auth — network error, TLS issue, or unexpected response body.';
+  }
+
+  return report;
+}
+
 function looksLikeHttpUrl(s: string): boolean {
   const t = s.trim();
   return t.length > 10 && /^https?:\/\//i.test(t);
@@ -308,7 +439,7 @@ async function fetchVelocityToken(
 
     const raw = await res.text();
     const parsed = safeJsonParse(raw) as Json;
-    const token = typeof parsed?.token === 'string' ? parsed.token : null;
+    const token = extractVelocityAuthToken(parsed);
     if (!res.ok || !token) {
       throw new Error(`Velocity auth failed (${res.status}): ${raw.slice(0, 300)}`);
     }
@@ -329,26 +460,96 @@ async function fetchVelocityToken(
   return authResponse.token;
 }
 
+/** Velocity auth-token JSON varies by host: `token`, `access_token`, nested `data`, etc. */
+function extractVelocityAuthToken(parsed: unknown): string | null {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+  const o = parsed as Record<string, unknown>;
+  const candidates: unknown[] = [
+    o.token,
+    o.access_token,
+    o.accessToken,
+    o.jwt,
+    o.auth_token,
+    o.data,
+  ];
+  const data = o.data && typeof o.data === 'object' && !Array.isArray(o.data) ? o.data as Record<string, unknown> : null;
+  if (data) {
+    candidates.push(data.token, data.access_token, data.accessToken, data.jwt);
+  }
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return null;
+}
+
 async function callVelocityApi(
   action: VelocityAction,
   endpoint: string,
   token: string,
   payload: unknown,
 ): Promise<VelocityApiResult> {
-  const result = await withRetry(async () => {
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: token,
-      },
-      body: JSON.stringify(payload ?? {}),
-    });
+  const trimmed = String(token || '').trim();
+  /**
+   * Velocity Custom API V1 (PDF): §1 says `Authorization: {{token}}` — raw token, no "Bearer" prefix.
+   * All sample curls (warehouse, serviceability, cancel, tracking) use the raw token directly.
+   * §9 Get Rates examples use `Authorization: Bearer …`.
+   * We always try raw token first (as the doc specifies), then Bearer as a fallback.
+   */
+  const bearerFirstForRates = action === 'calculate_rates';
+  const authVariants: string[] = [];
+  const push = (h: string) => {
+    const t = h.trim();
+    if (t && !authVariants.includes(t)) authVariants.push(t);
+  };
 
-    const raw = await res.text();
-    const data = safeJsonParse(raw);
-    return { res, data };
-  });
+  const extra = getEnvOptional('VELOCITY_AUTHORIZATION_HEADER');
+  if (extra) push(extra.replace(/\{token\}/gi, trimmed));
+
+  const pushRawThenBearer = () => {
+    // Raw token first — matches Velocity API doc §1 Authorization: {{token}}
+    push(trimmed);
+    if (!/^bearer\s+/i.test(trimmed)) push(`Bearer ${trimmed}`);
+    if (!/^token\s+/i.test(trimmed)) push(`Token ${trimmed}`);
+  };
+
+  const pushBearerThenRaw = () => {
+    if (!/^bearer\s+/i.test(trimmed)) push(`Bearer ${trimmed}`);
+    push(trimmed);
+    if (!/^token\s+/i.test(trimmed)) push(`Token ${trimmed}`);
+  };
+
+  if (bearerFirstForRates) {
+    // Rates API doc uses Bearer prefix
+    pushBearerThenRaw();
+  } else {
+    // All other endpoints (serviceability, warehouse, tracking, cancel, etc.) use raw token per doc
+    pushRawThenBearer();
+  }
+
+  let result: { res: Response; data: unknown } | null = null;
+  for (const authHeader of authVariants) {
+    result = await withRetry(async () => {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: authHeader,
+        },
+        body: JSON.stringify(payload ?? {}),
+      });
+
+      const raw = await res.text();
+      const data = safeJsonParse(raw);
+      return { res, data };
+    });
+    // Try next auth variant only on 401 — wrong Authorization scheme per Velocity API doc.
+    // If we get a non-401 (even 422 or 400), the header format was accepted; stop trying variants.
+    if (result.res.status !== 401) break;
+  }
+
+  if (!result) {
+    throw new Error('Velocity request failed before response was received.');
+  }
 
   const ok = result.res.ok;
   return {
@@ -357,6 +558,39 @@ async function callVelocityApi(
     data: result.data,
     endpoint,
   };
+}
+
+function hasVelocityInvalidCredentials(data: unknown): boolean {
+  const hit = (s: unknown) => String(s || '').toUpperCase().includes('INVALID_CREDENTIALS');
+
+  const checkObject = (o: Record<string, unknown>): boolean => {
+    if (hit(o.error)) return true;
+    const meta = o.meta && typeof o.meta === 'object' && !Array.isArray(o.meta) ? o.meta as Record<string, unknown> : null;
+    if (meta && hit(meta.message)) return true;
+
+    const nestedKeys = ['raw', 'payload', 'data', 'response', 'result', 'body'] as const;
+    for (const k of nestedKeys) {
+      const child = o[k];
+      if (!child || typeof child !== 'object' || Array.isArray(child)) continue;
+      const c = child as Record<string, unknown>;
+      if (hit(c.error)) return true;
+      const cmeta = c.meta && typeof c.meta === 'object' && !Array.isArray(c.meta) ? c.meta as Record<string, unknown> : null;
+      if (cmeta && hit(cmeta.message)) return true;
+    }
+    return false;
+  };
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  return checkObject(data as Record<string, unknown>);
+}
+
+async function clearVelocityTokenCache(adminClient: ReturnType<typeof createAdminClient>): Promise<void> {
+  memoryTokenCache = null;
+  await adminClient
+    .from('velocity_token_cache')
+    .delete()
+    .eq('cache_key', 'default')
+    .then(() => {}, () => {});
 }
 
 /** Parsed from Velocity POST /custom/api/v1/order-tracking (awbs[]) — see API doc §7. */
@@ -1019,6 +1253,13 @@ async function handleCheckServiceability(
     };
 
     const apiResult = await callVelocityApi('check_serviceability', endpoint, token, requestPayload);
+
+    // If Velocity returns INVALID_CREDENTIALS on serviceability, the cached token may be stale.
+    // Clear it so the next request re-authenticates.
+    if (apiResult.status === 401 || hasVelocityInvalidCredentials(apiResult.data)) {
+      await clearVelocityTokenCache(adminClient);
+    }
+
     const dataObj = (apiResult.data || {}) as Record<string, unknown>;
     const resultObj = (dataObj.result || {}) as Record<string, unknown>;
     const carriers = Array.isArray(resultObj.serviceability_results) ? resultObj.serviceability_results : [];
@@ -1120,6 +1361,12 @@ async function handleCheckServiceability(
   }
 
   const apiResult = await callVelocityApi('check_serviceability', endpoint, token, requestPayload);
+
+  // Clear stale token cache on INVALID_CREDENTIALS so next call re-authenticates.
+  if (apiResult.status === 401 || hasVelocityInvalidCredentials(apiResult.data)) {
+    await clearVelocityTokenCache(adminClient);
+  }
+
   await logVelocityCall(adminClient, {
     action: 'check_serviceability',
     requestPayload,
@@ -1337,7 +1584,10 @@ async function handleCreateForwardOrder(
     if (!sid) {
       throw new Error('Velocity forward-order succeeded but shipment_id was missing — not saving draft.');
     }
+
     const snap = payload.serviceability_snapshot;
+    const provisionalAwb = String(createOut.awb_code || createOut.shipment_awb || createOut.waybill || '').trim();
+
     const fulfillmentMeta: Record<string, unknown> = {
       pickup_location_id: pickupLocationId,
       length,
@@ -1346,6 +1596,9 @@ async function handleCreateForwardOrder(
       weight,
       saved_at: nowIso(),
     };
+    if (provisionalAwb) {
+      fulfillmentMeta.velocity_precancel_awb = provisionalAwb;
+    }
     if (snap && typeof snap === 'object' && !Array.isArray(snap)) {
       const s = snap as Record<string, unknown>;
       fulfillmentMeta.serviceability = {
@@ -1571,6 +1824,29 @@ async function handleTrackOrder(
   return apiResult;
 }
 
+/**
+ * Forward-order stage may have no carrier AWB yet, but many Velocity hosts still require
+ * `shipment_awb` on POST /cancel-order (e.g. "shipment_awb is mandatory").
+ * Prefer provisional AWB from forward-order response (stored on velocity_fulfillment); else use shipment_id for both.
+ */
+function buildCancelOrderPayloadForPendingShipment(
+  pendingShipmentId: string,
+  shipmentAwbHint?: string | null,
+): Json {
+  const sid = String(pendingShipmentId || '').trim();
+  const awb = String(shipmentAwbHint || '').trim() || sid;
+  return {
+    shipment_id: sid,
+    shipment_awb: awb,
+  };
+}
+
+function readVelocityPrecancelAwbFromFulfillment(fulfillment: unknown): string | null {
+  if (!fulfillment || typeof fulfillment !== 'object' || Array.isArray(fulfillment)) return null;
+  const v = (fulfillment as Record<string, unknown>).velocity_precancel_awb;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
 async function handleCancelVelocityDraft(
   adminClient: ReturnType<typeof createAdminClient>,
   endpoint: string,
@@ -1582,7 +1858,7 @@ async function handleCancelVelocityDraft(
 
   const { data: orderRow, error: orderErr } = await adminClient
     .from('orders')
-    .select('id, velocity_pending_shipment_id, tracking_number')
+    .select('id, velocity_pending_shipment_id, tracking_number, velocity_fulfillment')
     .eq('id', internalOrderId)
     .maybeSingle();
 
@@ -1596,7 +1872,8 @@ async function handleCancelVelocityDraft(
     throw new Error('This order already has an AWB; cancelling the draft is not applicable.');
   }
 
-  const requestPayload: Json = { shipment_id: pending };
+  const precancelAwb = readVelocityPrecancelAwbFromFulfillment(orderRow.velocity_fulfillment);
+  const requestPayload: Json = buildCancelOrderPayloadForPendingShipment(pending, precancelAwb);
   const apiResult = await callVelocityApi('cancel_velocity_draft', endpoint, token, requestPayload);
 
   if (apiResult.ok) {
@@ -1623,7 +1900,7 @@ async function handleCancelVelocityDraft(
 
 /**
  * Velocity POST /cancel-order — docs: body `{ "awbs": ["..."] }` (max 50).
- * Resolves AWB from the order row, or cancels a forward-order draft (no AWB) via `shipment_id`.
+ * With AWB: `awbs[]`. Pre-AWB forward order: `shipment_id` + `shipment_awb` (same ref on many tenants).
  */
 async function handleCancelOrder(
   adminClient: ReturnType<typeof createAdminClient>,
@@ -1636,7 +1913,7 @@ async function handleCancelOrder(
 
   const { data: row, error: rowErr } = await adminClient
     .from('orders')
-    .select('id, status, tracking_number, velocity_awb, velocity_pending_shipment_id, velocity_shipment_id')
+    .select('id, status, tracking_number, velocity_awb, velocity_pending_shipment_id, velocity_shipment_id, velocity_fulfillment')
     .eq('id', internalOrderId)
     .maybeSingle();
 
@@ -1654,7 +1931,8 @@ async function handleCancelOrder(
   if (awb) {
     requestPayload = { awbs: [awb] };
   } else if (pending) {
-    requestPayload = { shipment_id: pending };
+    const precancelAwb = readVelocityPrecancelAwbFromFulfillment(row.velocity_fulfillment);
+    requestPayload = buildCancelOrderPayloadForPendingShipment(pending, precancelAwb);
   } else {
     const skipped: VelocityApiResult = {
       ok: true,
@@ -1962,6 +2240,29 @@ Deno.serve(async (req: Request) => {
   }
 
   if (action === 'webhook_health') {
+    const velocity_api_credentials_configured = Boolean(
+      getEnvOptional('VELOCITY_BASE_URL') &&
+        getEnvOptional('VELOCITY_USERNAME') &&
+        getEnvOptional('VELOCITY_PASSWORD'),
+    );
+
+    let velocity_probe: Record<string, unknown> | null = null;
+    if (velocity_api_credentials_configured) {
+      try {
+        const bu = String(getEnvOptional('VELOCITY_BASE_URL') || '').replace(/\/$/, '');
+        const u = String(getEnvOptional('VELOCITY_USERNAME') || '');
+        const p = String(getEnvOptional('VELOCITY_PASSWORD') || '');
+        velocity_probe = await buildVelocityUpstreamProbe(bu, u, p);
+      } catch (e) {
+        velocity_probe = { probe_error: String((e as Error)?.message || e) };
+      }
+    } else {
+      velocity_probe = {
+        skipped: true,
+        reason: 'Set VELOCITY_BASE_URL, VELOCITY_USERNAME, and VELOCITY_PASSWORD to run live upstream checks.',
+      };
+    }
+
     return new Response(JSON.stringify({
       ok: true,
       action: 'webhook_health',
@@ -1969,11 +2270,8 @@ Deno.serve(async (req: Request) => {
       status: 200,
       data: {
         velocity_webhook_secret_configured: Boolean(getEnvOptional('VELOCITY_WEBHOOK_SECRET')),
-        velocity_api_credentials_configured: Boolean(
-          getEnvOptional('VELOCITY_BASE_URL') &&
-            getEnvOptional('VELOCITY_USERNAME') &&
-            getEnvOptional('VELOCITY_PASSWORD'),
-        ),
+        velocity_api_credentials_configured,
+        velocity_probe,
       },
       actor_id: auth.userId,
     }), {
@@ -2006,42 +2304,44 @@ Deno.serve(async (req: Request) => {
   }
 
   try {
-    const token = await fetchVelocityToken(adminClient, velocityBaseUrl, velocityUsername, velocityPassword);
+    const runActionWithToken = async (token: string): Promise<VelocityApiResult> => {
+      switch (action) {
+        case 'create_warehouse':
+          return await handleCreateWarehouse(adminClient, endpoint, token, payload);
+        case 'track_order':
+          return await handleTrackOrder(adminClient, endpoint, token, payload);
+        case 'cancel_order':
+          return await handleCancelOrder(adminClient, endpoint, token, payload);
+        case 'cancel_velocity_draft':
+          return await handleCancelVelocityDraft(adminClient, endpoint, token, payload);
+        case 'check_serviceability':
+          return await handleCheckServiceability(adminClient, endpoint, endpoints.calculate_rates, token, payload);
+        case 'create_order':
+          return await handleCreateOrder(adminClient, endpoint, token, payload);
+        case 'create_forward_order':
+          return await handleCreateForwardOrder(adminClient, endpoint, token, payload);
+        case 'assign_courier':
+          return await handleAssignCourier(adminClient, endpoint, token, payload);
+        case 'get_reports':
+        case 'list_shipments':
+        case 'list_returns':
+          return await handleLogisticsListingAction(adminClient, action, endpoint, token, payload);
+        default:
+          return await handleGenericAction(adminClient, action, endpoint, token, payload);
+      }
+    };
 
-    let result: VelocityApiResult;
-    switch (action) {
-      case 'create_warehouse':
-        result = await handleCreateWarehouse(adminClient, endpoint, token, payload);
-        break;
-      case 'track_order':
-        result = await handleTrackOrder(adminClient, endpoint, token, payload);
-        break;
-      case 'cancel_order':
-        result = await handleCancelOrder(adminClient, endpoint, token, payload);
-        break;
-      case 'cancel_velocity_draft':
-        result = await handleCancelVelocityDraft(adminClient, endpoint, token, payload);
-        break;
-      case 'check_serviceability':
-        result = await handleCheckServiceability(adminClient, endpoint, endpoints.calculate_rates, token, payload);
-        break;
-      case 'create_order':
-        result = await handleCreateOrder(adminClient, endpoint, token, payload);
-        break;
-      case 'create_forward_order':
-        result = await handleCreateForwardOrder(adminClient, endpoint, token, payload);
-        break;
-      case 'assign_courier':
-        result = await handleAssignCourier(adminClient, endpoint, token, payload);
-        break;
-      case 'get_reports':
-      case 'list_shipments':
-      case 'list_returns':
-        result = await handleLogisticsListingAction(adminClient, action, endpoint, token, payload);
-        break;
-      default:
-        result = await handleGenericAction(adminClient, action, endpoint, token, payload);
-        break;
+    let token = await fetchVelocityToken(adminClient, velocityBaseUrl, velocityUsername, velocityPassword);
+    let result = await runActionWithToken(token);
+
+    const shouldRetryAuth =
+      hasVelocityInvalidCredentials(result.data) &&
+      (result.status === 401 || result.status === 403 || result.ok);
+    if (shouldRetryAuth) {
+      // Stale cached token, rotated secrets, or tenant returning 200 with embedded auth errors.
+      await clearVelocityTokenCache(adminClient);
+      token = await fetchVelocityToken(adminClient, velocityBaseUrl, velocityUsername, velocityPassword);
+      result = await runActionWithToken(token);
     }
 
     return new Response(JSON.stringify({

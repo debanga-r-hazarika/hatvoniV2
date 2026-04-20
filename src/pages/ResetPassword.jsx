@@ -2,7 +2,17 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
+import Box from '@mui/material/Box';
+import Paper from '@mui/material/Paper';
+import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
+import { alpha, useTheme } from '@mui/material/styles';
+
 export default function ResetPassword() {
+  const theme = useTheme();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
@@ -38,97 +48,134 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 sm:p-10">
-          <div className="text-center mb-8">
-            <div className="mx-auto w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-              </svg>
-            </div>
-            <h2 className="text-3xl font-bold text-slate-900">Set new password</h2>
-            <p className="mt-2 text-slate-600">
+    <Box
+      sx={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: theme.palette.hatvoni.surfaceContainerLow,
+        py: 6,
+        px: 2,
+      }}
+    >
+      <Box sx={{ maxWidth: 440, width: '100%' }}>
+        <Paper
+          elevation={0}
+          sx={{
+            borderRadius: 6,
+            border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.35)}`,
+            p: { xs: 4, sm: 5 },
+            bgcolor: theme.palette.hatvoni.surfaceContainerLowest,
+            boxShadow: `0 20px 60px ${alpha(theme.palette.primary.main, 0.06)}`,
+          }}
+        >
+          <Box sx={{ textAlign: 'center', mb: 4 }}>
+            <Box
+              sx={{
+                mx: 'auto',
+                width: 64,
+                height: 64,
+                bgcolor: alpha(theme.palette.primary.main, 0.06),
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                mb: 2,
+              }}
+            >
+              <span className="material-symbols-outlined" style={{ fontSize: 32, color: theme.palette.primary.main }}>lock_reset</span>
+            </Box>
+            <Typography variant="h5" sx={{ color: 'text.primary', fontWeight: 700, mb: 0.5 }}>
+              Set new password
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
               Your new password must be different from previously used passwords
-            </p>
-          </div>
+            </Typography>
+          </Box>
 
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600">{error}</p>
-            </div>
+            <Alert severity="error" sx={{ mb: 3, borderRadius: 3 }}>
+              {error}
+            </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
-                New password
-              </label>
-              <input
-                id="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="••••••••"
-              />
-              <p className="mt-2 text-xs text-slate-500">Must be at least 6 characters</p>
-            </div>
+          <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+            <TextField
+              id="password"
+              label="New password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              helperText="Must be at least 6 characters"
+            />
 
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-2">
-                Confirm new password
-              </label>
-              <input
-                id="confirmPassword"
-                type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="••••••••"
-              />
-            </div>
+            <TextField
+              id="confirmPassword"
+              label="Confirm new password"
+              type="password"
+              required
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder="••••••••"
+            />
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-              <h4 className="text-sm font-medium text-slate-900 mb-2">Password requirements:</h4>
-              <ul className="space-y-1 text-xs text-slate-600">
-                <li className="flex items-center">
-                  <svg className="w-4 h-4 mr-2 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  At least 6 characters
-                </li>
-                <li className="flex items-center">
-                  <svg className="w-4 h-4 mr-2 text-slate-400" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                  </svg>
-                  Both passwords match
-                </li>
-              </ul>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2.5,
+                bgcolor: theme.palette.hatvoni.surfaceContainerLow,
+                border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`,
+                borderRadius: 3,
+              }}
             >
-              {loading ? 'Updating password...' : 'Reset password'}
-            </button>
-          </form>
-        </div>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 1, color: 'text.primary' }}>
+                Password requirements:
+              </Typography>
+              <Box component="ul" sx={{ pl: 2, m: 0, listStyle: 'disc' }}>
+                <Typography component="li" variant="caption" sx={{ color: 'text.secondary', mb: 0.25 }}>
+                  At least 6 characters
+                </Typography>
+                <Typography component="li" variant="caption" sx={{ color: 'text.secondary' }}>
+                  Both passwords match
+                </Typography>
+              </Box>
+            </Paper>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
+            <Button
+              type="submit"
+              fullWidth
+              variant="contained"
+              disabled={loading}
+              sx={{ py: 1.5, borderRadius: 3, fontWeight: 600, fontSize: '0.9375rem' }}
+            >
+              {loading ? <CircularProgress size={22} sx={{ color: 'white' }} /> : 'Reset password'}
+            </Button>
+          </Box>
+        </Paper>
+
+        <Typography variant="caption" sx={{ display: 'block', mt: 3, textAlign: 'center', color: 'text.secondary' }}>
           Remember your password?{' '}
-          <button
+          <Box
+            component="button"
             onClick={() => navigate('/login')}
-            className="font-medium text-slate-700 hover:text-slate-900 underline"
+            sx={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: 600,
+              color: 'primary.main',
+              textDecoration: 'underline',
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+            }}
           >
             Back to login
-          </button>
-        </p>
-      </div>
-    </div>
+          </Box>
+        </Typography>
+      </Box>
+    </Box>
   );
 }

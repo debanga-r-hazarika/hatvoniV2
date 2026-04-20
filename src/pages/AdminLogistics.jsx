@@ -259,17 +259,17 @@ export default function AdminLogistics() {
 
   return (
     <div className="min-h-screen bg-surface pt-28 pb-16">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         <header className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-secondary mb-1">Velocity Logistics</p>
-            <h1 className="font-brand text-4xl text-primary">Reports, Shipments, Returns</h1>
-            <p className="text-sm text-on-surface-variant mt-1">Uses `velocity-orchestrator` actions: `get_reports`, `list_shipments`, `list_returns`.</p>
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500 mb-1">Velocity Logistics</p>
+            <h1 className="font-brand text-2xl lg:text-3xl text-gray-900">Reports, Shipments, Returns</h1>
+            <p className="text-xs text-gray-500 mt-1">Uses `velocity-orchestrator` actions: `get_reports`, `list_shipments`, `list_returns`.</p>
           </div>
           <button
             type="button"
             onClick={() => navigate('/admin')}
-            className="px-4 py-2 rounded-xl border border-outline-variant/30 bg-white text-on-surface-variant hover:bg-surface-container-low"
+            className="px-4 py-2 rounded-lg border border-gray-200 bg-white text-gray-700 text-xs font-semibold hover:bg-gray-50"
           >
             Back to Admin
           </button>
@@ -278,23 +278,23 @@ export default function AdminLogistics() {
         {notice && <div className="px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">{notice}</div>}
         {error && <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm">{error}</div>}
 
-        <section className="rounded-2xl border border-outline-variant/20 bg-white p-5 shadow-sm">
-          <h2 className="font-brand text-2xl text-primary mb-4">Filters</h2>
+        <section className="rounded-xl border border-neutral-200 bg-white p-4 lg:p-6 shadow-sm">
+          <h2 className="font-brand text-xl text-gray-900 mb-4">Filters</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
-            <input type="date" value={filters.from_date} onChange={(e) => setFilters((p) => ({ ...p, from_date: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
-            <input type="date" value={filters.to_date} onChange={(e) => setFilters((p) => ({ ...p, to_date: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
-            <input type="text" placeholder="Status" value={filters.status} onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
-            <input type="text" placeholder="Courier" value={filters.courier} onChange={(e) => setFilters((p) => ({ ...p, courier: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
-            <input type="text" placeholder="COD/Prepaid" value={filters.payment_mode} onChange={(e) => setFilters((p) => ({ ...p, payment_mode: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
+            <input type="date" value={filters.from_date} onChange={(e) => setFilters((p) => ({ ...p, from_date: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
+            <input type="date" value={filters.to_date} onChange={(e) => setFilters((p) => ({ ...p, to_date: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
+            <input type="text" placeholder="Status" value={filters.status} onChange={(e) => setFilters((p) => ({ ...p, status: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
+            <input type="text" placeholder="Courier" value={filters.courier} onChange={(e) => setFilters((p) => ({ ...p, courier: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
+            <input type="text" placeholder="COD/Prepaid" value={filters.payment_mode} onChange={(e) => setFilters((p) => ({ ...p, payment_mode: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
             <div className="grid grid-cols-2 gap-2">
-              <input type="number" min="1" value={filters.page} onChange={(e) => setFilters((p) => ({ ...p, page: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
-              <input type="number" min="1" value={filters.per_page} onChange={(e) => setFilters((p) => ({ ...p, per_page: e.target.value }))} className="px-3 py-2 rounded-xl border border-outline-variant/30" />
+              <input type="number" min="1" value={filters.page} onChange={(e) => setFilters((p) => ({ ...p, page: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
+              <input type="number" min="1" value={filters.per_page} onChange={(e) => setFilters((p) => ({ ...p, per_page: e.target.value }))} className="px-3 py-2 rounded-lg border border-gray-200 text-xs" />
             </div>
           </div>
           <div className="flex flex-wrap gap-2 mt-4">
-            <button onClick={loadReports} disabled={reportsLoading} className="px-4 py-2 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-60">{reportsLoading ? 'Loading...' : 'Refresh Reports'}</button>
-            <button onClick={loadShipments} disabled={shipmentsLoading} className="px-4 py-2 rounded-xl bg-secondary text-white text-sm font-semibold disabled:opacity-60">{shipmentsLoading ? 'Loading...' : 'Refresh Shipments'}</button>
-            <button onClick={loadReturns} disabled={returnsLoading} className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold disabled:opacity-60">{returnsLoading ? 'Loading...' : 'Refresh Returns'}</button>
+            <button onClick={loadReports} disabled={reportsLoading} className="px-4 py-2 rounded-lg bg-gray-900 text-white text-xs font-semibold disabled:opacity-60">{reportsLoading ? 'Loading...' : 'Refresh Reports'}</button>
+            <button onClick={loadShipments} disabled={shipmentsLoading} className="px-4 py-2 rounded-lg bg-gray-700 text-white text-xs font-semibold disabled:opacity-60">{shipmentsLoading ? 'Loading...' : 'Refresh Shipments'}</button>
+            <button onClick={loadReturns} disabled={returnsLoading} className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 text-xs font-semibold disabled:opacity-60">{returnsLoading ? 'Loading...' : 'Refresh Returns'}</button>
             <button
               onClick={() => exportCsv('velocity-shipments.csv', shipmentsRows)}
               disabled={shipmentsRows.length === 0}
@@ -312,12 +312,12 @@ export default function AdminLogistics() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-outline-variant/20 bg-white p-5 shadow-sm">
-          <h2 className="font-brand text-2xl text-primary mb-4">Summary Reports</h2>
+        <section className="rounded-xl border border-neutral-200 bg-white p-4 lg:p-6 shadow-sm">
+          <h2 className="font-brand text-xl text-gray-900 mb-4">Summary Reports</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Total Shipments</p>
-              <p className="text-2xl font-brand text-primary mt-1">{reportTotals.totalShipments}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Total Shipments</p>
+              <p className="text-2xl font-bold text-gray-900 mt-1">{reportTotals.totalShipments}</p>
             </div>
             <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
               <p className="text-[10px] font-black uppercase tracking-wider text-emerald-700">Delivered</p>
@@ -333,13 +333,13 @@ export default function AdminLogistics() {
             </div>
           </div>
           {summaryRows.length === 0 ? (
-            <p className="text-sm text-on-surface-variant">No summary metrics available in current response.</p>
+            <p className="text-xs text-gray-500">No summary metrics available in current response.</p>
           ) : (
             <div className="grid grid-cols-1 xl:grid-cols-[1.1fr_0.9fr] gap-5">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead>
-                    <tr className="border-b border-outline-variant/20">
+                    <tr className="border-b border-gray-200">
                       <th className="text-left py-2 pr-4">Bucket</th>
                       <th className="text-left py-2 pr-4">Count</th>
                       <th className="text-left py-2 pr-4">Prepaid Amount</th>
@@ -348,7 +348,7 @@ export default function AdminLogistics() {
                   </thead>
                   <tbody>
                     {summaryRows.map((row) => (
-                      <tr key={row.key} className="border-b border-outline-variant/10">
+                      <tr key={row.key} className="border-b border-gray-100">
                         <td className="py-2 pr-4 font-semibold capitalize">{normalizeSummaryKey(row.key)}</td>
                         <td className="py-2 pr-4">{row.count}</td>
                         <td className="py-2 pr-4">{row.prepaid}</td>
@@ -358,7 +358,7 @@ export default function AdminLogistics() {
                   </tbody>
                 </table>
               </div>
-              <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-4">
+              <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
                 <p className="text-sm font-bold text-primary mb-3">Shipment Flow Trend</p>
                 <div className="space-y-2">
                   {summaryTrendRows.slice(0, 8).map((row) => (
@@ -381,33 +381,33 @@ export default function AdminLogistics() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-outline-variant/20 bg-white p-5 shadow-sm">
-          <h2 className="font-brand text-2xl text-primary mb-4">Shipment List (Forward)</h2>
+        <section className="rounded-xl border border-neutral-200 bg-white p-4 lg:p-6 shadow-sm">
+          <h2 className="font-brand text-xl text-gray-900 mb-4">Shipment List (Forward)</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Rows</p>
-              <p className="text-xl font-brand text-primary mt-1">{shipmentsRows.length}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Rows</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{shipmentsRows.length}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Current Page</p>
-              <p className="text-xl font-brand text-primary mt-1">{shipmentsMeta?.current_page || 1}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Current Page</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{shipmentsMeta?.current_page || 1}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Per Page</p>
-              <p className="text-xl font-brand text-primary mt-1">{shipmentsMeta?.per_page || filters.per_page}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Per Page</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{shipmentsMeta?.per_page || filters.per_page}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Total</p>
-              <p className="text-xl font-brand text-primary mt-1">{shipmentsMeta?.total || shipmentsRows.length}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Total</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{shipmentsMeta?.total || shipmentsRows.length}</p>
             </div>
           </div>
           {shipmentsRows.length === 0 ? (
-            <p className="text-sm text-on-surface-variant">No shipments in response for current filters.</p>
+            <p className="text-xs text-gray-500">No shipments in response for current filters.</p>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="border-b border-outline-variant/20">
+                  <tr className="border-b border-gray-200">
                     <th className="text-left py-2 pr-4">Shipment</th>
                     <th className="text-left py-2 pr-4">Order</th>
                     <th className="text-left py-2 pr-4">Courier</th>
@@ -422,7 +422,7 @@ export default function AdminLogistics() {
                 </thead>
                 <tbody>
                   {shipmentsRows.map((row, idx) => (
-                    <tr key={idx} className="border-b border-outline-variant/10">
+                    <tr key={idx} className="border-b border-gray-100">
                       <td className="py-2 pr-4 font-mono text-xs">{String(row.id)}</td>
                       <td className="py-2 pr-4">{String(row.order_display_id)}</td>
                       <td className="py-2 pr-4">{String(row.courier_name)}</td>
@@ -449,35 +449,35 @@ export default function AdminLogistics() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-outline-variant/20 bg-white p-5 shadow-sm">
-          <h2 className="font-brand text-2xl text-primary mb-4">Return Orders List</h2>
+        <section className="rounded-xl border border-neutral-200 bg-white p-4 lg:p-6 shadow-sm">
+          <h2 className="font-brand text-xl text-gray-900 mb-4">Return Orders List</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Rows</p>
-              <p className="text-xl font-brand text-primary mt-1">{returnsRows.length}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Rows</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{returnsRows.length}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Current Page</p>
-              <p className="text-xl font-brand text-primary mt-1">{returnsMeta?.current_page || 1}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Current Page</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{returnsMeta?.current_page || 1}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Per Page</p>
-              <p className="text-xl font-brand text-primary mt-1">{returnsMeta?.per_page || filters.per_page}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Per Page</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{returnsMeta?.per_page || filters.per_page}</p>
             </div>
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-3">
-              <p className="text-[10px] font-black uppercase tracking-wider text-on-surface-variant">Total</p>
-              <p className="text-xl font-brand text-primary mt-1">{returnsMeta?.total || returnsRows.length}</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Total</p>
+              <p className="text-xl font-bold text-gray-900 mt-1">{returnsMeta?.total || returnsRows.length}</p>
             </div>
           </div>
           {returnsRows.length === 0 ? (
-            <div className="rounded-xl border border-outline-variant/20 bg-surface-container-low p-4">
-              <p className="text-sm text-on-surface-variant">No return orders found for the selected filters. This is valid when no reverse shipments exist yet.</p>
+            <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
+              <p className="text-xs text-gray-500">No return orders found for the selected filters. This is valid when no reverse shipments exist yet.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="border-b border-outline-variant/20">
+                  <tr className="border-b border-gray-200">
                     <th className="text-left py-2 pr-4">Return ID</th>
                     <th className="text-left py-2 pr-4">Order</th>
                     <th className="text-left py-2 pr-4">Status</th>
@@ -487,7 +487,7 @@ export default function AdminLogistics() {
                 </thead>
                 <tbody>
                   {returnsRows.map((row, idx) => (
-                    <tr key={idx} className="border-b border-outline-variant/10">
+                    <tr key={idx} className="border-b border-gray-100">
                       <td className="py-2 pr-4">{String(row.return_id || row.id || '—')}</td>
                       <td className="py-2 pr-4">{String(row.order_id || row.order || '—')}</td>
                       <td className="py-2 pr-4">

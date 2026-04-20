@@ -2,9 +2,44 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Alert from '@mui/material/Alert';
+import Divider from '@mui/material/Divider';
+import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import Icon from '@mui/material/Icon';
+import { alpha, useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { tokens, fonts } from '../theme/hatvoniTheme';
+
+/* ── Hatvoni star-burst SVG logo ─────────────────────── */
+const HatvoniLogo = ({ size = 40, color = 'currentColor' }) => (
+  <svg width={size} height={size} viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M12.0799 24L4 19.2479L9.95537 8.75216L18.04 13.4961L18.0446 4H29.9554L29.96 13.4961L38.0446 8.75216L44 19.2479L35.92 24L44 28.7521L38.0446 39.2479L29.96 34.5039L29.9554 44H18.0446L18.04 34.5039L9.95537 39.2479L4 28.7521L12.0799 24Z"
+      fill={color}
+    />
+  </svg>
+);
+
+/* ── Background image URL ────────────────────────────── */
+const HERO_IMG =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuCdgo3BIB-1SY7EDeIk5jINmSIHU_0aV21C6SNWRjpB-6H1fRaFBPZ1NFldAPzbQLS1s4tonuA5vnLq7H3ktVsNJs7Hv0s_98m-J2JffOc_-d07ZVfn5cz7X-e6_qwNgsCE7G8VAh5O9zRv9rVIpbgOBlNIJcmSlfm2PyNOQEjXBz-21i53qnNCSDx-NOavTrsff7Q5SU2V5Mll8ISY6UCkOt83oj8BIxwfFH4754BmLvnBzRyUC5wWaLr1gSn2ckfKQUbTVmc7JQGW';
+
 export default function Login() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -56,131 +91,317 @@ export default function Login() {
     }
   };
 
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 sm:p-10">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-900">Welcome back</h2>
-            <p className="mt-2 text-slate-600">Sign in to your account</p>
-          </div>
+  /* ── Accent dots ─────────────────────────────────────── */
+  const AccentDots = () => (
+    <Box sx={{ display: 'flex', gap: 1, mt: 'auto', pt: { xs: 5, lg: 6 } }}>
+      <Box sx={{ width: { xs: 6, lg: 8 }, height: { xs: 6, lg: 8 }, borderRadius: '50%', bgcolor: tokens.tertiary }} />
+      <Box sx={{ width: { xs: 6, lg: 8 }, height: { xs: 6, lg: 8 }, borderRadius: '50%', bgcolor: tokens.primary }} />
+      <Box sx={{ width: { xs: 6, lg: 8 }, height: { xs: 6, lg: 8 }, borderRadius: '50%', bgcolor: tokens.secondaryContainer }} />
+    </Box>
+  );
 
+  return (
+    <Box sx={{ display: 'flex', minHeight: '100vh', flexDirection: { xs: 'column', lg: 'row' } }}>
+      {/* ═══════════════ LEFT: BRANDING PANEL ═══════════════ */}
+      <Box
+        sx={{
+          position: 'relative',
+          width: { xs: '100%', lg: '50%' },
+          minHeight: { xs: '35vh', lg: '100vh' },
+          bgcolor: tokens.primary,
+          overflow: 'hidden',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          // Mobile ellipse clip
+          ...(!isDesktop && {
+            clipPath: 'ellipse(150% 100% at 50% 0%)',
+          }),
+        }}
+      >
+        {/* BG image */}
+        <Box
+          component="img"
+          src={HERO_IMG}
+          alt="Traditional North East Indian textile"
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            opacity: { xs: 0.3, lg: 0.4 },
+            mixBlendMode: 'luminosity',
+          }}
+        />
+        {/* Gradient overlay */}
+        <Box
+          sx={{
+            position: 'absolute',
+            inset: 0,
+            background: `linear-gradient(to top, ${tokens.primary}, ${alpha(tokens.primary, 0.6)}, transparent)`,
+          }}
+        />
+
+        {/* Content */}
+        <Box
+          sx={{
+            position: 'relative',
+            zIndex: 10,
+            p: { xs: 4, lg: 8 },
+            textAlign: { xs: 'center', lg: 'left' },
+            maxWidth: 640,
+          }}
+        >
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, justifyContent: { xs: 'center', lg: 'flex-start' }, mb: { xs: 2, lg: 4 } }}>
+            <HatvoniLogo size={isDesktop ? 40 : 32} color={tokens.secondaryContainer} />
+            <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.5rem', lg: '1.875rem' }, color: tokens.onPrimary, letterSpacing: '-0.01em' }}>
+              Hatvoni
+            </Typography>
+          </Box>
+          <Typography
+            sx={{
+              fontFamily: fonts.display,
+              fontSize: { xs: '1.875rem', lg: '3.75rem' },
+              lineHeight: 1.1,
+              color: tokens.onPrimary,
+              mb: { xs: 2, lg: 3 },
+            }}
+          >
+            Preserving the Soul of the Seven Sisters.
+          </Typography>
+          <Typography
+            sx={{
+              display: { xs: 'none', sm: 'block' },
+              fontFamily: fonts.body,
+              fontSize: { xs: '1rem', lg: '1.25rem' },
+              color: alpha(tokens.onPrimary, 0.8),
+              maxWidth: 420,
+              lineHeight: 1.6,
+            }}
+          >
+            Join our community of modern ethnobotanists and culinary enthusiasts exploring the rare heritage of North East India.
+          </Typography>
+          {/* Progress dots */}
+          <Box sx={{ display: 'flex', gap: 1, mt: { xs: 3, lg: 6 }, justifyContent: { xs: 'center', lg: 'flex-start' } }}>
+            <Box sx={{ height: 4, width: { xs: 40, lg: 48 }, bgcolor: tokens.secondaryContainer, borderRadius: 99 }} />
+            <Box sx={{ height: 4, width: { xs: 12, lg: 16 }, bgcolor: alpha(tokens.secondaryContainer, 0.3), borderRadius: 99 }} />
+            <Box sx={{ height: 4, width: { xs: 12, lg: 16 }, bgcolor: alpha(tokens.secondaryContainer, 0.3), borderRadius: 99 }} />
+          </Box>
+        </Box>
+      </Box>
+
+      {/* ═══════════════ RIGHT: LOGIN FORM ═══════════════ */}
+      <Box
+        sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          bgcolor: tokens.surface,
+          px: { xs: 3, sm: 6 },
+          py: { xs: 5, lg: 6 },
+          width: { lg: '50%' },
+        }}
+      >
+        <Box sx={{ width: '100%', maxWidth: 420 }}>
+          {/* Back link */}
+          <Link to="/" style={{ textDecoration: 'none' }}>
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                mb: { xs: 4, lg: 5 },
+                color: tokens.onSurfaceVariant,
+                transition: 'color 0.2s',
+                '&:hover': { color: tokens.primary },
+                '&:hover .back-arrow': { transform: 'translateX(-4px)' },
+              }}
+            >
+              <Icon className="back-arrow" sx={{ fontSize: { xs: 18, lg: 20 }, transition: 'transform 0.2s' }}>arrow_back</Icon>
+              <Typography sx={{ fontFamily: fonts.label, fontSize: { xs: '0.625rem', lg: '0.75rem' }, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                Back to Main
+              </Typography>
+            </Box>
+          </Link>
+
+          {/* Heading */}
+          <Box sx={{ mb: { xs: 4, lg: 5 } }}>
+            <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.875rem', lg: '2.5rem' }, color: tokens.onSurface, mb: 1 }}>
+              Welcome Back
+            </Typography>
+            <Typography sx={{ fontFamily: fonts.body, color: tokens.onSurfaceVariant, fontSize: { xs: '0.875rem', lg: '1rem' } }}>
+              Sign in to access your curated botanical collection.
+            </Typography>
+          </Box>
+
+          {/* Error */}
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600">{error}</p>
-            </div>
+            <Alert severity="error" sx={{ mb: 3, borderRadius: 3 }}>
+              {error}
+            </Alert>
           )}
 
-          <button
-            type="button"
-            onClick={handleGoogleSignIn}
-            disabled={googleLoading || loading}
-            className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            {googleLoading ? 'Connecting to Google...' : 'Continue with Google'}
-          </button>
-
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-300"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-slate-500">Or continue with email</span>
-            </div>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
-                Email address
-              </label>
-              <input
-                id="email"
+          {/* Form */}
+          <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, lg: 4 } }}>
+            {/* Email */}
+            <Box>
+              <Typography sx={{ fontFamily: fonts.label, fontSize: { xs: '0.625rem', lg: '0.6875rem' }, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: tokens.onSurfaceVariant, mb: 1 }}>
+                Email Address
+              </Typography>
+              <TextField
+                id="login-email"
                 type="email"
                 required
+                fullWidth
+                variant="standard"
+                placeholder="e.g. curator@hatvoni.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="you@example.com"
+                InputProps={{
+                  disableUnderline: true,
+                  sx: {
+                    fontFamily: fonts.body,
+                    fontSize: { xs: '1rem', lg: '1.125rem' },
+                    py: 1.5,
+                    px: 0,
+                    borderBottom: `2px solid ${tokens.outlineVariant}`,
+                    transition: 'border-color 0.2s',
+                    '&.Mui-focused': { borderColor: tokens.primary },
+                    '& input::placeholder': { color: tokens.outline, opacity: 0.5 },
+                  },
+                }}
               />
-            </div>
+            </Box>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
+            {/* Password */}
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
+                <Typography sx={{ fontFamily: fonts.label, fontSize: { xs: '0.625rem', lg: '0.6875rem' }, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: tokens.onSurfaceVariant }}>
+                  Password
+                </Typography>
+                <Link to="/forgot-password" style={{ textDecoration: 'none' }}>
+                  <Typography sx={{ fontFamily: fonts.label, fontSize: { xs: '0.625rem', lg: '0.6875rem' }, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: tokens.primary, transition: 'color 0.2s', '&:hover': { color: tokens.secondary } }}>
+                    Forgot?
+                  </Typography>
+                </Link>
+              </Box>
+              <TextField
+                id="login-password"
+                type={showPassword ? 'text' : 'password'}
                 required
+                fullWidth
+                variant="standard"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="••••••••"
+                InputProps={{
+                  disableUnderline: true,
+                  endAdornment: (
+                    <InputAdornment position="end">
+                      <IconButton onClick={() => setShowPassword(!showPassword)} edge="end" sx={{ color: tokens.onSurfaceVariant, '&:hover': { color: tokens.primary } }}>
+                        <Icon>{showPassword ? 'visibility_off' : 'visibility'}</Icon>
+                      </IconButton>
+                    </InputAdornment>
+                  ),
+                  sx: {
+                    fontFamily: fonts.body,
+                    fontSize: { xs: '1rem', lg: '1.125rem' },
+                    py: 1.5,
+                    px: 0,
+                    borderBottom: `2px solid ${tokens.outlineVariant}`,
+                    transition: 'border-color 0.2s',
+                    '&.Mui-focused': { borderColor: tokens.primary },
+                    '& input::placeholder': { color: tokens.outline, opacity: 0.5 },
+                  },
+                }}
               />
-            </div>
+            </Box>
 
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <input
-                  id="remember"
-                  type="checkbox"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="h-4 w-4 text-slate-600 border-slate-300 rounded focus:ring-slate-500"
-                />
-                <label htmlFor="remember" className="ml-2 block text-sm text-slate-700">
-                  Remember me
-                </label>
-              </div>
-
-              <Link
-                to="/forgot-password"
-                className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors duration-200"
+            {/* Actions */}
+            <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: { xs: 2, lg: 3 } }}>
+              <Button
+                type="submit"
+                fullWidth
+                variant="contained"
+                disabled={loading}
+                sx={{
+                  py: { xs: 1.75, lg: 2.25 },
+                  px: 4,
+                  bgcolor: tokens.primary,
+                  color: tokens.onPrimary,
+                  fontFamily: fonts.headline,
+                  fontSize: { xs: '1rem', lg: '1.125rem' },
+                  fontWeight: 700,
+                  borderRadius: 3,
+                  boxShadow: `0 8px 24px ${alpha(tokens.primary, 0.2)}`,
+                  transition: 'all 0.2s',
+                  '&:hover': {
+                    bgcolor: alpha(tokens.primary, 0.9),
+                    boxShadow: `0 12px 32px ${alpha(tokens.primary, 0.3)}`,
+                  },
+                  '&:active': { transform: 'scale(0.98)' },
+                }}
               >
-                Forgot password?
-              </Link>
-            </div>
+                {loading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : 'Sign In to Hatvoni'}
+              </Button>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Signing in...' : 'Sign in'}
-            </button>
-          </form>
+              {/* Divider */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1 }}>
+                <Box sx={{ flex: 1, height: '1px', bgcolor: alpha(tokens.outlineVariant, 0.3) }} />
+                <Typography sx={{ fontSize: { xs: '0.625rem', lg: '0.6875rem' }, fontWeight: 500, color: tokens.outline, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                  OR
+                </Typography>
+                <Box sx={{ flex: 1, height: '1px', bgcolor: alpha(tokens.outlineVariant, 0.3) }} />
+              </Box>
 
-          <div className="mt-8 text-center">
-            <p className="text-sm text-slate-600">
+              {/* Google */}
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading || loading}
+                startIcon={
+                  googleLoading ? (
+                    <CircularProgress size={20} />
+                  ) : (
+                    <Box component="img" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZ6EOI2O3lkH60tifX6LhCLUtFR9HyHALGctV9cJL4GAW5JisfWbCAfmlv2FvJjvZqUeuYfu0CPnSGcmPWLEO7zHumy4dENzzZLp2fThW-7mV2ALWww9XREaD65aX880wXVoM4sldC9ujmdEJCXXABfywvmf-rdVQQJd5J66qrwepVlxZ4U0vXxNAUnr-wdtipG1-XwMVzcXF6TzFILpECO6ydxsR9Lc_YXroGiZTQW3oFBxBfUtpHg93rF2MLVYheZnhV-kmUNelA" alt="Google" sx={{ width: 20, height: 20 }} />
+                  )
+                }
+                sx={{
+                  py: { xs: 1.5, lg: 1.75 },
+                  px: 4,
+                  borderColor: alpha(tokens.outlineVariant, 0.5),
+                  bgcolor: tokens.surfaceContainerLowest,
+                  color: tokens.onSurface,
+                  fontFamily: fonts.headline,
+                  fontWeight: 600,
+                  fontSize: { xs: '0.875rem', lg: '1rem' },
+                  borderRadius: 3,
+                  '&:hover': { bgcolor: tokens.surfaceContainerLow, borderColor: tokens.outlineVariant },
+                }}
+              >
+                {googleLoading ? 'Connecting...' : 'Continue with Google'}
+              </Button>
+            </Box>
+          </Box>
+
+          {/* Sign up link */}
+          <Box sx={{ mt: { xs: 4, lg: 6 }, textAlign: 'center' }}>
+            <Typography sx={{ fontFamily: fonts.body, color: tokens.onSurfaceVariant, fontSize: { xs: '0.875rem', lg: '1rem' } }}>
               Don't have an account?{' '}
-              <Link
-                to="/signup"
-                className="font-medium text-slate-900 hover:text-slate-700 transition-colors duration-200"
-              >
-                Sign up
+              <Link to="/signup" style={{ textDecoration: 'none', color: tokens.primary, fontWeight: 700, marginLeft: 4 }}>
+                Create an account
               </Link>
-            </p>
-          </div>
-        </div>
+            </Typography>
+          </Box>
+        </Box>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
-          By signing in, you agree to our{' '}
-          <Link to="/terms-conditions" className="underline hover:text-slate-700">
-            Terms
-          </Link>{' '}
-          and{' '}
-          <Link to="/privacy-policy" className="underline hover:text-slate-700">
-            Privacy Policy
-          </Link>
-        </p>
-      </div>
-    </div>
+        {/* Accent dots */}
+        <AccentDots />
+      </Box>
+    </Box>
   );
 }

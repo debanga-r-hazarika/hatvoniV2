@@ -1,38 +1,43 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import TextField from '@mui/material/TextField';
+import Button from '@mui/material/Button';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
+import Icon from '@mui/material/Icon';
+import { alpha, useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { tokens, fonts } from '../theme/hatvoniTheme';
+
+/* ── Heritage panel background image ──────────────────── */
+const HERO_IMG =
+  'https://lh3.googleusercontent.com/aida-public/AB6AXuAAOc7vD-NBHW0ayNG0Be0gWUoAP3NoA22bip3HMtlocGhuB3uKA53VPtvjPMhsTotDRghUvB372i3K8BLwWX4oCP_lYfKg7AKNfhOQTHx8NqgPpalFZMf0OV926zeWCrczGoTyXODLZn-PcJYl_Nit8eWCuRy-H0Ibwgc8kaY9C6w1rJOFPy0cZGGFGmi_4blPfz86pB31W-DaaLH2dX1emM2TvWYUspBM8wReSNgxDl8oilKky6kpGmjiXhqd93tLak1laLO0OCs4';
 
 export default function Signup() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
     email: '',
     password: '',
-    confirmPassword: ''
+    confirmPassword: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const { signUp, signInWithGoogle } = useAuth();
+  const [termsChecked, setTermsChecked] = useState(false);
+  const { signUp } = useAuth();
   const navigate = useNavigate();
 
   const handleChange = (e) => {
-    setFormData({
-      ...formData,
-      [e.target.name]: e.target.value
-    });
-  };
-
-  const handleGoogleSignUp = async () => {
-    setError('');
-    setGoogleLoading(true);
-    const { data, error: googleError } = await signInWithGoogle();
-    if (googleError) {
-      setError(googleError.message);
-      setGoogleLoading(false);
-    }
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleSubmit = async (e) => {
@@ -76,8 +81,6 @@ export default function Signup() {
       }
       setLoading(false);
     } else {
-      // Customer sync is handled server-side by DB triggers.
-
       setSuccess(true);
       setLoading(false);
       setTimeout(() => navigate('/confirm-account', {
@@ -89,192 +92,303 @@ export default function Signup() {
     }
   };
 
+  /* ── Styled underline input ─────────────────────────── */
+  const UnderlineInput = ({ label, id, ...rest }) => (
+    <Box>
+      <Typography
+        sx={{
+          fontFamily: fonts.label,
+          fontSize: { xs: '0.625rem', md: '0.6875rem' },
+          fontWeight: 700,
+          letterSpacing: '0.15em',
+          textTransform: 'uppercase',
+          color: tokens.secondary,
+          mb: 1,
+        }}
+      >
+        {label}
+      </Typography>
+      <TextField
+        id={id}
+        fullWidth
+        variant="standard"
+        InputProps={{
+          disableUnderline: true,
+          sx: {
+            fontFamily: fonts.headline,
+            fontSize: { xs: '1rem', md: '1.125rem' },
+            py: 1.5,
+            px: 0,
+            borderBottom: `2px solid ${tokens.outlineVariant}`,
+            transition: 'border-color 0.2s',
+            '&.Mui-focused': { borderColor: tokens.primary },
+            '& input::placeholder': { color: alpha(tokens.outlineVariant, 0.6), opacity: 1 },
+          },
+        }}
+        {...rest}
+      />
+    </Box>
+  );
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 sm:p-10">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-slate-900">Create account</h2>
-            <p className="mt-2 text-slate-600">Join us today</p>
-          </div>
-
-          {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600 mb-2">{error}</p>
-              {error.includes('already registered') && (
-                <div className="mt-3 pt-3 border-t border-red-100 flex gap-3">
-                  <Link
-                    to="/login"
-                    className="text-sm font-medium text-red-700 hover:text-red-900 underline"
-                  >
-                    Sign in instead
-                  </Link>
-                  <span className="text-red-300">|</span>
-                  <Link
-                    to="/forgot-password"
-                    className="text-sm font-medium text-red-700 hover:text-red-900 underline"
-                  >
-                    Reset password
-                  </Link>
-                </div>
-              )}
-            </div>
-          )}
-
-          {success && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg">
-              <p className="text-sm text-green-600">Account created successfully! Setting up your profile...</p>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={handleGoogleSignUp}
-            disabled={googleLoading || loading}
-            className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-white border-2 border-slate-300 text-slate-700 rounded-lg font-medium hover:bg-slate-50 hover:border-slate-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* ── Main Grid ────────────────────────────────────── */}
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          display: 'grid',
+          gridTemplateColumns: { xs: '1fr', md: '5fr 7fr', lg: '4fr 8fr' },
+          minHeight: '100vh',
+        }}
+      >
+        {/* ═══════ LEFT BRAND PANEL (Desktop) ═══════ */}
+        {isDesktop && (
+          <Box
+            sx={{
+              position: 'relative',
+              bgcolor: tokens.primaryContainer,
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'space-between',
+              p: { md: 6, lg: 6 },
+            }}
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
-              <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
-              <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
-              <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
-            </svg>
-            {googleLoading ? 'Connecting to Google...' : 'Continue with Google'}
-          </button>
+            {/* BG image */}
+            <Box component="img" src={HERO_IMG} alt="Heritage Visual" sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.4, mixBlendMode: 'luminosity' }} />
+            <Box sx={{ position: 'absolute', inset: 0, background: `linear-gradient(to bottom, ${alpha(tokens.primaryContainer, 0.6)}, ${alpha(tokens.primaryContainer, 0.8)}, ${tokens.primaryContainer})` }} />
 
-          <div className="relative my-6">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-slate-300"></div>
-            </div>
-            <div className="relative flex justify-center text-sm">
-              <span className="px-4 bg-white text-slate-500">Or continue with email</span>
-            </div>
-          </div>
+            {/* Top Logo */}
+            <Box sx={{ position: 'relative', zIndex: 10 }}>
+              <Link to="/" style={{ textDecoration: 'none' }}>
+                <Typography sx={{ fontFamily: fonts.display, fontSize: '1.875rem', color: tokens.secondaryContainer, letterSpacing: '-0.02em' }}>
+                  Hatvoni
+                </Typography>
+              </Link>
+            </Box>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label htmlFor="firstName" className="block text-sm font-medium text-slate-700 mb-2">
-                  First name
-                </label>
-                <input
-                  id="firstName"
-                  name="firstName"
-                  type="text"
-                  required
-                  value={formData.firstName}
-                  onChange={handleChange}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                  placeholder="John"
-                />
-              </div>
-              <div>
-                <label htmlFor="lastName" className="block text-sm font-medium text-slate-700 mb-2">
-                  Last name
-                </label>
-                <input
-                  id="lastName"
-                  name="lastName"
-                  type="text"
-                  required
-                  value={formData.lastName}
-                  onChange={handleChange}
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                  placeholder="Doe"
-                />
-              </div>
-            </div>
+            {/* Bottom Content */}
+            <Box sx={{ position: 'relative', zIndex: 10, mt: 'auto' }}>
+              <Typography sx={{ fontFamily: fonts.display, fontSize: { md: '2.5rem', lg: '3rem' }, lineHeight: 1.1, color: '#fff', mb: 3 }}>
+                Join the heritage community.
+              </Typography>
+              <Typography sx={{ fontFamily: fonts.headline, fontSize: '1.125rem', color: tokens.onPrimaryContainer, maxWidth: 380, lineHeight: 1.6 }}>
+                Preserving the ethnobotanical wisdom of the Seven Sisters, delivered to your doorstep.
+              </Typography>
+              {/* Cultural accent */}
+              <Box sx={{ display: 'flex', gap: 1, mt: 6 }}>
+                <Box sx={{ height: 4, width: 48, bgcolor: tokens.secondaryContainer }} />
+                <Box sx={{ height: 4, width: 16, bgcolor: tokens.tertiary }} />
+                <Box sx={{ height: 4, width: 8, bgcolor: tokens.secondaryFixedDim }} />
+              </Box>
+            </Box>
+          </Box>
+        )}
 
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
-                Email address
-              </label>
-              <input
-                id="email"
+        {/* ═══════ RIGHT FORM PANEL ═══════ */}
+        <Box
+          component="section"
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: { xs: 3, md: 8, lg: 12 },
+            bgcolor: tokens.surface,
+          }}
+        >
+          <Box sx={{ width: '100%', maxWidth: 440, display: 'flex', flexDirection: 'column', gap: { xs: 4, md: 5 } }}>
+            {/* Mobile logo */}
+            {!isDesktop && (
+              <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography sx={{ fontFamily: fonts.display, fontSize: '1.5rem', color: tokens.primary }}>
+                  Hatvoni
+                </Typography>
+                <Link to="/login" style={{ textDecoration: 'none', color: tokens.primary, fontFamily: fonts.label, fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                  Login
+                </Link>
+              </Box>
+            )}
+
+            {/* Header */}
+            <Box>
+              <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.875rem', md: '2rem' }, color: tokens.primary, letterSpacing: '-0.01em' }}>
+                Create Account
+              </Typography>
+              <Typography sx={{ fontFamily: fonts.body, color: tokens.onSurfaceVariant, mt: 0.5, fontSize: { xs: '0.875rem', md: '1rem' } }}>
+                Become a part of our curated botanical journey.
+              </Typography>
+              {/* Mobile accent */}
+              {!isDesktop && (
+                <Box sx={{ display: 'flex', gap: 0.5, mt: 2 }}>
+                  <Box sx={{ height: 4, width: 32, bgcolor: tokens.primary }} />
+                  <Box sx={{ height: 4, width: 8, bgcolor: tokens.secondaryContainer }} />
+                </Box>
+              )}
+            </Box>
+
+            {/* Errors / Success */}
+            {error && (
+              <Alert
+                severity="error"
+                sx={{ borderRadius: 3 }}
+                action={
+                  error.includes('already registered') ? (
+                    <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                      <Link to="/login" style={{ color: theme.palette.error.main, fontSize: '0.8125rem', fontWeight: 600, textDecoration: 'underline' }}>Sign in</Link>
+                      <Link to="/forgot-password" style={{ color: theme.palette.error.main, fontSize: '0.8125rem', fontWeight: 600, textDecoration: 'underline' }}>Reset password</Link>
+                    </Box>
+                  ) : undefined
+                }
+              >
+                {error}
+              </Alert>
+            )}
+            {success && (
+              <Alert severity="success" sx={{ borderRadius: 3 }}>
+                Account created successfully! Setting up your profile...
+              </Alert>
+            )}
+
+            {/* Form */}
+            <Box component="form" onSubmit={handleSubmit} sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 3, md: 4 } }}>
+              <UnderlineInput
+                label="Full Name"
+                id="signup-name"
+                name="firstName"
+                placeholder="Aishee Sharma"
+                required
+                value={formData.firstName}
+                onChange={(e) => setFormData({ ...formData, firstName: e.target.value, lastName: '' })}
+              />
+              <UnderlineInput
+                label="Email Address"
+                id="signup-email"
                 name="email"
                 type="email"
+                placeholder="aishee@heritage.com"
                 required
                 value={formData.email}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="you@example.com"
               />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
-                Password
-              </label>
-              <input
-                id="password"
+              <UnderlineInput
+                label="Password"
+                id="signup-password"
                 name="password"
                 type="password"
+                placeholder="••••••••"
                 required
                 value={formData.password}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="••••••••"
               />
-              <p className="mt-1 text-xs text-slate-500">Must contain lowercase, uppercase letters, and digits (min. 6 characters)</p>
-            </div>
-
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-slate-700 mb-2">
-                Confirm password
-              </label>
-              <input
-                id="confirmPassword"
+              <UnderlineInput
+                label="Confirm Password"
+                id="signup-confirm-password"
                 name="confirmPassword"
                 type="password"
+                placeholder="••••••••"
                 required
                 value={formData.confirmPassword}
                 onChange={handleChange}
-                className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-transparent transition-all duration-200 outline-none"
-                placeholder="••••••••"
               />
-            </div>
 
-            <div className="flex items-start">
-              <input
-                id="terms"
-                type="checkbox"
-                required
-                className="h-4 w-4 mt-1 text-slate-600 border-slate-300 rounded focus:ring-slate-500"
+              {/* Terms */}
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    required
+                    checked={termsChecked}
+                    onChange={(e) => setTermsChecked(e.target.checked)}
+                    sx={{
+                      color: tokens.outlineVariant,
+                      '&.Mui-checked': { color: tokens.primary },
+                      alignSelf: 'flex-start',
+                      mt: -0.5,
+                    }}
+                  />
+                }
+                label={
+                  <Typography variant="body2" sx={{ color: tokens.onSurfaceVariant, lineHeight: 1.5 }}>
+                    I agree to the{' '}
+                    <Link to="/terms-conditions" style={{ fontWeight: 600, color: tokens.secondary, textDecoration: 'none' }}>Terms of Service</Link>
+                    {' '}and{' '}
+                    <Link to="/privacy-policy" style={{ fontWeight: 600, color: tokens.secondary, textDecoration: 'none' }}>Privacy Policy</Link>.
+                  </Typography>
+                }
+                sx={{ alignItems: 'flex-start' }}
               />
-              <label htmlFor="terms" className="ml-2 block text-sm text-slate-700">
-                I agree to the{' '}
-                <Link to="/terms-conditions" className="font-medium text-slate-900 hover:text-slate-700">
-                  Terms and Conditions
-                </Link>{' '}
-                and{' '}
-                <Link to="/privacy-policy" className="font-medium text-slate-900 hover:text-slate-700">
-                  Privacy Policy
-                </Link>
-              </label>
-            </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 px-4 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Creating account...' : 'Create account'}
-            </button>
-          </form>
-
-          <div className="mt-8 text-center">
-            <p className="text-sm text-slate-600">
-              Already have an account?{' '}
-              <Link
-                to="/login"
-                className="font-medium text-slate-900 hover:text-slate-700 transition-colors duration-200"
+              {/* CTA */}
+              <Button
+                type="submit"
+                fullWidth
+                variant="contained"
+                disabled={loading}
+                endIcon={!loading && <Icon>arrow_forward</Icon>}
+                sx={{
+                  py: { xs: 1.75, md: 2.25 },
+                  bgcolor: tokens.primaryContainer,
+                  color: tokens.onPrimaryContainer,
+                  fontFamily: fonts.headline,
+                  fontWeight: 700,
+                  fontSize: { xs: '1rem', md: '1.125rem' },
+                  borderRadius: 3,
+                  boxShadow: `0 10px 40px -10px ${alpha(tokens.onSurface, 0.15)}`,
+                  transition: 'all 0.2s',
+                  '&:hover': { bgcolor: tokens.primary },
+                  '&:active': { transform: 'scale(0.98)' },
+                }}
               >
-                Sign in
-              </Link>
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
+                {loading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : 'Create Account'}
+              </Button>
+            </Box>
+
+            {/* Footer link */}
+            <Box sx={{ textAlign: 'center', pt: 4, borderTop: `1px solid ${alpha(tokens.outlineVariant, 0.2)}` }}>
+              <Typography sx={{ color: tokens.onSurfaceVariant }}>
+                Already have an account?{' '}
+                <Link to="/login" style={{ color: tokens.primary, fontWeight: 700, textDecoration: 'none', marginLeft: 4 }}>
+                  Log in
+                </Link>
+              </Typography>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+
+      {/* ── Footer ─────────────────────────────────────── */}
+      <Box
+        component="footer"
+        sx={{
+          bgcolor: tokens.primary,
+          py: { xs: 5, md: 6 },
+          px: { xs: 3, md: 4 },
+          display: 'flex',
+          flexDirection: { xs: 'column', md: 'row' },
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 3,
+        }}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: { xs: 'center', md: 'flex-start' } }}>
+          <Typography sx={{ fontFamily: fonts.display, fontSize: '1.25rem', color: tokens.surface }}>Hatvoni</Typography>
+          <Typography sx={{ fontSize: '0.625rem', letterSpacing: '0.15em', textTransform: 'uppercase', color: alpha(tokens.surface, 0.6), fontFamily: fonts.body }}>
+            © 2024 Hatvoni. The Modern Ethnobotanist.
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: { xs: 3, md: 4 } }}>
+          {['Privacy Policy', 'Terms of Service', 'Contact Us', 'Shipping Info'].map((item) => (
+            <Typography key={item} component="a" href="#" sx={{ color: alpha(tokens.surface, 0.8), fontSize: '0.6875rem', fontFamily: fonts.label, letterSpacing: '0.15em', textTransform: 'uppercase', textDecoration: 'none', transition: 'color 0.2s', '&:hover': { color: tokens.secondaryContainer } }}>
+              {item}
+            </Typography>
+          ))}
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tokens.secondaryContainer }} />
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: tokens.tertiary }} />
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: alpha(tokens.secondaryContainer, 0.4) }} />
+        </Box>
+      </Box>
+    </Box>
   );
 }

@@ -52,6 +52,17 @@ const recipePageModalInitialState = (item) => ({
   default_pantry_input: (item?.default_pantry_essentials || []).join(', '),
 });
 
+/* ─── Style constants ──────────────────────────────────────────────────────── */
+const C = {
+  primary: '#004a2b',
+  accent: '#815500',
+  muted: '#3f4942',
+  border: '#c8c8b9',
+  bg: '#fbfaf1',
+  bgCard: '#f5f4eb',
+  white: '#ffffff',
+};
+
 export default function AdminModal({ type, item, catalogProducts, sellerOptions, onClose, onSave }) {
   const [formData, setFormData] = useState(() => {
     if (type === 'recipes') return recipeModalInitialState(item);
@@ -170,247 +181,337 @@ export default function AdminModal({ type, item, catalogProducts, sellerOptions,
     setLotItems((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
   };
 
-  const labelClass = "block text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/70 mb-2";
-  const inputClass = "w-full px-5 py-3.5 border border-outline-variant/30 rounded-2xl bg-surface-container-lowest focus:border-primary focus:bg-primary/5 focus:ring-4 focus:ring-primary/5 focus:outline-none transition-all font-body text-primary font-bold placeholder:font-normal placeholder:opacity-40";
-  const selectClass = "w-full px-5 py-3.5 border border-outline-variant/30 rounded-2xl bg-surface-container-lowest focus:border-primary focus:bg-primary/5 focus:outline-none transition-all font-body text-primary font-bold appearance-none cursor-pointer";
+  /* ─── Reusable form element components ──────────────────────────────────── */
+  const Label = ({ children }) => (
+    <label className="block text-[10px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: `${C.muted}99` }}>{children}</label>
+  );
+
+  const Input = ({ className = '', ...props }) => (
+    <input
+      {...props}
+      className={`w-full h-9 px-3 text-xs font-medium rounded-lg border transition-all outline-none ${className}`}
+      style={{
+        borderColor: `${C.border}50`,
+        backgroundColor: C.white,
+        color: C.primary,
+      }}
+      onFocus={(e) => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px ${C.primary}15`; props.onFocus?.(e); }}
+      onBlur={(e) => { e.target.style.borderColor = `${C.border}50`; e.target.style.boxShadow = 'none'; props.onBlur?.(e); }}
+    />
+  );
+
+  const Select = ({ className = '', children, ...props }) => (
+    <select
+      {...props}
+      className={`w-full h-9 px-3 text-xs font-medium rounded-lg border transition-all outline-none appearance-none cursor-pointer ${className}`}
+      style={{
+        borderColor: `${C.border}50`,
+        backgroundColor: C.white,
+        color: C.primary,
+        backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%233f4942' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 10px center',
+        paddingRight: '28px',
+      }}
+    >
+      {children}
+    </select>
+  );
+
+  const TextArea = ({ className = '', ...props }) => (
+    <textarea
+      {...props}
+      className={`w-full px-3 py-2.5 text-xs font-medium rounded-lg border transition-all outline-none resize-none leading-relaxed ${className}`}
+      style={{
+        borderColor: `${C.border}50`,
+        backgroundColor: C.white,
+        color: C.primary,
+      }}
+      onFocus={(e) => { e.target.style.borderColor = C.primary; e.target.style.boxShadow = `0 0 0 3px ${C.primary}15`; }}
+      onBlur={(e) => { e.target.style.borderColor = `${C.border}50`; e.target.style.boxShadow = 'none'; }}
+    />
+  );
+
+  const ToggleCard = ({ checked, onChange, icon, label, sublabel, activeColor = '#004a2b', disabled = false }) => (
+    <label className={`flex items-center gap-3 p-3 rounded-xl border cursor-pointer transition-all ${disabled ? 'opacity-50 cursor-not-allowed' : 'hover:shadow-sm'}`}
+      style={{
+        borderColor: checked ? `${activeColor}40` : `${C.border}30`,
+        backgroundColor: checked ? `${activeColor}08` : C.white,
+      }}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="sr-only"
+      />
+      <div className="w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all"
+        style={{
+          borderColor: checked ? activeColor : `${C.border}60`,
+          backgroundColor: checked ? activeColor : 'transparent',
+        }}
+      >
+        {checked && <span className="material-symbols-outlined text-white" style={{ fontSize: '14px' }}>check</span>}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className="material-symbols-outlined" style={{ fontSize: '16px', color: checked ? activeColor : `${C.muted}80` }}>{icon}</span>
+          <span className="text-xs font-semibold" style={{ color: checked ? activeColor : C.muted }}>{label}</span>
+        </div>
+        {sublabel && <p className="text-[9px] mt-0.5" style={{ color: `${C.muted}80` }}>{sublabel}</p>}
+      </div>
+    </label>
+  );
+
+  const SectionCard = ({ children, className = '' }) => (
+    <div className={`p-4 rounded-xl border ${className}`} style={{ borderColor: `${C.border}20`, backgroundColor: `${C.bgCard}60` }}>
+      {children}
+    </div>
+  );
+
+  const SectionLabel = ({ children }) => (
+    <p className="text-[9px] font-semibold uppercase tracking-wider mb-3" style={{ color: `${C.muted}60` }}>{children}</p>
+  );
+
+  const typeLabel = type === 'customers' ? 'Customer'
+    : type === 'products' ? 'Product'
+    : type === 'lots' ? 'Bundle'
+    : type === 'recipes' ? 'Recipe'
+    : type === 'recipe-page' ? 'Page Config'
+    : 'Order';
 
   return (
-    <div className="fixed inset-0 bg-black/80 backdrop-blur-xl flex items-center justify-center z-50 p-4 sm:p-6 animate-in fade-in duration-300" onClick={onClose}>
-      <div className="bg-surface-container-lowest rounded-[3rem] border border-outline-variant/30 max-w-2xl w-full max-h-[92vh] overflow-y-auto shadow-[0_32px_120px_rgba(0,0,0,0.5)] flex flex-col animate-in zoom-in-95 slide-in-from-bottom-8 duration-500" onClick={(e) => e.stopPropagation()}>
-        
-        {/* Header */}
-        <div className="sticky top-0 bg-surface-container-lowest/95 backdrop-blur-sm z-10 px-10 py-8 border-b border-outline-variant/10 flex items-center justify-between">
-          <div>
-             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-secondary mb-1 block">Administrative Tool</span>
-             <h3 className="font-brand text-3xl font-bold text-primary tracking-tight">
-               {item ? 'Modify' : 'Initialize'} {
-                 type === 'customers' ? 'Customer'
-                 : type === 'products' ? 'Product'
-                 : type === 'lots' ? 'Bundle'
-                 : type === 'recipes' ? 'Recipe'
-                 : type === 'recipe-page' ? 'Section Config'
-                 : 'Order'
-               }
-             </h3>
+    <div className="fixed inset-0 flex items-center justify-center z-50 p-4" style={{ backgroundColor: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }} onClick={onClose}>
+      <div className="rounded-2xl max-w-xl w-full max-h-[88vh] overflow-hidden shadow-2xl flex flex-col" style={{ backgroundColor: C.white, border: `1px solid ${C.border}25` }} onClick={(e) => e.stopPropagation()}>
+
+        {/* ─── Header ──────────────────────────────────────────────────────── */}
+        <div className="sticky top-0 z-10 px-5 py-3.5 flex items-center justify-between" style={{ backgroundColor: C.white, borderBottom: `1px solid ${C.border}20` }}>
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: `${C.primary}10` }}>
+              <span className="material-symbols-outlined" style={{ fontSize: '16px', color: C.primary }}>
+                {type === 'customers' ? 'person' : type === 'products' ? 'inventory_2' : type === 'lots' ? 'deployed_code' : type === 'recipes' ? 'local_dining' : type === 'recipe-page' ? 'menu_book' : 'list_alt'}
+              </span>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-widest" style={{ color: C.accent }}>{item ? 'Edit' : 'New'}</p>
+              <h3 className="text-base font-bold tracking-tight" style={{ fontFamily: '"Plus Jakarta Sans",sans-serif', color: C.primary }}>{typeLabel}</h3>
+            </div>
           </div>
-          <button onClick={onClose} className="w-12 h-12 rounded-full hover:bg-surface-container-low text-on-surface-variant hover:text-red-500 focus:text-red-500 transition-all active:scale-95 flex items-center justify-center border border-outline-variant/20 shadow-sm">
-            <span className="material-symbols-outlined text-2xl font-bold">close</span>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-red-50 hover:text-red-500" style={{ color: `${C.muted}80`, border: `1px solid ${C.border}25` }}>
+            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
           </button>
         </div>
 
-        {/* Content */}
-        <form onSubmit={handleSubmit} className="px-10 py-8 flex-1 space-y-8">
-          
-          {/* CUSTOMERS FORM */}
+        {/* ─── Content ─────────────────────────────────────────────────────── */}
+        <form onSubmit={handleSubmit} className="px-5 py-4 flex-1 overflow-y-auto space-y-4">
+
+          {/* ── CUSTOMERS ─────────────────────────────────────────────────── */}
           {type === 'customers' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className={labelClass}>Legal First Name</label>
-                  <input type="text" placeholder="e.g. Priom" value={formData.first_name || ''} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} className={inputClass} />
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>First Name</Label>
+                  <Input type="text" placeholder="e.g. Priom" value={formData.first_name || ''} onChange={(e) => setFormData({ ...formData, first_name: e.target.value })} />
                 </div>
-                <div className="space-y-2">
-                  <label className={labelClass}>Surnames</label>
-                  <input type="text" placeholder="e.g. Hazarika" value={formData.last_name || ''} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} className={inputClass} />
+                <div>
+                  <Label>Last Name</Label>
+                  <Input type="text" placeholder="e.g. Hazarika" value={formData.last_name || ''} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} />
                 </div>
               </div>
-              <div className="space-y-2">
-                <label className={labelClass}>Verified Phone Number</label>
-                <input type="tel" placeholder="+91 000-000-0000" value={formData.phone || ''} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} className={inputClass} />
+              <div>
+                <Label>Phone Number</Label>
+                <Input type="tel" placeholder="+91 000-000-0000" value={formData.phone || ''} onChange={(e) => setFormData({ ...formData, phone: e.target.value })} />
               </div>
-              
-              <div className="p-6 rounded-[2rem] bg-surface-container-low/50 border border-outline-variant/20 space-y-4">
-                 <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant/60 mb-2">Access Privileges</p>
-                 <div className="grid grid-cols-2 gap-4">
-                    <label className={`flex items-center gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${formData.is_admin ? 'bg-amber-50 border-amber-200 text-amber-900' : 'bg-surface border-outline-variant/30 text-on-surface-variant'}`}>
-                       <input type="checkbox" checked={formData.is_admin || false} onChange={(e) => setFormData({ ...formData, is_admin: e.target.checked })} className="w-5 h-5 rounded-lg border-outline-variant text-amber-600 focus:ring-amber-500" />
-                       <span className="font-bold text-sm tracking-tight flex items-center gap-2">
-                          <span className="material-symbols-outlined text-lg">admin_panel_settings</span>
-                          Administrator
-                       </span>
-                    </label>
-                    <label className={`flex items-center gap-3 p-4 rounded-2xl border transition-all cursor-pointer ${formData.is_seller ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-surface border-outline-variant/30 text-on-surface-variant'}`}>
-                       <input type="checkbox" checked={formData.is_seller || false} onChange={(e) => setFormData({ ...formData, is_seller: e.target.checked })} className="w-5 h-5 rounded-lg border-outline-variant text-emerald-600 focus:ring-emerald-500" />
-                       <span className="font-bold text-sm tracking-tight flex items-center gap-2">
-                          <span className="material-symbols-outlined text-lg">storefront</span>
-                          Merchant
-                       </span>
-                    </label>
-                 </div>
-              </div>
+              <SectionCard>
+                <SectionLabel>Access Roles</SectionLabel>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <ToggleCard
+                    checked={formData.is_admin || false}
+                    onChange={(e) => setFormData({ ...formData, is_admin: e.target.checked })}
+                    icon="admin_panel_settings"
+                    label="Administrator"
+                    sublabel="Full system access"
+                    activeColor="#b45309"
+                  />
+                  <ToggleCard
+                    checked={formData.is_seller || false}
+                    onChange={(e) => setFormData({ ...formData, is_seller: e.target.checked })}
+                    icon="storefront"
+                    label="Merchant"
+                    sublabel="Can manage products"
+                    activeColor="#047857"
+                  />
+                </div>
+              </SectionCard>
             </div>
           )}
 
-          {/* PRODUCTS FORM */}
+          {/* ── PRODUCTS ──────────────────────────────────────────────────── */}
           {type === 'products' && (
-            <div className="space-y-6">
-              <div className="grid grid-cols-[1fr_200px] gap-5">
-                <div className="space-y-2">
-                   <label className={labelClass}>Human Readable Name *</label>
-                   <input type="text" required placeholder="e.g. Bamboo Salt Jar" value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} className={inputClass} />
+            <div className="space-y-4">
+              <div className="grid grid-cols-[1fr_160px] gap-3">
+                <div>
+                  <Label>Product Name *</Label>
+                  <Input type="text" required placeholder="e.g. Bamboo Salt Jar" value={formData.name || ''} onChange={(e) => setFormData({ ...formData, name: e.target.value })} />
                 </div>
-                <div className="space-y-2">
-                   <label className={labelClass}>Internal Stock Key *</label>
-                   <input type="text" required placeholder="BAMBOO_01" value={formData.key || ''} onChange={(e) => setFormData({ ...formData, key: e.target.value })} className={`${inputClass} font-mono`} />
+                <div>
+                  <Label>Stock Key *</Label>
+                  <Input type="text" required placeholder="BAMBOO_01" value={formData.key || ''} onChange={(e) => setFormData({ ...formData, key: e.target.value })} className="font-mono" />
                 </div>
               </div>
-              
-              <div className="space-y-2">
-                <label className={labelClass}>Product Lifecycle Summary</label>
-                <textarea rows={3} placeholder="Describe materials, origin and taste profile..." value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className={`${inputClass} resize-none leading-relaxed p-5`} />
+              <div>
+                <Label>Description</Label>
+                <TextArea rows={2} placeholder="Describe materials, origin and taste profile..." value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
               </div>
-
-              <div className="grid grid-cols-2 gap-5">
-                <div className="space-y-2">
-                  <label className={labelClass}>Base Retail Price (₹)</label>
-                  <input type="number" step="0.01" required placeholder="0.00" value={formData.price || ''} onChange={(e) => setFormData({ ...formData, price: e.target.value })} className={inputClass} />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Price (₹)</Label>
+                  <Input type="number" step="0.01" required placeholder="0.00" value={formData.price || ''} onChange={(e) => setFormData({ ...formData, price: e.target.value })} />
                 </div>
-                <div className="space-y-2">
-                  <label className={labelClass}>Category</label>
-                   <select value={formData.category || ''} onChange={(e) => setFormData({ ...formData, category: e.target.value })} className={selectClass}>
-                      <option value="">Select Department</option>
-                      <option value="Pickles">Pickles</option>
-                      <option value="Spices">Spices</option>
-                      <option value="Tea">Tea</option>
-                      <option value="Handicrafts">Handicrafts</option>
-                      <option value="Superfoods">Superfoods</option>
-                   </select>
+                <div>
+                  <Label>Category</Label>
+                  <Select value={formData.category || ''} onChange={(e) => setFormData({ ...formData, category: e.target.value })}>
+                    <option value="">Select</option>
+                    <option value="Pickles">Pickles</option>
+                    <option value="Spices">Spices</option>
+                    <option value="Tea">Tea</option>
+                    <option value="Handicrafts">Handicrafts</option>
+                    <option value="Superfoods">Superfoods</option>
+                  </Select>
                 </div>
               </div>
 
-              <div className="p-6 rounded-[2rem] bg-surface-container-low/50 border border-outline-variant/20 space-y-6">
-                 <div className="space-y-2">
-                    <label className={labelClass}>Fulfillment Partnership</label>
-                    <select value={formData.seller_id || ''} onChange={(e) => {
-                      const newSellerId = e.target.value || null;
-                      const newSeller = (sellerOptions || []).find((s) => s.id === newSellerId);
-                      setFormData({ ...formData, seller_id: newSellerId, sync_with_insider: newSeller?.is_own_seller ? formData.sync_with_insider : false });
-                    }} className={selectClass}>
-                      <option value="">Unmanaged Catalog</option>
-                      {(sellerOptions || []).map((seller) => (
-                        <option key={seller.id} value={seller.id}>{`${seller.first_name || ''} ${seller.last_name || ''}`.trim() || seller.email} {seller.is_own_seller ? '(Hatvoni)' : '(Partner)'}</option>
-                      ))}
-                    </select>
-                 </div>
-
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className={`p-4 rounded-2xl border transition-all ${formData.sync_with_insider ? 'bg-secondary/5 border-secondary/30' : 'bg-surface border-outline-variant/20'}`}>
-                       <label className="flex items-center gap-3 cursor-pointer">
-                          <input type="checkbox" checked={formData.sync_with_insider || false} disabled={!(sellerOptions || []).find(s => s.id === formData.seller_id)?.is_own_seller} onChange={(e) => setFormData({ ...formData, sync_with_insider: e.target.checked })} className="w-5 h-5 rounded-lg border-outline-variant text-secondary focus:ring-secondary" />
-                          <div className="flex flex-col">
-                             <span className="font-bold text-sm tracking-tight">Sync Inventory</span>
-                             <span className="text-[9px] font-black uppercase opacity-60">Insider API</span>
-                          </div>
-                       </label>
-                    </div>
-                    <div className={`p-4 rounded-2xl border transition-all ${formData.show_as_individual_product !== false ? 'bg-primary/5 border-primary/30' : 'bg-surface border-outline-variant/20'}`}>
-                       <label className="flex items-center gap-3 cursor-pointer">
-                          <input type="checkbox" checked={formData.show_as_individual_product !== false} onChange={(e) => setFormData({ ...formData, show_as_individual_product: e.target.checked })} className="w-5 h-5 rounded-lg border-outline-variant text-primary focus:ring-primary" />
-                          <div className="flex flex-col">
-                             <span className="font-bold text-sm tracking-tight">Public Listing</span>
-                             <span className="text-[9px] font-black uppercase opacity-60">Main Shop</span>
-                          </div>
-                       </label>
-                    </div>
-                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* LOTS FORM */}
-          {type === 'lots' && (
-            <div className="space-y-6">
-              <div className="space-y-2">
-                <label className={labelClass}>Collection Reference Name</label>
-                <input type="text" required placeholder="Ethno-Modern Starter Pack" value={formData.lot_name || ''} onChange={(e) => setFormData({ ...formData, lot_name: e.target.value })} className={inputClass} />
-              </div>
-              <div className="space-y-2">
-                <label className={labelClass}>Marketing Blurb</label>
-                <textarea rows={2} placeholder="A curated collection of basics..." value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} className={inputClass} />
-              </div>
-
-              <div className="grid grid-cols-2 gap-5">
-                 <div className="p-5 rounded-[2rem] bg-primary/5 border border-primary/20 flex flex-col items-center justify-center">
-                    <span className="text-[9px] font-bold text-primary uppercase tracking-[0.2em] mb-1">Total Bundle Value</span>
-                    <span className="text-3xl font-brand font-bold text-primary tracking-tighter">₹{calculatedLotPrice.toLocaleString('en-IN')}</span>
-                 </div>
-                 <div className="space-y-2">
-                    <label className={labelClass}>Availability Status</label>
-                    <select value={formData.status || 'active'} onChange={(e) => setFormData({ ...formData, status: e.target.value })} className={selectClass}>
-                       <option value="active">Operational</option>
-                       <option value="inactive">Sold Out / Archive</option>
-                    </select>
-                 </div>
-              </div>
-
-              <div className="rounded-[2.5rem] bg-surface-container-low/50 border border-outline-variant/20 overflow-hidden">
-                 <div className="px-8 py-6 border-b border-outline-variant/10 flex items-center justify-between">
-                    <div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-on-surface-variant">Unit Configuration</p>
-                        <p className="text-xs text-on-surface-variant/60 font-medium">Add products to this signature lot bundle</p>
-                    </div>
-                    <button type="button" onClick={addLotRow} className="w-10 h-10 rounded-full bg-primary text-white hover:scale-105 transition-all shadow-lg flex items-center justify-center border-4 border-white">
-                       <span className="material-symbols-outlined font-bold">add</span>
-                    </button>
-                 </div>
-                 <div className="p-6 space-y-3 max-h-[400px] overflow-y-auto">
-                    {lotItems.length === 0 ? (
-                      <div className="text-center py-10 opacity-30">
-                         <span className="material-symbols-outlined text-4xl mb-2">inventory</span>
-                         <p className="text-xs font-bold uppercase tracking-widest">No Items Added</p>
-                      </div>
-                    ) : lotItems.map((row, index) => (
-                      <div key={index} className="flex gap-3 group animate-in slide-in-from-right-4 duration-300">
-                        <select
-                          value={row.product_key}
-                          onChange={(e) => updateLotRow(index, 'product_key', e.target.value)}
-                          className={`${selectClass} flex-1 py-3 text-xs`}
-                        >
-                          <option value="">Search Master Catalog...</option>
-                          {catalogProducts.map((product) => (
-                            <option key={product.id} value={product.key || product.external_product_id || product.id}>
-                              {product.name} (₹{Number(product.price || 0).toLocaleString('en-IN')})
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min="1"
-                          value={row.quantity}
-                          onChange={(e) => updateLotRow(index, 'quantity', Number(e.target.value) || 1)}
-                          className={`${inputClass} w-24 py-3 text-xs text-center`}
-                        />
-                        <button type="button" onClick={() => removeLotRow(index)} className="w-10 h-10 shrink-0 rounded-xl bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center border border-red-100 shadow-sm">
-                          <span className="material-symbols-outlined text-lg font-bold">delete</span>
-                        </button>
-                      </div>
+              <SectionCard>
+                <SectionLabel>Fulfillment & Visibility</SectionLabel>
+                <div className="mb-3">
+                  <Label>Seller</Label>
+                  <Select value={formData.seller_id || ''} onChange={(e) => {
+                    const newSellerId = e.target.value || null;
+                    const newSeller = (sellerOptions || []).find((s) => s.id === newSellerId);
+                    setFormData({ ...formData, seller_id: newSellerId, sync_with_insider: newSeller?.is_own_seller ? formData.sync_with_insider : false });
+                  }}>
+                    <option value="">Unmanaged</option>
+                    {(sellerOptions || []).map((seller) => (
+                      <option key={seller.id} value={seller.id}>{`${seller.first_name || ''} ${seller.last_name || ''}`.trim() || seller.email} {seller.is_own_seller ? '(Hatvoni)' : '(Partner)'}</option>
                     ))}
-                 </div>
-              </div>
+                  </Select>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <ToggleCard
+                    checked={formData.sync_with_insider || false}
+                    onChange={(e) => setFormData({ ...formData, sync_with_insider: e.target.checked })}
+                    disabled={!(sellerOptions || []).find(s => s.id === formData.seller_id)?.is_own_seller}
+                    icon="sync"
+                    label="Sync Inventory"
+                    sublabel="Insider API"
+                    activeColor="#815500"
+                  />
+                  <ToggleCard
+                    checked={formData.show_as_individual_product !== false}
+                    onChange={(e) => setFormData({ ...formData, show_as_individual_product: e.target.checked })}
+                    icon="visibility"
+                    label="Public Listing"
+                    sublabel="Show in shop"
+                  />
+                </div>
+              </SectionCard>
             </div>
           )}
-          
+
+          {/* ── LOTS/BUNDLES ──────────────────────────────────────────────── */}
+          {type === 'lots' && (
+            <div className="space-y-4">
+              <div>
+                <Label>Bundle Name</Label>
+                <Input type="text" required placeholder="Ethno-Modern Starter Pack" value={formData.lot_name || ''} onChange={(e) => setFormData({ ...formData, lot_name: e.target.value })} />
+              </div>
+              <div>
+                <Label>Description</Label>
+                <TextArea rows={2} placeholder="A curated collection of basics..." value={formData.description || ''} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3.5 rounded-xl flex flex-col items-center justify-center" style={{ backgroundColor: `${C.primary}08`, border: `1px solid ${C.primary}20` }}>
+                  <span className="text-[9px] font-semibold uppercase tracking-wider mb-1" style={{ color: `${C.primary}99` }}>Bundle Value</span>
+                  <span className="text-xl font-bold tracking-tight" style={{ fontFamily: '"Plus Jakarta Sans",sans-serif', color: C.primary }}>₹{calculatedLotPrice.toLocaleString('en-IN')}</span>
+                </div>
+                <div>
+                  <Label>Status</Label>
+                  <Select value={formData.status || 'active'} onChange={(e) => setFormData({ ...formData, status: e.target.value })}>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </Select>
+                </div>
+              </div>
+
+              <SectionCard>
+                <div className="flex items-center justify-between mb-3">
+                  <SectionLabel>Bundle Items</SectionLabel>
+                  <button type="button" onClick={addLotRow} className="h-7 px-3 rounded-lg text-white text-[10px] font-semibold flex items-center gap-1 transition-colors hover:opacity-90" style={{ backgroundColor: C.primary }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>add</span>
+                    Add Item
+                  </button>
+                </div>
+                <div className="space-y-2 max-h-[280px] overflow-y-auto">
+                  {lotItems.length === 0 ? (
+                    <div className="text-center py-6" style={{ color: `${C.muted}30` }}>
+                      <span className="material-symbols-outlined block mb-1" style={{ fontSize: '28px' }}>inventory</span>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider">No items added</p>
+                    </div>
+                  ) : lotItems.map((row, index) => (
+                    <div key={index} className="flex gap-2 items-center">
+                      <Select
+                        value={row.product_key}
+                        onChange={(e) => updateLotRow(index, 'product_key', e.target.value)}
+                        className="flex-1"
+                      >
+                        <option value="">Select product...</option>
+                        {catalogProducts.map((product) => (
+                          <option key={product.id} value={product.key || product.external_product_id || product.id}>
+                            {product.name} (₹{Number(product.price || 0).toLocaleString('en-IN')})
+                          </option>
+                        ))}
+                      </Select>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={row.quantity}
+                        onChange={(e) => updateLotRow(index, 'quantity', Number(e.target.value) || 1)}
+                        className="!w-16 text-center"
+                      />
+                      <button type="button" onClick={() => removeLotRow(index)} className="w-8 h-8 shrink-0 rounded-lg flex items-center justify-center transition-all hover:bg-red-500 hover:text-white" style={{ backgroundColor: '#fef2f2', color: '#ef4444', border: '1px solid #fee2e2' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>delete</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </SectionCard>
+            </div>
+          )}
+
+          {/* ── RECIPES FORM (placeholder — structure preserved) ──────────── */}
           {/* ... More forms for recipes, orders similarly ... */}
 
-          {/* SHARED ASSET FIELDS */}
+          {/* ── SHARED: Image Upload ──────────────────────────────────────── */}
           {(type === 'products' || type === 'lots' || type === 'recipes') && (
-            <div className="space-y-4">
-              <label className={labelClass}>Primary Visual Asset (URL)</label>
-              <div className="flex gap-3">
-                 <input type="url" placeholder="https://cdn.hatvoni.com/assets/..." value={formData.image_url || ''} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} className={inputClass} />
-                 {type === 'recipes' && (
-                   <label className="shrink-0 w-14 h-14 rounded-2xl bg-secondary text-white hover:bg-secondary/80 transition-all active:scale-95 flex items-center justify-center cursor-pointer shadow-lg border-4 border-white">
-                      <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImage} />
-                      <span className="material-symbols-outlined">{uploadingImage ? 'sync' : 'upload'}</span>
-                   </label>
-                 )}
+            <div className="space-y-3">
+              <Label>Image URL</Label>
+              <div className="flex gap-2">
+                <Input type="url" placeholder="https://cdn.hatvoni.com/..." value={formData.image_url || ''} onChange={(e) => setFormData({ ...formData, image_url: e.target.value })} />
+                {type === 'recipes' && (
+                  <label className="shrink-0 w-9 h-9 rounded-lg flex items-center justify-center cursor-pointer transition-all hover:opacity-80" style={{ backgroundColor: C.accent, color: C.white }}>
+                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImage} />
+                    <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>{uploadingImage ? 'sync' : 'upload'}</span>
+                  </label>
+                )}
               </div>
               {formData.image_url && (
-                <div className="w-full h-40 rounded-[2rem] border-2 border-dashed border-outline-variant/30 overflow-hidden group/preview relative">
-                   <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover transition-transform duration-700 group-hover/preview:scale-105" />
-                   <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/preview:opacity-100 transition-opacity">
-                      <span className="text-white text-[10px] font-black uppercase tracking-widest bg-black/50 px-4 py-2 rounded-full backdrop-blur-md">VIsual Asset Preview</span>
-                   </div>
+                <div className="w-full h-32 rounded-xl overflow-hidden relative group" style={{ border: `1px dashed ${C.border}40` }}>
+                  <img src={formData.image_url} alt="Preview" className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    <span className="text-white text-[9px] font-semibold uppercase tracking-widest px-3 py-1 rounded-full" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)' }}>Preview</span>
+                  </div>
                 </div>
               )}
             </div>
@@ -418,23 +519,24 @@ export default function AdminModal({ type, item, catalogProducts, sellerOptions,
 
         </form>
 
-        {/* Action Bar */}
-        <div className="sticky bottom-0 bg-surface-container-lowest border-t border-outline-variant/10 px-10 py-8 flex items-center justify-between gap-6 z-10">
-           <button type="button" onClick={onClose} className="px-8 py-4 rounded-2xl font-brand font-bold text-on-surface-variant hover:bg-surface-container-low transition-all active:scale-95">
-             Discard Changes
-           </button>
-           <button 
-             onClick={handleSubmit}
-             disabled={saving}
-             className="px-10 py-4 bg-tertiary text-white rounded-2xl font-brand font-bold text-lg hover:bg-tertiary/90 shadow-[0_12px_40px_rgba(0,121,107,0.3)] hover:shadow-[0_12px_45px_rgba(0,121,107,0.4)] transition-all active:scale-95 flex items-center gap-3 disabled:opacity-50"
-           >
-             {saving ? (
-                <span className="material-symbols-outlined animate-spin">progress_activity</span>
-             ) : (
-                <span className="material-symbols-outlined">save</span>
-             )}
-             {item ? 'Authorize Updates' : 'Commit to Database'}
-           </button>
+        {/* ─── Footer Action Bar ────────────────────────────────────────── */}
+        <div className="sticky bottom-0 z-10 px-5 py-3 flex items-center justify-end gap-2.5" style={{ backgroundColor: C.white, borderTop: `1px solid ${C.border}20` }}>
+          <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-xs font-semibold transition-all hover:opacity-80" style={{ color: C.muted, backgroundColor: `${C.bgCard}` }}>
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving}
+            className="h-9 px-5 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 transition-all hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: C.primary }}
+          >
+            {saving ? (
+              <span className="material-symbols-outlined animate-spin" style={{ fontSize: '14px' }}>progress_activity</span>
+            ) : (
+              <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check</span>
+            )}
+            {item ? 'Save Changes' : 'Create'}
+          </button>
         </div>
       </div>
     </div>

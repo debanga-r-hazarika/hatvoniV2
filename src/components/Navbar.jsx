@@ -3,6 +3,24 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { cartService } from '../services/cartService';
 
+import AppBar from '@mui/material/AppBar';
+import Toolbar from '@mui/material/Toolbar';
+import Drawer from '@mui/material/Drawer';
+import Badge from '@mui/material/Badge';
+import Avatar from '@mui/material/Avatar';
+import IconButton from '@mui/material/IconButton';
+import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Divider from '@mui/material/Divider';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
+import ListItemIcon from '@mui/material/ListItemIcon';
+import ListItemText from '@mui/material/ListItemText';
+import Chip from '@mui/material/Chip';
+import { alpha, useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+
 const navLinks = [
   { to: '/', label: 'Home' },
   { to: '/products', label: 'Shop' },
@@ -14,17 +32,19 @@ const navLinks = [
 ];
 
 export default function Navbar() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('lg'));
+  const isSmUp = useMediaQuery(theme.breakpoints.up('sm'));
+
   const [scrolled, setScrolled] = useState(false);
   const [hidden, setHidden] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   const [cartCount, setCartCount] = useState(() => cartService.getCartCount());
   const { user, profile, isAdmin, isEmployee, isSeller, signOut } = useAuth();
   const navigate = useNavigate();
 
   const lastScrollY = useRef(0);
   const ticking = useRef(false);
-  const navRef = useRef(null);
 
   const handleScroll = useCallback(() => {
     const currentScrollY = window.scrollY;
@@ -58,16 +78,6 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', onScroll);
   }, [handleScroll]);
 
-  const closeMenu = useCallback(() => {
-    if (menuOpen) {
-      setIsClosing(true);
-      setTimeout(() => {
-        setMenuOpen(false);
-        setIsClosing(false);
-      }, 280);
-    }
-  }, [menuOpen]);
-
   useEffect(() => {
     if (menuOpen) {
       document.body.style.overflow = 'hidden';
@@ -86,13 +96,8 @@ export default function Navbar() {
     return unsubscribe;
   }, []);
 
-  const toggleMenu = () => {
-    if (menuOpen) {
-      closeMenu();
-    } else {
-      setMenuOpen(true);
-    }
-  };
+  const toggleMenu = () => setMenuOpen(!menuOpen);
+  const closeMenu = () => setMenuOpen(false);
 
   const handleSignOut = async () => {
     closeMenu();
@@ -101,379 +106,767 @@ export default function Navbar() {
   };
 
   const getUserDisplayName = () => {
-    if (profile?.first_name) {
-      return profile.first_name;
-    }
-    if (user?.email) {
-      return user.email.split('@')[0];
-    }
+    if (profile?.first_name) return profile.first_name;
+    if (user?.email) return user.email.split('@')[0];
     return 'User';
   };
 
-  const handleLinkClick = () => {
-    closeMenu();
-  };
+  const handleLinkClick = () => closeMenu();
 
+  /* ── Render ─────────────────────────────────────────── */
   return (
     <>
-      <header
-        ref={navRef}
-        className={`fixed top-0 w-full z-50 transition-all duration-500 ease-out font-body ${
-          hidden ? '-translate-y-full' : 'translate-y-0'
-        }`}
-        style={{ willChange: 'transform' }}
+      <AppBar
+        position="fixed"
+        sx={{
+          transform: hidden ? 'translateY(-100%)' : 'translateY(0)',
+          transition: 'all 0.5s cubic-bezier(0.22, 1, 0.36, 1)',
+          willChange: 'transform',
+          bgcolor: 'transparent',
+          boxShadow: 'none',
+          zIndex: theme.zIndex.appBar,
+        }}
       >
-        {/* Top Announcement Bar */}
-        <div className="bg-primary text-white py-1.5 px-4 text-center text-xs tracking-wide border-b border-primary-fixed/20 relative z-10 hidden sm:block">
-          Discover the Authentic Heritage & Flavors of Northeast India
-        </div>
-
-        {/* Main Navbar */}
-        <div 
-          className={`w-full transition-all duration-500 ${
-            scrolled
-              ? 'bg-surface/90 backdrop-blur-md shadow-sm border-b border-outline-variant/30 py-3'
-              : 'bg-surface py-4 md:py-6'
-          }`}
-        >
-          <nav className="flex justify-between items-center px-4 md:px-8 xl:px-12 w-full max-w-screen-2xl mx-auto">
-            {/* Logo */}
-            <Link
-              to="/"
-              className="flex items-center gap-2 hover:opacity-80 transition-opacity z-10"
+        {/* ─── Announcement Bar ─── */}
+        {isSmUp && (
+          <Box
+            sx={{
+              bgcolor: 'primary.main',
+              color: 'white',
+              py: 0.75,
+              px: 2,
+              textAlign: 'center',
+              borderBottom: `1px solid ${alpha(theme.palette.hatvoni.primaryFixed, 0.2)}`,
+              position: 'relative',
+              zIndex: 10,
+            }}
+          >
+            <Typography
+              variant="overline"
+              sx={{
+                fontSize: '0.6875rem',
+                letterSpacing: '0.12em',
+                fontWeight: 500,
+                lineHeight: 1.6,
+              }}
             >
-              <span className="text-2xl md:text-4xl font-bold tracking-tight font-brand text-primary leading-[0.9]">
-                 Hatvoni
-              </span>
-            </Link>
+              Discover the Authentic Heritage & Flavors of Northeast India
+            </Typography>
+          </Box>
+        )}
 
-            {/* Desktop nav links */}
-            <div className="hidden lg:flex items-center gap-2 xl:gap-4 absolute left-1/2 -translate-x-1/2">
+        {/* ─── Main Toolbar ─── */}
+        <Toolbar
+          disableGutters
+          sx={{
+            bgcolor: scrolled
+              ? alpha(theme.palette.hatvoni.surface, 0.9)
+              : theme.palette.hatvoni.surface,
+            backdropFilter: scrolled ? 'blur(12px)' : 'none',
+            WebkitBackdropFilter: scrolled ? 'blur(12px)' : 'none',
+            borderBottom: scrolled
+              ? `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`
+              : 'none',
+            boxShadow: scrolled ? theme.shadows[1] : 'none',
+            py: scrolled ? 1 : { xs: 1.5, md: 2.5 },
+            px: { xs: 2, md: 4, xl: 6 },
+            transition: 'all 0.5s ease',
+            maxWidth: '1536px',
+            width: '100%',
+            mx: 'auto',
+            position: 'relative',
+          }}
+        >
+          {/* ─── Logo ─── */}
+          <Link to="/" style={{ textDecoration: 'none', zIndex: 10 }}>
+            <Typography
+              variant="h4"
+              sx={{
+                fontFamily: '"Plus Jakarta Sans", sans-serif',
+                fontWeight: 700,
+                color: 'primary.main',
+                fontSize: { xs: '1.5rem', md: '2.25rem' },
+                letterSpacing: '-0.02em',
+                lineHeight: 0.9,
+                transition: 'opacity 0.3s ease',
+                '&:hover': { opacity: 0.8 },
+              }}
+            >
+              Hatvoni
+            </Typography>
+          </Link>
+
+          {/* ─── Desktop Nav Links ─── */}
+          {isDesktop && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: { lg: 0.5, xl: 1 },
+                position: 'absolute',
+                left: '50%',
+                transform: 'translateX(-50%)',
+              }}
+            >
               {navLinks.map((link) => (
                 <NavLink
                   key={link.to}
                   to={link.to}
-                  className={({ isActive }) =>
-                    `relative px-3 py-2 rounded-full transition-all duration-300 text-[14px] xl:text-[15px] font-medium tracking-wide ${
-                      isActive
-                        ? 'text-primary'
-                        : 'text-primary/70 hover:text-primary hover:bg-primary/5'
-                    }`
-                  }
                   end={link.to === '/'}
+                  style={{ textDecoration: 'none' }}
                 >
                   {({ isActive }) => (
-                    <>
+                    <Box
+                      sx={{
+                        position: 'relative',
+                        px: 1.5,
+                        py: 1,
+                        borderRadius: '9999px',
+                        fontSize: { lg: '0.875rem', xl: '0.9375rem' },
+                        fontWeight: 500,
+                        fontFamily: '"Inter", sans-serif',
+                        letterSpacing: '0.02em',
+                        color: isActive
+                          ? 'primary.main'
+                          : alpha(theme.palette.primary.main, 0.65),
+                        transition: 'all 0.3s ease',
+                        cursor: 'pointer',
+                        '&:hover': {
+                          color: 'primary.main',
+                          bgcolor: alpha(theme.palette.primary.main, 0.05),
+                        },
+                      }}
+                    >
                       {link.label}
                       {isActive && (
-                        <span className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-[3px] w-1 bg-secondary rounded-full" />
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            bottom: -2,
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            height: 3,
+                            width: 5,
+                            bgcolor: 'secondary.main',
+                            borderRadius: '9999px',
+                          }}
+                        />
                       )}
-                    </>
+                    </Box>
                   )}
                 </NavLink>
               ))}
-            </div>
+            </Box>
+          )}
 
-            {/* Icons & Utility */}
-            <div className="flex items-center space-x-1 md:space-x-3 z-10">
-              <div className="hidden sm:flex space-x-2">
-                <Link
+          {/* ─── Right-side Actions ─── */}
+          <Box sx={{ display: 'flex', alignItems: 'center', ml: 'auto', gap: { xs: 0.25, md: 0.5 }, zIndex: 10 }}>
+            {/* Desktop Wishlist & Cart */}
+            {isSmUp && (
+              <Box sx={{ display: 'flex', gap: 0.5 }}>
+                <IconButton
+                  component={Link}
                   to="/wishlist"
-                  className="relative p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
                   aria-label="Wishlist"
+                  sx={{
+                    color: alpha(theme.palette.primary.main, 0.7),
+                    '&:hover': { color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.05) },
+                  }}
                 >
-                  <span className="material-symbols-outlined text-[24px] transition-transform duration-300 group-hover:scale-110">favorite</span>
-                </Link>
-                <Link
+                  <span className="material-symbols-outlined" style={{ fontSize: 24 }}>favorite</span>
+                </IconButton>
+                <IconButton
+                  component={Link}
                   to="/cart"
-                  className="relative p-2.5 text-primary/80 hover:text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 group"
                   aria-label="Cart"
+                  sx={{
+                    color: alpha(theme.palette.primary.main, 0.7),
+                    '&:hover': { color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.05) },
+                  }}
                 >
-                  <span className="material-symbols-outlined text-[24px] transition-transform duration-300 group-hover:scale-110">shopping_cart</span>
-                  {cartCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 bg-secondary-container text-on-secondary-container text-[10px] min-w-[18px] h-[18px] px-1 rounded-full flex items-center justify-center font-bold border-2 border-surface shadow-sm">
-                      {cartCount}
-                    </span>
-                  )}
-                </Link>
-              </div>
+                  <Badge
+                    badgeContent={cartCount}
+                    color="primary"
+                    sx={{
+                      '& .MuiBadge-badge': {
+                        bgcolor: theme.palette.hatvoni.secondaryContainer,
+                        color: theme.palette.hatvoni.onSecondaryContainer,
+                        fontSize: '0.625rem',
+                        fontWeight: 800,
+                        minWidth: 18,
+                        height: 18,
+                        border: `2px solid ${theme.palette.hatvoni.surface}`,
+                      },
+                    }}
+                  >
+                    <span className="material-symbols-outlined" style={{ fontSize: 24 }}>shopping_cart</span>
+                  </Badge>
+                </IconButton>
+              </Box>
+            )}
 
-              {/* User / Auth Section */}
-              {user ? (
-                <>
-                  <div className="hidden md:flex items-center space-x-4 ml-4 border-l border-outline-variant/40 pl-6">
-                    {(isAdmin || isEmployee) && (
-                      <Link
-                        to="/admin"
-                        className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-amber-500 text-white hover:bg-amber-600 rounded-full transition-all duration-300 shadow-sm hover:shadow active:scale-95 hidden xl:block"
-                      >
-                        {isAdmin ? 'Admin' : 'Staff'}
-                      </Link>
-                    )}
-                    {isSeller && (
-                      <Link
-                        to="/seller"
-                        className="px-4 py-2 text-xs font-semibold uppercase tracking-wider border border-primary text-primary hover:bg-primary hover:text-white rounded-full transition-all duration-300 active:scale-95 hidden xl:block"
-                      >
-                        Seller
-                      </Link>
-                    )}
-                    <div className="relative group">
-                      <Link
-                        to="/profile"
-                        className="flex items-center gap-2 px-1.5 py-1.5 pr-4 hover:bg-primary/5 rounded-full border border-transparent hover:border-outline-variant/30 transition-all duration-300"
-                      >
-                        {profile?.avatar_url ? (
-                          <img src={profile.avatar_url} alt="Profile" className="w-8 h-8 rounded-full object-cover shadow-sm" />
-                        ) : (
-                          <div className="w-8 h-8 rounded-full bg-surface-variant flex items-center justify-center text-primary/70">
-                            <span className="material-symbols-outlined text-[20px]">person</span>
-                          </div>
-                        )}
-                        <span className="text-sm font-medium text-primary hidden lg:block truncate max-w-[120px]">{getUserDisplayName()}</span>
-                      </Link>
-                    </div>
-                  </div>
-
-                  {/* Mobile Icons */}
-                  <div className="flex sm:hidden items-center ml-2">
-                    <Link
-                      to="/cart"
-                      className="relative p-2 text-primary/80 hover:text-primary rounded-full transition-all duration-300"
+            {/* User Section */}
+            {user ? (
+              <>
+                {/* Desktop auth section */}
+                <Box
+                  sx={{
+                    display: { xs: 'none', md: 'flex' },
+                    alignItems: 'center',
+                    gap: 1.5,
+                    ml: 2,
+                    pl: 3,
+                    borderLeft: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.4)}`,
+                  }}
+                >
+                  {(isAdmin || isEmployee) && (
+                    <Button
+                      component={Link}
+                      to="/admin"
+                      size="small"
+                      sx={{
+                        display: { xs: 'none', xl: 'inline-flex' },
+                        bgcolor: '#f59e0b',
+                        color: '#fff',
+                        fontSize: '0.6875rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        px: 2,
+                        py: 0.75,
+                        borderRadius: '9999px',
+                        '&:hover': { bgcolor: '#d97706' },
+                      }}
                     >
-                      <span className="material-symbols-outlined text-[22px]">shopping_cart</span>
-                      {cartCount > 0 && (
-                        <span className="absolute top-1 right-0 bg-secondary-container text-on-secondary-container text-[9px] min-w-[16px] h-[16px] px-1 rounded-full flex items-center justify-center font-bold">
-                          {cartCount}
-                        </span>
+                      {isAdmin ? 'Admin' : 'Staff'}
+                    </Button>
+                  )}
+                  {isSeller && (
+                    <Button
+                      component={Link}
+                      to="/seller"
+                      variant="outlined"
+                      size="small"
+                      sx={{
+                        display: { xs: 'none', xl: 'inline-flex' },
+                        fontSize: '0.6875rem',
+                        fontWeight: 700,
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        px: 2,
+                        py: 0.75,
+                      }}
+                    >
+                      Seller
+                    </Button>
+                  )}
+                  <IconButton
+                    component={Link}
+                    to="/profile"
+                    sx={{
+                      p: 0.5,
+                      pr: 2,
+                      borderRadius: '9999px',
+                      border: '1px solid transparent',
+                      '&:hover': {
+                        bgcolor: alpha(theme.palette.primary.main, 0.05),
+                        border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`,
+                      },
+                    }}
+                  >
+                    <Avatar
+                      src={profile?.avatar_url}
+                      alt={getUserDisplayName()}
+                      sx={{
+                        width: 32,
+                        height: 32,
+                        bgcolor: theme.palette.hatvoni.surfaceVariant,
+                        color: alpha(theme.palette.primary.main, 0.7),
+                        fontSize: '0.875rem',
+                        mr: 1,
+                      }}
+                    >
+                      {!profile?.avatar_url && (
+                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>person</span>
                       )}
-                    </Link>
-                  </div>
-                </>
-              ) : (
-                <div className="hidden md:flex items-center space-x-3 ml-4 border-l border-outline-variant/40 pl-6">
-                  <Link
-                     to="/login"
-                     className="text-sm font-medium text-primary hover:text-primary/70 transition-colors duration-300 px-3 py-2"
-                  >
-                     Log In
-                  </Link>
-                  <Link
-                    to="/signup"
-                    className="px-5 py-2.5 text-sm font-semibold bg-primary text-white hover:bg-primary/90 rounded-full transition-all duration-300 shadow-sm hover:shadow-md active:scale-95"
-                  >
-                    Join Us
-                  </Link>
-                </div>
-              )}
+                    </Avatar>
+                    <Typography
+                      variant="body2"
+                      sx={{
+                        display: { xs: 'none', lg: 'block' },
+                        fontWeight: 500,
+                        color: 'primary.main',
+                        maxWidth: 120,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {getUserDisplayName()}
+                    </Typography>
+                  </IconButton>
+                </Box>
 
-              {/* Mobile Menu Toggle */}
-              <button
-                className="lg:hidden p-2 text-primary hover:bg-primary/5 rounded-full transition-all duration-300 active:scale-95 ml-2"
+                {/* Mobile cart icon (only visible on xs) */}
+                {!isSmUp && (
+                  <IconButton
+                    component={Link}
+                    to="/cart"
+                    aria-label="Cart"
+                    size="small"
+                    sx={{
+                      color: alpha(theme.palette.primary.main, 0.7),
+                      ml: 0.5,
+                    }}
+                  >
+                    <Badge
+                      badgeContent={cartCount}
+                      sx={{
+                        '& .MuiBadge-badge': {
+                          bgcolor: theme.palette.hatvoni.secondaryContainer,
+                          color: theme.palette.hatvoni.onSecondaryContainer,
+                          fontSize: '0.5625rem',
+                          fontWeight: 800,
+                          minWidth: 16,
+                          height: 16,
+                        },
+                      }}
+                    >
+                      <span className="material-symbols-outlined" style={{ fontSize: 22 }}>shopping_cart</span>
+                    </Badge>
+                  </IconButton>
+                )}
+              </>
+            ) : (
+              /* Logged-out buttons */
+              <Box
+                sx={{
+                  display: { xs: 'none', md: 'flex' },
+                  alignItems: 'center',
+                  gap: 1,
+                  ml: 2,
+                  pl: 3,
+                  borderLeft: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.4)}`,
+                }}
+              >
+                <Button
+                  component={Link}
+                  to="/login"
+                  variant="text"
+                  sx={{ fontSize: '0.875rem', fontWeight: 500, color: 'primary.main' }}
+                >
+                  Log In
+                </Button>
+                <Button
+                  component={Link}
+                  to="/signup"
+                  variant="contained"
+                  sx={{
+                    px: 3,
+                    py: 1.25,
+                    fontSize: '0.875rem',
+                    fontWeight: 600,
+                    boxShadow: theme.shadows[1],
+                    '&:hover': { boxShadow: theme.shadows[3] },
+                  }}
+                >
+                  Join Us
+                </Button>
+              </Box>
+            )}
+
+            {/* ─── Mobile Menu Toggle ─── */}
+            {!isDesktop && (
+              <IconButton
                 onClick={toggleMenu}
                 aria-label="Toggle menu"
                 aria-expanded={menuOpen}
+                sx={{
+                  ml: 1,
+                  color: 'primary.main',
+                  '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.05) },
+                }}
               >
-                <div className="w-[22px] h-[16px] flex flex-col justify-between items-end relative">
-                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? 'rotate-45 top-1/2 -translate-y-1/2' : 'top-0'}`} />
-                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-200 absolute w-[80%] top-1/2 -translate-y-1/2 ${menuOpen ? 'opacity-0 translate-x-2' : ''}`} />
-                  <span className={`h-[2px] bg-primary rounded-full transition-all duration-300 absolute w-full ${menuOpen ? '-rotate-45 top-1/2 -translate-y-1/2' : 'bottom-0'}`} />
-                </div>
-              </button>
-            </div>
-          </nav>
-        </div>
-      </header>
+                <Box
+                  sx={{
+                    width: 22,
+                    height: 16,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-end',
+                    position: 'relative',
+                  }}
+                >
+                  <Box
+                    component="span"
+                    sx={{
+                      height: 2,
+                      bgcolor: 'primary.main',
+                      borderRadius: 9999,
+                      transition: 'all 0.3s ease',
+                      position: 'absolute',
+                      width: '100%',
+                      ...(menuOpen
+                        ? { transform: 'rotate(45deg)', top: '50%', mt: '-1px' }
+                        : { top: 0 }),
+                    }}
+                  />
+                  <Box
+                    component="span"
+                    sx={{
+                      height: 2,
+                      bgcolor: 'primary.main',
+                      borderRadius: 9999,
+                      transition: 'all 0.2s ease',
+                      position: 'absolute',
+                      width: '80%',
+                      top: '50%',
+                      mt: '-1px',
+                      ...(menuOpen ? { opacity: 0, transform: 'translateX(8px)' } : {}),
+                    }}
+                  />
+                  <Box
+                    component="span"
+                    sx={{
+                      height: 2,
+                      bgcolor: 'primary.main',
+                      borderRadius: 9999,
+                      transition: 'all 0.3s ease',
+                      position: 'absolute',
+                      width: '100%',
+                      ...(menuOpen
+                        ? { transform: 'rotate(-45deg)', top: '50%', mt: '-1px' }
+                        : { bottom: 0 }),
+                    }}
+                  />
+                </Box>
+              </IconButton>
+            )}
+          </Box>
+        </Toolbar>
+      </AppBar>
 
-      {/* Mobile Sidebar Overlay */}
-      {(menuOpen || isClosing) && (
-        <>
-          <div
-            className={`fixed inset-0 bg-scrim/40 backdrop-blur-sm z-40 lg:hidden transition-opacity duration-400 ease-in-out ${
-              isClosing ? 'opacity-0' : 'opacity-100'
-            }`}
+      {/* ─── Mobile Drawer ─── */}
+      <Drawer
+        anchor="right"
+        open={menuOpen}
+        onClose={closeMenu}
+        sx={{
+          display: { lg: 'none' },
+          '& .MuiDrawer-paper': {
+            width: { xs: '85%', sm: 360 },
+            maxWidth: 360,
+            bgcolor: theme.palette.hatvoni.surface,
+            borderRadius: 0,
+            border: 'none',
+          },
+          '& .MuiBackdrop-root': {
+            bgcolor: alpha(theme.palette.common.black, 0.4),
+            backdropFilter: 'blur(4px)',
+          },
+        }}
+      >
+        {/* Drawer Header */}
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            px: 3,
+            py: 2.5,
+            borderBottom: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+          }}
+        >
+          <Link to="/" onClick={handleLinkClick} style={{ textDecoration: 'none' }}>
+            <Typography
+              sx={{
+                fontFamily: '"Plus Jakarta Sans", sans-serif',
+                fontSize: '1.875rem',
+                color: 'primary.main',
+                letterSpacing: '-0.03em',
+                lineHeight: 1,
+                fontWeight: 700,
+              }}
+            >
+              Hatvoni
+            </Typography>
+          </Link>
+          <IconButton
             onClick={closeMenu}
-            aria-hidden="true"
-          />
-
-          <div
-            className={`fixed top-0 right-0 h-[100dvh] w-[85%] max-w-[360px] bg-surface z-50 lg:hidden flex flex-col shadow-[rgba(0,0,0,0.1)_0px_10px_50px] transition-transform duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] ${
-              isClosing ? 'translate-x-full' : 'translate-x-0'
-            }`}
+            aria-label="Close menu"
+            sx={{
+              color: alpha(theme.palette.primary.main, 0.6),
+              mr: -0.5,
+              '&:hover': {
+                color: 'primary.main',
+                bgcolor: theme.palette.hatvoni.surfaceContainer,
+              },
+            }}
           >
-            <div className="flex items-center justify-between px-6 py-5 border-b border-primary/10 bg-surface">
-              <Link
-                to="/"
-                onClick={handleLinkClick}
-                className="font-brand text-3xl text-primary tracking-tighter leading-none"
-              >
-                Hatvoni
-              </Link>
-              <button
-                onClick={closeMenu}
-                className="w-10 h-10 text-primary/70 hover:text-primary hover:bg-surface-container rounded-full transition-all duration-300 flex items-center justify-center -mr-2 bg-surface"
-                aria-label="Close menu"
-              >
-                <span className="material-symbols-outlined text-[20px]">close</span>
-              </button>
-            </div>
+            <span className="material-symbols-outlined" style={{ fontSize: 20 }}>close</span>
+          </IconButton>
+        </Box>
 
-            <div className="flex-1 overflow-y-auto px-5 py-6 no-scrollbar bg-surface-container-lowest">
-              <nav className="flex flex-col space-y-1 mb-8">
-                {navLinks.map((link, index) => (
-                  <NavLink
-                    key={link.to}
-                    to={link.to}
-                    className={({ isActive }) =>
-                      `flex items-center px-4 py-3.5 rounded-2xl font-headline tracking-wide text-[16px] transition-all duration-300 ${
-                        isActive
-                          ? 'text-primary bg-primary/5 font-semibold'
-                          : 'text-primary/70 hover:bg-surface-container hover:text-primary'
-                      }`
-                    }
+        {/* Drawer Body */}
+        <Box
+          sx={{
+            flex: 1,
+            overflowY: 'auto',
+            px: 2.5,
+            py: 3,
+            bgcolor: theme.palette.hatvoni.surfaceContainerLowest,
+            '&::-webkit-scrollbar': { display: 'none' },
+            msOverflowStyle: 'none',
+            scrollbarWidth: 'none',
+          }}
+        >
+          {/* Nav Links */}
+          <List disablePadding>
+            {navLinks.map((link) => (
+              <ListItemButton
+                key={link.to}
+                component={NavLink}
+                to={link.to}
+                end={link.to === '/'}
+                onClick={handleLinkClick}
+                sx={{
+                  borderRadius: 4,
+                  mb: 0.25,
+                  py: 1.5,
+                  px: 2,
+                  fontFamily: '"Plus Jakarta Sans", sans-serif',
+                  fontWeight: 500,
+                  fontSize: '1rem',
+                  letterSpacing: '0.01em',
+                  color: alpha(theme.palette.primary.main, 0.65),
+                  '&.active': {
+                    color: 'primary.main',
+                    bgcolor: alpha(theme.palette.primary.main, 0.05),
+                    fontWeight: 600,
+                  },
+                  '&:hover': {
+                    bgcolor: theme.palette.hatvoni.surfaceContainer,
+                    color: 'primary.main',
+                  },
+                }}
+              >
+                <ListItemText
+                  primary={link.label}
+                  primaryTypographyProps={{
+                    fontFamily: '"Plus Jakarta Sans", sans-serif',
+                    fontWeight: 'inherit',
+                    fontSize: 'inherit',
+                    letterSpacing: 'inherit',
+                  }}
+                />
+              </ListItemButton>
+            ))}
+          </List>
+
+          {/* Shopping Section */}
+          <Divider sx={{ my: 3, borderColor: alpha(theme.palette.primary.main, 0.1) }} />
+          <Typography variant="overline" sx={{ color: alpha(theme.palette.primary.main, 0.35), px: 2, mb: 1, display: 'block' }}>
+            Shopping
+          </Typography>
+          <List disablePadding>
+            <ListItemButton component={Link} to="/wishlist" onClick={handleLinkClick} sx={{ borderRadius: 4, py: 1.5, px: 2 }}>
+              <ListItemIcon sx={{ minWidth: 36, color: alpha(theme.palette.primary.main, 0.5) }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>favorite</span>
+              </ListItemIcon>
+              <ListItemText primary="Wishlist" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+            </ListItemButton>
+            <ListItemButton component={Link} to="/cart" onClick={handleLinkClick} sx={{ borderRadius: 4, py: 1.5, px: 2 }}>
+              <ListItemIcon sx={{ minWidth: 36, color: alpha(theme.palette.primary.main, 0.5) }}>
+                <span className="material-symbols-outlined" style={{ fontSize: 20 }}>shopping_cart</span>
+              </ListItemIcon>
+              <ListItemText primary="Shopping Cart" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+              {cartCount > 0 && (
+                <Chip
+                  label={cartCount}
+                  size="small"
+                  sx={{
+                    bgcolor: theme.palette.hatvoni.secondaryContainer,
+                    color: theme.palette.hatvoni.onSecondaryContainer,
+                    fontSize: '0.75rem',
+                    fontWeight: 800,
+                    height: 24,
+                    minWidth: 32,
+                  }}
+                />
+              )}
+            </ListItemButton>
+          </List>
+
+          {/* Account Section */}
+          <Divider sx={{ my: 3, borderColor: alpha(theme.palette.primary.main, 0.1) }} />
+          <Typography variant="overline" sx={{ color: alpha(theme.palette.primary.main, 0.35), px: 2, mb: 1, display: 'block' }}>
+            Account
+          </Typography>
+          <List disablePadding>
+            {user ? (
+              <>
+                {(isAdmin || isEmployee) && (
+                  <ListItemButton
+                    component={Link}
+                    to="/admin"
                     onClick={handleLinkClick}
-                    end={link.to === '/'}
-                    style={{
-                      animationDelay: `${index * 40}ms`,
-                      animation: isClosing ? 'none' : 'slideInRight 0.4s cubic-bezier(0.22,1,0.36,1) forwards',
-                      opacity: isClosing ? 1 : 0,
+                    sx={{
+                      borderRadius: 4,
+                      py: 1.5,
+                      px: 2,
+                      bgcolor: alpha('#f59e0b', 0.1),
+                      color: '#b45309',
+                      '&:hover': { bgcolor: alpha('#f59e0b', 0.2) },
                     }}
                   >
-                    {link.label}
-                  </NavLink>
-                ))}
-              </nav>
-
-              <div className="pt-6 border-t border-primary/10 flex flex-col space-y-2">
-                <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest px-4 mb-2">Shopping</div>
-                <Link
-                  to="/wishlist"
-                  onClick={handleLinkClick}
-                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
-                  style={{ animationDelay: '200ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                >
-                  <span className="material-symbols-outlined text-[20px] text-primary/60">favorite</span>
-                  Wishlist
-                </Link>
-                <Link
-                  to="/cart"
-                  onClick={handleLinkClick}
-                  className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
-                  style={{ animationDelay: '240ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                >
-                  <span className="material-symbols-outlined text-[20px] text-primary/60">shopping_cart</span>
-                  Shopping Cart
-                  {cartCount > 0 && <span className="ml-auto bg-secondary-container text-on-secondary-container text-xs px-2.5 py-0.5 rounded-full font-bold">{cartCount}</span>}
-                </Link>
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-primary/10 flex flex-col space-y-2">
-                <div className="text-[10px] font-bold text-primary/40 uppercase tracking-widest px-4 mb-2">Account</div>
-                {user ? (
-                  <>
-                    {(isAdmin || isEmployee) && (
-                      <Link
-                        to="/admin"
-                        onClick={handleLinkClick}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-amber-500/10 text-amber-700 font-body text-sm font-semibold hover:bg-amber-500/20 transition-all duration-300"
-                        style={{ animationDelay: '280ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                      >
-                        <span className="material-symbols-outlined text-[20px]">admin_panel_settings</span>
-                        {isAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
-                      </Link>
-                    )}
-                    {isSeller && (
-                      <Link
-                        to="/seller"
-                        onClick={handleLinkClick}
-                        className="flex items-center gap-3 px-4 py-3 rounded-2xl bg-primary/10 text-primary font-body text-sm font-semibold hover:bg-primary/20 transition-all duration-300"
-                        style={{ animationDelay: '300ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                      >
-                        <span className="material-symbols-outlined text-[20px]">storefront</span>
-                        Seller Panel
-                      </Link>
-                    )}
-                    
-                    <Link
-                      to="/profile"
-                      onClick={handleLinkClick}
-                      className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
-                      style={{ animationDelay: '320ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                    >
-                      {profile?.avatar_url ? (
-                        <img src={profile.avatar_url} alt="" className="w-5 h-5 rounded-full object-cover" />
-                      ) : (
-                        <span className="material-symbols-outlined text-[20px] text-primary/60">person</span>
-                      )}
-                      My Profile
-                    </Link>
-                    <Link
-                      to="/orders"
-                      onClick={handleLinkClick}
-                      className="flex items-center gap-3 px-4 py-3 rounded-2xl text-primary font-body text-sm hover:bg-surface-container transition-all duration-300"
-                      style={{ animationDelay: '360ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                    >
-                      <span className="material-symbols-outlined text-[20px] text-primary/60">package_2</span>
-                      My Orders
-                    </Link>
-                    <button
-                      onClick={handleSignOut}
-                      className="flex w-full items-center gap-3 px-4 py-3 mt-4 rounded-2xl text-error font-body text-sm font-medium bg-error/5 hover:bg-error/10 transition-all duration-300 text-left"
-                      style={{ animationDelay: '400ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                    >
-                      <span className="material-symbols-outlined text-[20px]">logout</span>
-                      Sign out
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <Link
-                      to="/login"
-                      onClick={handleLinkClick}
-                      className="flex items-center justify-center gap-3 px-4 py-3.5 rounded-2xl bg-surface-container text-primary font-body text-sm font-semibold hover:bg-surface-variant transition-all duration-300"
-                      style={{ animationDelay: '280ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                    >
-                      Log In
-                    </Link>
-                    <Link
-                      to="/signup"
-                      onClick={handleLinkClick}
-                      className="flex items-center justify-center gap-2 px-4 py-3.5 mt-3 rounded-2xl bg-primary text-white font-body text-sm font-semibold hover:bg-primary/90 transition-all duration-300 shadow-md"
-                      style={{ animationDelay: '320ms', animation: isClosing ? 'none' : 'fadeUp 0.4s ease forwards', opacity: isClosing ? 1 : 0 }}
-                    >
-                      Create an Account
-                    </Link>
-                  </>
+                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>admin_panel_settings</span>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={isAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
+                      primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+                    />
+                  </ListItemButton>
                 )}
-              </div>
-            </div>
+                {isSeller && (
+                  <ListItemButton
+                    component={Link}
+                    to="/seller"
+                    onClick={handleLinkClick}
+                    sx={{
+                      borderRadius: 4,
+                      py: 1.5,
+                      px: 2,
+                      mt: 0.5,
+                      bgcolor: alpha(theme.palette.primary.main, 0.1),
+                      color: 'primary.main',
+                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) },
+                    }}
+                  >
+                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>storefront</span>
+                    </ListItemIcon>
+                    <ListItemText
+                      primary="Seller Panel"
+                      primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+                    />
+                  </ListItemButton>
+                )}
+                <ListItemButton component={Link} to="/profile" onClick={handleLinkClick} sx={{ borderRadius: 4, py: 1.5, px: 2, mt: 0.5 }}>
+                  <ListItemIcon sx={{ minWidth: 36, color: alpha(theme.palette.primary.main, 0.5) }}>
+                    {profile?.avatar_url ? (
+                      <Avatar src={profile.avatar_url} alt="" sx={{ width: 20, height: 20 }} />
+                    ) : (
+                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>person</span>
+                    )}
+                  </ListItemIcon>
+                  <ListItemText primary="My Profile" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+                </ListItemButton>
+                <ListItemButton component={Link} to="/orders" onClick={handleLinkClick} sx={{ borderRadius: 4, py: 1.5, px: 2 }}>
+                  <ListItemIcon sx={{ minWidth: 36, color: alpha(theme.palette.primary.main, 0.5) }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>package_2</span>
+                  </ListItemIcon>
+                  <ListItemText primary="My Orders" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+                </ListItemButton>
+                <ListItemButton
+                  onClick={handleSignOut}
+                  sx={{
+                    borderRadius: 4,
+                    py: 1.5,
+                    px: 2,
+                    mt: 2,
+                    color: 'error.main',
+                    bgcolor: alpha(theme.palette.error.main, 0.04),
+                    '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.1) },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                    <span className="material-symbols-outlined" style={{ fontSize: 20 }}>logout</span>
+                  </ListItemIcon>
+                  <ListItemText primary="Sign out" primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 500 }} />
+                </ListItemButton>
+              </>
+            ) : (
+              <>
+                <Box sx={{ mt: 1, display: 'flex', flexDirection: 'column', gap: 1.5, px: 0.5 }}>
+                  <Button
+                    component={Link}
+                    to="/login"
+                    onClick={handleLinkClick}
+                    fullWidth
+                    variant="outlined"
+                    sx={{
+                      py: 1.5,
+                      borderRadius: 4,
+                      fontWeight: 600,
+                      bgcolor: theme.palette.hatvoni.surfaceContainer,
+                      borderColor: 'transparent',
+                      color: 'primary.main',
+                      '&:hover': {
+                        bgcolor: theme.palette.hatvoni.surfaceVariant,
+                        borderColor: 'transparent',
+                      },
+                    }}
+                  >
+                    Log In
+                  </Button>
+                  <Button
+                    component={Link}
+                    to="/signup"
+                    onClick={handleLinkClick}
+                    fullWidth
+                    variant="contained"
+                    sx={{
+                      py: 1.5,
+                      borderRadius: 4,
+                      fontWeight: 600,
+                      boxShadow: theme.shadows[3],
+                    }}
+                  >
+                    Create an Account
+                  </Button>
+                </Box>
+              </>
+            )}
+          </List>
+        </Box>
 
-            <div className="px-6 py-5 border-t border-primary/10 bg-surface">
-              <div className="flex flex-col items-center justify-center">
-                <span className="font-brand text-primary/30 text-2xl leading-[0.9]">Hatvoni</span>
-                <p className="text-[9px] text-primary/50 text-center font-body uppercase tracking-[0.2em] mt-1.5 font-medium">
-                  Authentic Flavors of<br/>Northeast India
-                </p>
-              </div>
-            </div>
-          </div>
-        </>
-      )}
-
-      <style>{`
-        @keyframes slideInRight {
-          from { opacity: 0; transform: translateX(20px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
-        
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
+        {/* Drawer Footer */}
+        <Box
+          sx={{
+            px: 3,
+            py: 2.5,
+            borderTop: `1px solid ${alpha(theme.palette.primary.main, 0.1)}`,
+            textAlign: 'center',
+            bgcolor: theme.palette.hatvoni.surface,
+          }}
+        >
+          <Typography
+            sx={{
+              fontFamily: '"Plus Jakarta Sans", sans-serif',
+              color: alpha(theme.palette.primary.main, 0.25),
+              fontSize: '1.5rem',
+              lineHeight: 0.9,
+            }}
+          >
+            Hatvoni
+          </Typography>
+          <Typography
+            variant="overline"
+            sx={{
+              color: alpha(theme.palette.primary.main, 0.45),
+              fontSize: '0.5625rem',
+              letterSpacing: '0.2em',
+              mt: 0.75,
+              display: 'block',
+              lineHeight: 1.4,
+            }}
+          >
+            Authentic Flavors of<br />Northeast India
+          </Typography>
+        </Box>
+      </Drawer>
     </>
   );
 }

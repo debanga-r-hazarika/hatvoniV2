@@ -2,7 +2,19 @@ import { useLocation, useNavigate, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
+import Icon from '@mui/material/Icon';
+import { alpha, useTheme } from '@mui/material/styles';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { tokens, fonts } from '../theme/hatvoniTheme';
+
 export default function ConfirmAccount() {
+  const theme = useTheme();
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'));
   const location = useLocation();
   const navigate = useNavigate();
   const email = location.state?.email;
@@ -35,157 +47,517 @@ export default function ConfirmAccount() {
     setResendLoading(false);
   };
 
+  /* ── Info card rows ──────────────────────────────────── */
+  const InfoCards = () => (
+    <Box
+      sx={{
+        width: '100%',
+        maxWidth: 800,
+        mt: { xs: 3, md: 6 },
+        display: 'grid',
+        gridTemplateColumns: { xs: '1fr', md: '1fr 1fr 1fr' },
+        gap: { xs: 1.5, md: 3 },
+      }}
+    >
+      {[
+        { icon: 'security', title: 'Secure Link', desc: 'Your confirmation link is uniquely generated and encrypted for your safety.' },
+        { icon: 'support_agent', title: 'Need Help?', desc: 'Our support team is available to assist you with any login issues.' },
+        { icon: 'history_edu', title: 'Our Legacy', desc: 'While you wait, explore our story of North Eastern botanical heritage.' },
+      ].map(({ icon, title, desc }) => (
+        <Box
+          key={title}
+          sx={{
+            bgcolor: alpha(tokens.surfaceContainerLow, 0.8),
+            p: { xs: 2.5, md: 3 },
+            borderRadius: 3,
+            display: 'flex',
+            flexDirection: { xs: 'row', md: 'column' },
+            alignItems: { xs: 'flex-start', md: 'stretch' },
+            gap: { xs: 2, md: 1.5 },
+            border: `1px solid ${alpha(tokens.outlineVariant, 0.1)}`,
+          }}
+        >
+          <Icon sx={{ color: tokens.secondary, fontSize: 24, fontVariationSettings: "'FILL' 1", flexShrink: 0 }}>{icon}</Icon>
+          <Box>
+            <Typography sx={{ fontFamily: fonts.headline, fontWeight: 700, fontSize: '0.875rem', color: tokens.primary }}>{title}</Typography>
+            <Typography sx={{ fontFamily: fonts.body, fontSize: '0.75rem', color: tokens.onSurfaceVariant, mt: 0.5 }}>{desc}</Typography>
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
+
+  /* ── Needs confirmation (email verification pending) ─── */
   if (needsConfirmation) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 sm:p-10">
-            <div className="text-center">
-              <div className="mx-auto w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mb-6">
-                <svg className="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                </svg>
-              </div>
+      <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+        {/* Top accent bar */}
+        <Box sx={{ width: '100%', height: { xs: 6, md: 8 }, bgcolor: tokens.primary }} />
 
-              <h2 className="text-3xl font-bold text-slate-900 mb-3">Check your email</h2>
-              <p className="text-slate-600 mb-6">
-                Please check your email to activate your account
-              </p>
+        <Box
+          component="main"
+          sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            justifyContent: 'center',
+            px: { xs: 2.5, md: 6 },
+            py: { xs: 4, md: 6 },
+            position: 'relative',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Background decorative icons */}
+          <Icon sx={{ position: 'absolute', top: { xs: -40, md: 16 }, left: { xs: -40, md: 16 }, fontSize: { xs: 140, md: 120 }, color: tokens.primary, opacity: 0.1, fontVariationSettings: "'FILL' 1" }}>eco</Icon>
+          <Icon sx={{ position: 'absolute', bottom: { xs: -40, md: 48 }, right: { xs: -40, md: 48 }, fontSize: { xs: 160, md: 180 }, color: tokens.secondary, opacity: 0.1, fontVariationSettings: "'FILL' 1", transform: 'rotate(12deg)' }}>local_florist</Icon>
 
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6 text-left">
-                <div className="flex items-start">
-                  <svg className="w-5 h-5 text-blue-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                  </svg>
-                  <div>
-                    <p className="text-sm font-medium text-slate-900 mb-2">We sent an email to:</p>
-                    {email && (
-                      <p className="text-sm font-semibold text-slate-900 mb-3">
-                        {email}
-                      </p>
-                    )}
-                    <p className="text-sm text-slate-600 mb-2">
-                      Click the verification link in the email to activate your account. Once verified, you'll be automatically logged in.
-                    </p>
-                  </div>
-                </div>
-              </div>
+          {/* ═══════ Main Card ═══════ */}
+          <Box
+            sx={{
+              maxWidth: 800,
+              width: '100%',
+              display: 'grid',
+              gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+              bgcolor: tokens.surfaceContainerLow,
+              borderRadius: { xs: 4, md: 3 },
+              overflow: 'hidden',
+              boxShadow: `0 10px 40px -10px ${alpha(tokens.onSurface, 0.15)}`,
+              position: 'relative',
+              zIndex: 10,
+            }}
+          >
+            {/* ─── Visual side ─── */}
+            <Box
+              sx={{
+                bgcolor: tokens.primaryContainer,
+                p: { xs: 4, md: 6 },
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                position: 'relative',
+                overflow: 'hidden',
+              }}
+            >
+              {/* Dot pattern overlay */}
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: 0,
+                  opacity: 0.05,
+                  pointerEvents: 'none',
+                  backgroundImage: `radial-gradient(${tokens.secondaryContainer} 1px, transparent 1px)`,
+                  backgroundSize: { xs: '15px 15px', md: '20px 20px' },
+                }}
+              />
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
-                <p className="text-xs font-medium text-slate-700 mb-2">Can't find the email?</p>
-                <ul className="text-xs text-slate-600 space-y-1 text-left list-disc list-inside">
-                  <li>Check your spam or junk folder</li>
-                  <li>Make sure you entered the correct email address</li>
-                  <li>Wait a few minutes and check again</li>
-                  <li>Click the button below to resend the email</li>
-                </ul>
-              </div>
+              {/* Icon circle */}
+              <Box
+                sx={{
+                  position: 'relative',
+                  zIndex: 20,
+                  width: { xs: 192, md: 280 },
+                  height: { xs: 192, md: 280 },
+                  bgcolor: tokens.surfaceContainerLowest,
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  border: `${isDesktop ? 8 : 4}px solid ${alpha(tokens.primary, 0.2)}`,
+                }}
+              >
+                <Box sx={{ position: 'relative' }}>
+                  <Icon sx={{ fontSize: { xs: 80, md: 120 }, color: tokens.secondary, fontVariationSettings: "'FILL' 1" }}>mark_email_read</Icon>
+                  <Box
+                    sx={{
+                      position: 'absolute',
+                      top: { xs: -8, md: -16 },
+                      right: { xs: -8, md: -16 },
+                      bgcolor: tokens.tertiary,
+                      color: tokens.onTertiary,
+                      p: { xs: 1, md: 1.5 },
+                      borderRadius: '50%',
+                      animation: 'bounce 2s infinite',
+                      '@keyframes bounce': {
+                        '0%, 100%': { transform: 'translateY(0)' },
+                        '50%': { transform: 'translateY(-6px)' },
+                      },
+                    }}
+                  >
+                    <Icon sx={{ fontSize: { xs: 16, md: 24 } }}>auto_awesome</Icon>
+                  </Box>
+                </Box>
+              </Box>
 
+              <Typography sx={{ mt: { xs: 3, md: 4 }, fontFamily: fonts.label, fontSize: { xs: '0.5rem', md: '0.75rem' }, letterSpacing: '0.2em', textTransform: 'uppercase', color: alpha(tokens.onPrimaryContainer, 0.7) }}>
+                The Modern Ethnobotanist
+              </Typography>
+            </Box>
+
+            {/* ─── Content side ─── */}
+            <Box sx={{ p: { xs: 3, md: 8 }, display: 'flex', flexDirection: 'column', justifyContent: 'center', bgcolor: tokens.surface }}>
+              <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.875rem', md: '2.5rem', lg: '3rem' }, color: tokens.primary, lineHeight: 1.1, mb: { xs: 2, md: 3 }, textAlign: { xs: 'center', md: 'left' } }}>
+                Check Your Inbox
+              </Typography>
+              <Typography sx={{ fontFamily: fonts.body, color: tokens.onSurfaceVariant, fontSize: { xs: '0.875rem', md: '1.125rem' }, lineHeight: 1.6, mb: { xs: 4, md: 5 }, textAlign: { xs: 'center', md: 'left' }, px: { xs: 1, md: 0 } }}>
+                We've sent a digital courier your way. Please follow the link in the email to confirm your identity and continue your journey into our curated collections.
+              </Typography>
+
+              {/* Status Details */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: { xs: 4, md: 6 }, ...(isDesktop ? {} : { bgcolor: alpha(tokens.surfaceContainer, 0.3), p: 2, borderRadius: 3 }) }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: alpha(tokens.secondaryContainer, isDesktop ? 0.3 : 0.2), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon sx={{ color: tokens.secondary, fontSize: 20 }}>drafts</Icon>
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontFamily: fonts.body, fontWeight: 700, fontSize: { xs: '0.75rem', md: '0.875rem' }, color: tokens.onSurface, ...(isDesktop ? {} : { textTransform: 'uppercase', letterSpacing: '0.1em' }) }}>
+                      {isDesktop ? 'Sender Information' : 'Sender'}
+                    </Typography>
+                    <Typography sx={{ fontFamily: fonts.body, fontSize: '0.875rem', color: tokens.onSurfaceVariant }}>
+                      hello@hatvoni.com
+                    </Typography>
+                  </Box>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, ...(isDesktop ? {} : { borderTop: `1px solid ${alpha(tokens.outlineVariant, 0.1)}`, pt: 2 }) }}>
+                  <Box sx={{ width: 40, height: 40, borderRadius: '50%', bgcolor: alpha(tokens.secondaryContainer, isDesktop ? 0.3 : 0.2), display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <Icon sx={{ color: tokens.secondary, fontSize: 20 }}>schedule</Icon>
+                  </Box>
+                  <Box>
+                    <Typography sx={{ fontFamily: fonts.body, fontWeight: 700, fontSize: { xs: '0.75rem', md: '0.875rem' }, color: tokens.onSurface, ...(isDesktop ? {} : { textTransform: 'uppercase', letterSpacing: '0.1em' }) }}>
+                      {isDesktop ? 'Time Remaining' : 'Expiry'}
+                    </Typography>
+                    <Typography sx={{ fontFamily: fonts.body, fontSize: '0.875rem', color: tokens.onSurfaceVariant }}>
+                      Link expires in 24 hours
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+
+              {/* Resend feedback */}
               {resendSuccess && (
-                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-                  <p className="text-sm text-green-600">Confirmation email resent successfully!</p>
-                </div>
+                <Alert severity="success" sx={{ mb: 2, borderRadius: 3 }}>
+                  Confirmation email resent successfully!
+                </Alert>
               )}
-
               {resendError && (
-                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-600">{resendError}</p>
-                </div>
+                <Alert severity="error" sx={{ mb: 2, borderRadius: 3 }}>
+                  {resendError}
+                </Alert>
               )}
 
-              <button
-                onClick={handleResendEmail}
-                disabled={resendLoading || resendSuccess}
-                className="w-full py-3 px-4 bg-slate-900 text-white rounded-lg font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed mb-3"
-              >
-                {resendLoading ? 'Sending...' : resendSuccess ? 'Email sent!' : 'Resend confirmation email'}
-              </button>
+              {/* Actions */}
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                <Button
+                  component={Link}
+                  to="/"
+                  fullWidth
+                  variant="contained"
+                  endIcon={<Icon>arrow_forward</Icon>}
+                  sx={{
+                    py: 1.75,
+                    bgcolor: tokens.primaryContainer,
+                    color: tokens.onPrimaryContainer,
+                    fontFamily: fonts.headline,
+                    fontWeight: 700,
+                    borderRadius: 3,
+                    transition: 'all 0.2s',
+                    '&:hover': { bgcolor: tokens.primary, boxShadow: `0 8px 24px ${alpha(tokens.primary, 0.3)}` },
+                    '&:active': { transform: 'scale(0.95)' },
+                  }}
+                >
+                  Return to Home
+                </Button>
+                <Button
+                  fullWidth
+                  variant="outlined"
+                  onClick={handleResendEmail}
+                  disabled={resendLoading || resendSuccess}
+                  startIcon={resendLoading ? <CircularProgress size={18} /> : <Icon sx={{ fontSize: 18 }}>refresh</Icon>}
+                  sx={{
+                    py: 1.5,
+                    borderColor: alpha(tokens.outlineVariant, 0.4),
+                    color: tokens.primary,
+                    fontFamily: fonts.headline,
+                    fontWeight: 600,
+                    borderRadius: 3,
+                    '&:hover': { bgcolor: tokens.surfaceContainerLow },
+                    '&:active': { transform: 'scale(0.95)' },
+                  }}
+                >
+                  {resendLoading ? 'Sending...' : resendSuccess ? 'Email Sent!' : 'Resend Email'}
+                </Button>
+              </Box>
 
-              <Link
-                to="/login"
-                className="block w-full py-2 text-slate-600 text-center text-sm hover:text-slate-900 transition-colors duration-200"
-              >
-                Back to sign in
-              </Link>
-            </div>
-          </div>
+              <Typography sx={{ mt: 4, fontFamily: fonts.label, fontSize: '0.625rem', color: alpha(tokens.onSurfaceVariant, 0.6), textAlign: 'center', fontStyle: 'italic', letterSpacing: '0.05em' }}>
+                If you don't see it, please check your spam or promotional folders.
+              </Typography>
+            </Box>
+          </Box>
 
-          <p className="mt-6 text-center text-xs text-slate-500">
-            Need help? Contact us at{' '}
-            <a href="mailto:hello@hatvoni.com" className="font-medium text-slate-700 hover:text-slate-900 underline">
-              hello@hatvoni.com
-            </a>
-          </p>
-        </div>
-      </div>
+          {/* ── Info cards ────────────────────────────────── */}
+          <InfoCards />
+        </Box>
+
+        {/* ── Footer ─────────────────────────────────────── */}
+        <Box
+          component="footer"
+          sx={{
+            bgcolor: tokens.primary,
+            py: { xs: 5, md: 6 },
+            px: { xs: 3, md: 4 },
+            display: 'flex',
+            flexDirection: { xs: 'column', md: 'row' },
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 3,
+            width: '100%',
+          }}
+        >
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: { xs: 'center', md: 'flex-start' } }}>
+            <Typography sx={{ fontFamily: fonts.headline, fontSize: '1.25rem', fontWeight: 700, color: tokens.surface }}>Hatvoni</Typography>
+            <Typography sx={{ fontSize: '0.625rem', letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: fonts.body, color: tokens.secondaryContainer }}>
+              © 2024 Hatvoni. The Modern Ethnobotanist.
+            </Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: { xs: 3, md: 4 } }}>
+            {['Privacy Policy', 'Terms of Service', 'Contact Us', 'Shipping Info'].map((item) => (
+              <Typography key={item} component="a" href="#" sx={{ color: alpha(tokens.surface, 0.8), fontSize: '0.875rem', fontFamily: fonts.body, textDecoration: 'none', transition: 'color 0.2s', '&:hover': { color: tokens.secondaryContainer } }}>
+                {item}
+              </Typography>
+            ))}
+          </Box>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Icon sx={{ color: alpha(tokens.surface, 0.8), cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 1 }, opacity: 0.8 }}>language</Icon>
+            <Icon sx={{ color: alpha(tokens.surface, 0.8), cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 1 }, opacity: 0.8 }}>share</Icon>
+          </Box>
+        </Box>
+      </Box>
     );
   }
 
+  /* ── Default: Account confirmed ────────────────────── */
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-white to-slate-100 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full">
-        <div className="bg-white rounded-2xl shadow-xl border border-slate-200 p-8 sm:p-10">
-          <div className="text-center">
-            <div className="mx-auto w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <svg className="w-10 h-10 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Top accent bar */}
+      <Box sx={{ width: '100%', height: { xs: 6, md: 8 }, bgcolor: tokens.primary }} />
 
-            <h2 className="text-3xl font-bold text-slate-900 mb-3">Welcome to Hatvoni!</h2>
-            <p className="text-slate-600 mb-8">
-              Your account has been successfully created and verified
-            </p>
+      <Box
+        component="main"
+        sx={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          px: { xs: 2.5, md: 6 },
+          py: { xs: 4, md: 6 },
+          position: 'relative',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Background decorative icons */}
+        <Icon sx={{ position: 'absolute', top: 16, left: 16, fontSize: 120, color: tokens.primary, opacity: 0.1, fontVariationSettings: "'FILL' 1" }}>eco</Icon>
+        <Icon sx={{ position: 'absolute', bottom: 48, right: 48, fontSize: 180, color: tokens.secondary, opacity: 0.1, fontVariationSettings: "'FILL' 1", transform: 'rotate(12deg)' }}>local_florist</Icon>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-lg p-6 mb-8 text-left">
-              <div className="flex items-start">
-                <svg className="w-5 h-5 text-slate-600 mt-0.5 mr-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                </svg>
-                <div>
-                  <p className="text-sm font-medium text-slate-900 mb-1">Your account is ready to use</p>
-                  <p className="text-sm text-slate-600">
-                    You can now access your profile and start shopping for authentic heritage products.
-                  </p>
-                  {email && (
-                    <p className="text-sm text-slate-500 mt-2">
-                      Account email: <span className="font-medium text-slate-700">{email}</span>
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
+        {/* ═══════ Main Card ═══════ */}
+        <Box
+          sx={{
+            maxWidth: 800,
+            width: '100%',
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' },
+            bgcolor: tokens.surfaceContainerLow,
+            borderRadius: { xs: 4, md: 3 },
+            overflow: 'hidden',
+            boxShadow: `0 10px 40px -10px ${alpha(tokens.onSurface, 0.15)}`,
+            position: 'relative',
+            zIndex: 10,
+          }}
+        >
+          {/* ─── Visual side ─── */}
+          <Box
+            sx={{
+              bgcolor: tokens.primaryContainer,
+              p: { xs: 4, md: 6 },
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              textAlign: 'center',
+              position: 'relative',
+              overflow: 'hidden',
+            }}
+          >
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                opacity: 0.05,
+                pointerEvents: 'none',
+                backgroundImage: `radial-gradient(${tokens.secondaryContainer} 1px, transparent 1px)`,
+                backgroundSize: { xs: '15px 15px', md: '20px 20px' },
+              }}
+            />
+            <Box
+              sx={{
+                position: 'relative',
+                zIndex: 20,
+                width: { xs: 192, md: 280 },
+                height: { xs: 192, md: 280 },
+                bgcolor: tokens.surfaceContainerLowest,
+                borderRadius: '50%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border: `${isDesktop ? 8 : 4}px solid ${alpha(tokens.primary, 0.2)}`,
+              }}
+            >
+              <Box sx={{ position: 'relative' }}>
+                <Icon sx={{ fontSize: { xs: 80, md: 120 }, color: tokens.secondary, fontVariationSettings: "'FILL' 1" }}>check_circle</Icon>
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: -16,
+                    right: -16,
+                    bgcolor: tokens.primaryContainer,
+                    color: tokens.onPrimaryContainer,
+                    p: 1.5,
+                    borderRadius: '50%',
+                    animation: 'bounce 2s infinite',
+                    '@keyframes bounce': {
+                      '0%, 100%': { transform: 'translateY(0)' },
+                      '50%': { transform: 'translateY(-6px)' },
+                    },
+                  }}
+                >
+                  <Icon sx={{ fontSize: 24 }}>celebration</Icon>
+                </Box>
+              </Box>
+            </Box>
+            <Typography sx={{ mt: 4, fontFamily: fonts.label, fontSize: '0.75rem', letterSpacing: '0.2em', textTransform: 'uppercase', color: alpha(tokens.onPrimaryContainer, 0.7) }}>
+              The Modern Ethnobotanist
+            </Typography>
+          </Box>
 
-            <div className="space-y-3">
-              <Link
+          {/* ─── Content side ─── */}
+          <Box sx={{ p: { xs: 3, md: 8 }, display: 'flex', flexDirection: 'column', justifyContent: 'center', bgcolor: tokens.surface }}>
+            <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.875rem', md: '2.5rem' }, color: tokens.primary, lineHeight: 1.1, mb: 3, textAlign: { xs: 'center', md: 'left' } }}>
+              Welcome to Hatvoni!
+            </Typography>
+            <Typography sx={{ fontFamily: fonts.body, color: tokens.onSurfaceVariant, fontSize: '1.125rem', lineHeight: 1.6, mb: 5, textAlign: { xs: 'center', md: 'left' } }}>
+              Your account has been successfully created and verified. You're now part of our heritage community.
+            </Typography>
+
+            {email && (
+              <Box sx={{ p: 3, mb: 4, bgcolor: tokens.surfaceContainerLow, border: `1px solid ${alpha(tokens.outlineVariant, 0.3)}`, borderRadius: 3, textAlign: 'left' }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>Your account is ready to use</Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  You can now access your profile and start shopping for authentic heritage products.
+                </Typography>
+                <Typography variant="caption" sx={{ color: 'text.secondary', mt: 1, display: 'block' }}>
+                  Account email: <strong style={{ color: tokens.onSurface }}>{email}</strong>
+                </Typography>
+              </Box>
+            )}
+
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+              <Button
+                component={Link}
                 to="/profile"
-                className="block w-full py-3 px-4 bg-slate-900 text-white text-center rounded-lg font-medium hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200"
+                fullWidth
+                variant="contained"
+                endIcon={<Icon>arrow_forward</Icon>}
+                sx={{
+                  py: 1.75,
+                  bgcolor: tokens.primaryContainer,
+                  color: tokens.onPrimaryContainer,
+                  fontFamily: fonts.headline,
+                  fontWeight: 700,
+                  borderRadius: 3,
+                  transition: 'all 0.2s',
+                  '&:hover': { bgcolor: tokens.primary, boxShadow: `0 8px 24px ${alpha(tokens.primary, 0.3)}` },
+                  '&:active': { transform: 'scale(0.95)' },
+                }}
               >
                 Go to My Profile
-              </Link>
-              <Link
+              </Button>
+              <Button
+                component={Link}
                 to="/products"
-                className="block w-full py-3 px-4 bg-white border-2 border-slate-300 text-slate-700 text-center rounded-lg font-medium hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-slate-500 transition-all duration-200"
+                fullWidth
+                variant="outlined"
+                sx={{
+                  py: 1.5,
+                  borderColor: alpha(tokens.outlineVariant, 0.4),
+                  color: tokens.primary,
+                  fontFamily: fonts.headline,
+                  fontWeight: 600,
+                  borderRadius: 3,
+                  '&:hover': { bgcolor: tokens.surfaceContainerLow },
+                  '&:active': { transform: 'scale(0.95)' },
+                }}
               >
                 Start Shopping
-              </Link>
-              <Link
+              </Button>
+              <Button
+                component={Link}
                 to="/"
-                className="block w-full py-2 text-slate-600 text-center text-sm hover:text-slate-900 transition-colors duration-200"
+                fullWidth
+                variant="text"
+                sx={{ color: 'text.secondary', fontWeight: 500 }}
               >
                 Go to Homepage
-              </Link>
-            </div>
-          </div>
-        </div>
+              </Button>
+            </Box>
 
-        <p className="mt-6 text-center text-xs text-slate-500">
-          Questions? Contact us at{' '}
-          <a href="mailto:hello@hatvoni.com" className="font-medium text-slate-700 hover:text-slate-900 underline">
-            hello@hatvoni.com
-          </a>
-        </p>
-      </div>
-    </div>
+            <Typography sx={{ mt: 4, fontFamily: fonts.label, fontSize: '0.625rem', color: alpha(tokens.onSurfaceVariant, 0.6), textAlign: 'center', letterSpacing: '0.05em' }}>
+              Questions? Contact us at{' '}
+              <a href="mailto:hello@hatvoni.com" style={{ fontWeight: 600, color: tokens.primary, textDecoration: 'underline' }}>
+                hello@hatvoni.com
+              </a>
+            </Typography>
+          </Box>
+        </Box>
+
+        {/* ── Info cards ────────────────────────────────── */}
+        <InfoCards />
+      </Box>
+
+      {/* ── Footer ─────────────────────────────────────── */}
+      <Box
+        component="footer"
+        sx={{
+          bgcolor: tokens.primary,
+          py: { xs: 5, md: 6 },
+          px: { xs: 3, md: 4 },
+          display: 'flex',
+          flexDirection: { xs: 'column', md: 'row' },
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 3,
+          width: '100%',
+        }}
+      >
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, alignItems: { xs: 'center', md: 'flex-start' } }}>
+          <Typography sx={{ fontFamily: fonts.headline, fontSize: '1.25rem', fontWeight: 700, color: tokens.surface }}>Hatvoni</Typography>
+          <Typography sx={{ fontSize: '0.625rem', letterSpacing: '0.15em', textTransform: 'uppercase', fontFamily: fonts.body, color: tokens.secondaryContainer }}>
+            © 2024 Hatvoni. The Modern Ethnobotanist.
+          </Typography>
+        </Box>
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'center', gap: { xs: 3, md: 4 } }}>
+          {['Privacy Policy', 'Terms of Service', 'Contact Us', 'Shipping Info'].map((item) => (
+            <Typography key={item} component="a" href="#" sx={{ color: alpha(tokens.surface, 0.8), fontSize: '0.875rem', fontFamily: fonts.body, textDecoration: 'none', transition: 'color 0.2s', '&:hover': { color: tokens.secondaryContainer } }}>
+              {item}
+            </Typography>
+          ))}
+        </Box>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Icon sx={{ color: alpha(tokens.surface, 0.8), cursor: 'pointer', opacity: 0.8, '&:hover': { opacity: 1 } }}>language</Icon>
+          <Icon sx={{ color: alpha(tokens.surface, 0.8), cursor: 'pointer', opacity: 0.8, '&:hover': { opacity: 1 } }}>share</Icon>
+        </Box>
+      </Box>
+    </Box>
   );
 }

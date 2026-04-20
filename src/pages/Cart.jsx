@@ -2,10 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { cartService } from '../services/cartService';
 
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
+import Paper from '@mui/material/Paper';
+import Divider from '@mui/material/Divider';
+import Chip from '@mui/material/Chip';
+import Container from '@mui/material/Container';
+import Grid from '@mui/material/Grid';
+import { alpha, useTheme } from '@mui/material/styles';
+
 const DELIVERY_FEE = 79;
 const FREE_DELIVERY_THRESHOLD = 500;
 
 export default function Cart() {
+  const theme = useTheme();
   const navigate = useNavigate();
   const [items, setItems] = useState(() => cartService.getCartItems());
 
@@ -52,175 +64,419 @@ export default function Cart() {
   };
 
   return (
-    <main className="pt-32 pb-24 md:pt-40 md:pb-32 bg-surface min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <header className="mb-10 md:mb-16 flex flex-wrap items-end justify-between gap-6 border-b border-outline-variant/20 pb-8">
-          <div className="space-y-2">
-            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-secondary">Your Selection</span>
-            <h1 className="font-brand text-5xl md:text-7xl text-primary tracking-tighter leading-none">Your Basket</h1>
-            <p className="text-on-surface-variant font-medium tracking-wide text-sm leading-relaxed max-w-lg mt-4">
+    <Box component="main" sx={{ pt: { xs: 16, md: 20 }, pb: { xs: 12, md: 16 }, bgcolor: theme.palette.hatvoni.surface, minHeight: '100vh' }}>
+      <Container maxWidth="lg" sx={{ px: { xs: 2, sm: 3, lg: 4 } }}>
+        {/* Header */}
+        <Box
+          sx={{
+            mb: { xs: 5, md: 8 },
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            justifyContent: 'space-between',
+            gap: 3,
+            borderBottom: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.2)}`,
+            pb: 4,
+          }}
+        >
+          <Box>
+            <Typography variant="overline" sx={{ color: 'secondary.main' }}>Your Selection</Typography>
+            <Typography variant="h1" sx={{ color: 'primary.main', fontSize: { xs: '3rem', md: '4.5rem' }, letterSpacing: '-0.03em', lineHeight: 1 }}>
+              Your Basket
+            </Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 2, maxWidth: 500, fontWeight: 500 }}>
               Review your curated items of authentic North East Indian heritage before proceeding to secure checkout.
-            </p>
-          </div>
+            </Typography>
+          </Box>
           {items.length > 0 && (
-            <button onClick={clearCart} className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-red-600 hover:text-red-700 hover:bg-red-50 px-5 py-3 rounded-xl transition-all active:scale-95">
-              <span className="material-symbols-outlined text-[16px]">close</span>
+            <Button
+              onClick={clearCart}
+              startIcon={<span className="material-symbols-outlined" style={{ fontSize: 16 }}>close</span>}
+              sx={{
+                color: 'error.main',
+                fontSize: '0.6875rem',
+                fontWeight: 700,
+                letterSpacing: '0.15em',
+                textTransform: 'uppercase',
+                borderRadius: 3,
+                '&:hover': { bgcolor: alpha(theme.palette.error.main, 0.05) },
+              }}
+            >
               Clear Basket
-            </button>
+            </Button>
           )}
-        </header>
+        </Box>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 md:gap-14 items-start">
-          <section className="lg:col-span-7 xl:col-span-8 space-y-6 md:space-y-8">
+        <Grid container spacing={{ xs: 4, md: 7 }} alignItems="flex-start">
+          {/* Cart Items */}
+          <Grid size={{ xs: 12, lg: 7, xl: 8 }}>
             {items.length === 0 ? (
-              <div className="text-center py-24 bg-surface-container-lowest border border-outline-variant/30 rounded-[2rem] shadow-sm relative overflow-hidden flex flex-col items-center group">
-                 <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-bl-[150px] -z-10 group-hover:scale-110 transition-transform"></div>
-                <span className="material-symbols-outlined text-[80px] text-primary/10 mb-6">shopping_bag</span>
-                <h2 className="font-brand text-3xl md:text-4xl text-primary mb-3 leading-tight">Your basket is perfectly empty</h2>
-                <p className="text-sm font-medium text-on-surface-variant max-w-md mx-auto mb-8">
+              <Paper
+                elevation={0}
+                sx={{
+                  textAlign: 'center',
+                  py: 12,
+                  borderRadius: 6,
+                  border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`,
+                  position: 'relative',
+                  overflow: 'hidden',
+                }}
+              >
+                <Box sx={{ position: 'absolute', top: 0, right: 0, width: 192, height: 192, bgcolor: alpha(theme.palette.primary.main, 0.04), borderBottomLeftRadius: 150 }} />
+                <span className="material-symbols-outlined" style={{ fontSize: 80, color: alpha(theme.palette.primary.main, 0.08), marginBottom: 24, display: 'block' }}>shopping_bag</span>
+                <Typography variant="h3" sx={{ color: 'primary.main', mb: 1.5, fontSize: { xs: '1.875rem', md: '2.25rem' } }}>
+                  Your basket is perfectly empty
+                </Typography>
+                <Typography variant="body2" sx={{ color: 'text.secondary', maxWidth: 400, mx: 'auto', mb: 4, fontWeight: 500 }}>
                   Fill it with traditional staples and unique heritage ingredients.
-                </p>
-                <Link to="/products">
-                  <button className="bg-primary text-white border-2 border-primary hover:bg-primary/90 px-8 py-4 rounded-2xl font-bold text-[11px] uppercase tracking-widest transition-all shadow-md active:scale-95 flex items-center justify-center gap-2">
-                     <span className="material-symbols-outlined text-[16px]">explore</span>
-                     Explore Collection
-                  </button>
-                </Link>
-              </div>
-            ) : (
-              <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-[2rem] p-4 md:p-8 shadow-sm">
-                <div className="space-y-6 md:space-y-8">
-                  {items.map((item, index) => (
-                    <article key={item.id} className={`group flex flex-row gap-4 md:gap-6 items-start pb-5 md:pb-6 ${index !== items.length - 1 ? 'border-b border-outline-variant/20' : ''}`}>
-                      <Link to={item.item_type === 'lot' ? `/lots/${item.entity_id || item.lot_id}` : `/products/${item.entity_id || item.product_id}`} className="w-20 md:w-24 aspect-square overflow-hidden rounded-xl bg-surface-container relative shrink-0">
-                        <img className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" src={item.image_url || 'https://via.placeholder.com/400'} alt={item.name} />
-                        <div className="absolute inset-0 bg-black/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
-                      </Link>
-
-                      <div className="flex-1 w-full flex flex-col h-full justify-between py-1">
-                        <div>
-                          <div className="flex justify-between items-start gap-4">
-                            <div>
-                              <p className="text-[9px] md:text-[10px] font-bold tracking-[0.2em] text-secondary uppercase mb-0.5">{item.item_type === 'lot' ? 'Heritage Bundle' : (item.category || 'Traditional Staple')}</p>
-                              <h3 className="font-brand text-lg md:text-xl text-primary leading-snug group-hover:text-secondary transition-colors line-clamp-2 md:line-clamp-none">{item.name}</h3>
-                            </div>
-                            <span className="font-bold text-base md:text-lg text-primary whitespace-nowrap">₹{(Number(item.price || 0) * item.qty).toLocaleString()}</span>
-                          </div>
-
-                          {item.description && (
-                            <p className="text-on-surface-variant font-medium leading-relaxed italic text-xs mt-1.5 hidden md:block line-clamp-1 max-w-md">{item.description}</p>
-                          )}
-
-                          {(item.lot_items || []).length > 0 && (
-                            <div className="mt-2.5 rounded-lg bg-surface-container-lowest border border-outline-variant/20 p-2.5 text-[10px] md:text-xs shadow-sm">
-                              {(item.lot_items || []).slice(0, 3).map((bundleItem) => (
-                                <div key={`${item.id}-${bundleItem.product_key || bundleItem.id}`} className="flex items-center justify-between gap-3 text-on-surface-variant mb-1 last:mb-0">
-                                  <span className="font-bold truncate">{bundleItem.products?.name || bundleItem.product_name || bundleItem.product_key}</span>
-                                  <span className="text-[9px] shrink-0">×{bundleItem.quantity}</span>
-                                </div>
-                              ))}
-                              {item.lot_items?.length > 3 && (
-                                <div className="text-[9px] font-bold text-secondary tracking-wider pt-1 border-t border-outline-variant/20 mt-1">+ {item.lot_items.length - 3} more</div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between pt-3 mt-auto gap-4">
-                          <div className="flex items-center bg-surface-container border border-outline-variant/30 rounded-xl px-2 py-1 shadow-sm">
-                            <button onClick={() => updateQty(item.id, -1)} className="w-6 h-6 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Decrease quantity">
-                              <span className="material-symbols-outlined text-[14px]">remove</span>
-                            </button>
-                            <span className="font-bold text-xs md:text-sm w-8 text-center tracking-widest">{item.qty}</span>
-                            <button onClick={() => updateQty(item.id, 1)} className="w-6 h-6 flex items-center justify-center rounded-full text-on-surface-variant hover:text-primary hover:bg-white transition-all active:scale-95" aria-label="Increase quantity">
-                              <span className="material-symbols-outlined text-[14px]">add</span>
-                            </button>
-                          </div>
-
-                          <button onClick={() => removeItem(item.id)} className="text-on-surface-variant font-bold text-[9px] md:text-[10px] uppercase tracking-widest flex items-center gap-1.5 hover:text-red-600 transition-colors bg-surface-container-low px-3 py-1.5 rounded-lg border border-transparent hover:border-red-100 hover:bg-red-50">
-                            <span className="material-symbols-outlined text-[14px]">delete</span>
-                            Remove
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </div>
-            )}
-          </section>
-
-          <aside className="lg:col-span-5 xl:col-span-4 lg:sticky lg:top-40">
-            <div className="bg-primary p-6 md:p-8 rounded-[2rem] shadow-xl relative overflow-hidden group">
-              <div className="absolute -top-20 -right-20 w-64 h-64 bg-secondary/20 rounded-full blur-3xl mix-blend-screen group-hover:scale-110 transition-transform duration-1000"></div>
-              <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-white/10 rounded-full blur-3xl mix-blend-screen group-hover:scale-110 transition-transform duration-1000"></div>
-              
-              <h2 className="font-brand text-3xl font-bold text-white border-b border-white/20 pb-6 mb-6 relative z-10 leading-tight">Order Summary</h2>
-
-              <div className="space-y-4 relative z-10 text-white/90">
-                <div className="flex justify-between text-sm font-medium">
-                  <span>Subtotal ({totals.itemCount} items)</span>
-                  <span className="font-bold text-white">₹{totals.subtotal.toLocaleString()}</span>
-                </div>
-                <div className="flex justify-between text-sm font-medium">
-                  <span>Delivery</span>
-                  <span className="font-bold text-white">₹{totals.deliveryFee.toLocaleString()}</span>
-                </div>
-                {totals.freeShippingDiscount > 0 && (
-                  <div className="flex justify-between text-secondary text-sm font-bold">
-                     <span className="flex items-center gap-1.5"><span className="material-symbols-outlined text-[14px]">local_shipping</span> Free Shipping</span>
-                    <span>−₹{totals.freeShippingDiscount.toLocaleString()}</span>
-                  </div>
-                )}
-                {totals.subtotal > 0 && totals.subtotal < FREE_DELIVERY_THRESHOLD && (
-                  <div className="text-[11px] font-semibold text-secondary leading-relaxed bg-white/10 p-3 rounded-xl backdrop-blur-sm mt-3">
-                    Add <span className="font-bold">₹{(FREE_DELIVERY_THRESHOLD - totals.subtotal).toLocaleString()}</span> more to unlock free shipping on this order.
-                  </div>
-                )}
-                {totals.subtotal >= FREE_DELIVERY_THRESHOLD && (
-                  <div className="text-[11px] font-bold tracking-widest uppercase text-secondary bg-white/10 p-3 rounded-xl backdrop-blur-sm mt-3 flex items-center justify-center gap-2">
-                    <span className="material-symbols-outlined text-[16px]">check_circle</span>
-                    Free shipping unlocked
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-6 mt-6 border-t border-white/20 flex justify-between items-end relative z-10">
-                <div>
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-white/70 font-bold block mb-1">Pay on Delivery</span>
-                  <div className="text-4xl md:text-5xl font-brand text-white leading-none">₹{totals.grandTotal.toLocaleString()}</div>
-                </div>
-              </div>
-
-              <div className="mt-8 space-y-3 relative z-10">
-                <button
-                  onClick={handleCheckout}
-                  disabled={items.length === 0}
-                  className="w-full bg-secondary text-white py-4 md:py-5 rounded-2xl font-bold uppercase tracking-widest text-[11px] hover:bg-secondary/90 transition-all shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                </Typography>
+                <Button
+                  component={Link}
+                  to="/products"
+                  variant="contained"
+                  startIcon={<span className="material-symbols-outlined" style={{ fontSize: 16 }}>explore</span>}
+                  sx={{
+                    py: 1.5,
+                    px: 4,
+                    borderRadius: 4,
+                    fontWeight: 700,
+                    fontSize: '0.6875rem',
+                    letterSpacing: '0.15em',
+                    textTransform: 'uppercase',
+                    boxShadow: theme.shadows[3],
+                  }}
                 >
-                  Proceed to Checkout
-                  <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                </button>
-                <Link to="/products" className="block">
-                  <button className="w-full bg-white/10 backdrop-blur-sm text-white border border-white/20 py-4 rounded-2xl font-bold uppercase tracking-widest text-[11px] hover:bg-white/20 transition-all active:scale-95">
+                  Explore Collection
+                </Button>
+              </Paper>
+            ) : (
+              <Paper
+                elevation={0}
+                sx={{
+                  borderRadius: 6,
+                  border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`,
+                  p: { xs: 2, md: 4 },
+                }}
+              >
+                {items.map((item, index) => (
+                  <Box
+                    key={item.id}
+                    sx={{
+                      display: 'flex',
+                      gap: { xs: 2, md: 3 },
+                      alignItems: 'flex-start',
+                      pb: { xs: 2.5, md: 3 },
+                      mb: index !== items.length - 1 ? { xs: 2.5, md: 3 } : 0,
+                      borderBottom: index !== items.length - 1 ? `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.2)}` : 'none',
+                      '&:hover .cart-img': { transform: 'scale(1.05)' },
+                    }}
+                  >
+                    <Link to={item.item_type === 'lot' ? `/lots/${item.entity_id || item.lot_id}` : `/products/${item.entity_id || item.product_id}`} style={{ textDecoration: 'none', flexShrink: 0 }}>
+                      <Box
+                        sx={{
+                          width: { xs: 80, md: 96 },
+                          aspectRatio: '1',
+                          overflow: 'hidden',
+                          borderRadius: 3,
+                          bgcolor: theme.palette.hatvoni.surfaceContainer,
+                          position: 'relative',
+                        }}
+                      >
+                        <Box
+                          component="img"
+                          className="cart-img"
+                          src={item.image_url || 'https://via.placeholder.com/400'}
+                          alt={item.name}
+                          sx={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.7s ease' }}
+                        />
+                      </Box>
+                    </Link>
+
+                    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', py: 0.5 }}>
+                      <Box>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 2 }}>
+                          <Box>
+                            <Typography variant="overline" sx={{ color: 'secondary.main', fontSize: '0.5625rem' }}>
+                              {item.item_type === 'lot' ? 'Heritage Bundle' : (item.category || 'Traditional Staple')}
+                            </Typography>
+                            <Typography
+                              sx={{
+                                fontFamily: '"Plus Jakarta Sans", sans-serif',
+                                fontSize: { xs: '1.125rem', md: '1.25rem' },
+                                fontWeight: 700,
+                                color: 'primary.main',
+                                lineHeight: 1.3,
+                                display: { xs: '-webkit-box', md: 'block' },
+                                WebkitLineClamp: { xs: 2, md: 'unset' },
+                                WebkitBoxOrient: 'vertical',
+                                overflow: 'hidden',
+                              }}
+                            >
+                              {item.name}
+                            </Typography>
+                          </Box>
+                          <Typography sx={{ fontWeight: 700, fontSize: { xs: '1rem', md: '1.125rem' }, color: 'primary.main', whiteSpace: 'nowrap' }}>
+                            ₹{(Number(item.price || 0) * item.qty).toLocaleString()}
+                          </Typography>
+                        </Box>
+
+                        {item.description && (
+                          <Typography
+                            variant="caption"
+                            sx={{
+                              color: 'text.secondary',
+                              fontStyle: 'italic',
+                              fontWeight: 500,
+                              mt: 0.75,
+                              display: { xs: 'none', md: '-webkit-box' },
+                              WebkitLineClamp: 1,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                              maxWidth: 400,
+                            }}
+                          >
+                            {item.description}
+                          </Typography>
+                        )}
+
+                        {(item.lot_items || []).length > 0 && (
+                          <Paper
+                            elevation={0}
+                            sx={{
+                              mt: 1.5,
+                              p: 1.5,
+                              bgcolor: theme.palette.hatvoni.surfaceContainerLowest,
+                              border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.2)}`,
+                              borderRadius: 2,
+                            }}
+                          >
+                            {(item.lot_items || []).slice(0, 3).map((bundleItem) => (
+                              <Box key={`${item.id}-${bundleItem.product_key || bundleItem.id}`} sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
+                                <Typography variant="caption" sx={{ fontWeight: 700, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {bundleItem.products?.name || bundleItem.product_name || bundleItem.product_key}
+                                </Typography>
+                                <Typography variant="caption" sx={{ fontSize: '0.5625rem', flexShrink: 0 }}>×{bundleItem.quantity}</Typography>
+                              </Box>
+                            ))}
+                            {item.lot_items?.length > 3 && (
+                              <Typography variant="caption" sx={{ fontWeight: 700, color: 'secondary.main', mt: 0.5, pt: 0.5, borderTop: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.2)}`, display: 'block', fontSize: '0.5625rem', letterSpacing: '0.1em' }}>
+                                + {item.lot_items.length - 3} more
+                              </Typography>
+                            )}
+                          </Paper>
+                        )}
+                      </Box>
+
+                      <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', pt: 1.5, mt: 'auto', gap: 2 }}>
+                        <Box
+                          sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            bgcolor: theme.palette.hatvoni.surfaceContainer,
+                            border: `1px solid ${alpha(theme.palette.hatvoni.outlineVariant, 0.3)}`,
+                            borderRadius: 3,
+                            px: 1,
+                            py: 0.5,
+                          }}
+                        >
+                          <IconButton size="small" onClick={() => updateQty(item.id, -1)} aria-label="Decrease quantity" sx={{ p: 0.25 }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>remove</span>
+                          </IconButton>
+                          <Typography sx={{ fontWeight: 700, fontSize: { xs: '0.75rem', md: '0.875rem' }, width: 32, textAlign: 'center', letterSpacing: '0.15em' }}>
+                            {item.qty}
+                          </Typography>
+                          <IconButton size="small" onClick={() => updateQty(item.id, 1)} aria-label="Increase quantity" sx={{ p: 0.25 }}>
+                            <span className="material-symbols-outlined" style={{ fontSize: 14 }}>add</span>
+                          </IconButton>
+                        </Box>
+
+                        <Button
+                          onClick={() => removeItem(item.id)}
+                          startIcon={<span className="material-symbols-outlined" style={{ fontSize: 14 }}>delete</span>}
+                          size="small"
+                          sx={{
+                            color: 'text.secondary',
+                            fontSize: '0.5625rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.15em',
+                            textTransform: 'uppercase',
+                            borderRadius: 2,
+                            px: 1.5,
+                            py: 0.75,
+                            bgcolor: theme.palette.hatvoni.surfaceContainerLow,
+                            border: '1px solid transparent',
+                            '&:hover': {
+                              color: 'error.main',
+                              borderColor: alpha(theme.palette.error.main, 0.15),
+                              bgcolor: alpha(theme.palette.error.main, 0.05),
+                            },
+                          }}
+                        >
+                          Remove
+                        </Button>
+                      </Box>
+                    </Box>
+                  </Box>
+                ))}
+              </Paper>
+            )}
+          </Grid>
+
+          {/* Order Summary Sidebar */}
+          <Grid size={{ xs: 12, lg: 5, xl: 4 }}>
+            <Box sx={{ position: { lg: 'sticky' }, top: { lg: 160 } }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  bgcolor: 'primary.main',
+                  p: { xs: 3, md: 4 },
+                  borderRadius: 6,
+                  boxShadow: theme.shadows[6],
+                  position: 'relative',
+                  overflow: 'hidden',
+                  border: 'none',
+                }}
+              >
+                {/* Decorative blurs */}
+                <Box sx={{ position: 'absolute', top: -80, right: -80, width: 256, height: 256, bgcolor: alpha(theme.palette.secondary.main, 0.2), borderRadius: '50%', filter: 'blur(48px)' }} />
+                <Box sx={{ position: 'absolute', bottom: -80, left: -80, width: 256, height: 256, bgcolor: alpha('#fff', 0.1), borderRadius: '50%', filter: 'blur(48px)' }} />
+
+                <Typography variant="h3" sx={{ fontWeight: 700, color: 'white', borderBottom: '1px solid rgba(255,255,255,0.2)', pb: 3, mb: 3, position: 'relative', zIndex: 1, fontSize: '1.875rem' }}>
+                  Order Summary
+                </Typography>
+
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, position: 'relative', zIndex: 1, color: 'rgba(255,255,255,0.9)' }}>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 500 }}>
+                    <span>Subtotal ({totals.itemCount} items)</span>
+                    <Typography sx={{ fontWeight: 700, color: 'white' }}>₹{totals.subtotal.toLocaleString()}</Typography>
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 500 }}>
+                    <span>Delivery</span>
+                    <Typography sx={{ fontWeight: 700, color: 'white' }}>₹{totals.deliveryFee.toLocaleString()}</Typography>
+                  </Box>
+                  {totals.freeShippingDiscount > 0 && (
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', fontWeight: 700, color: theme.palette.secondary.main }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 14 }}>local_shipping</span>
+                        Free Shipping
+                      </Box>
+                      <span>−₹{totals.freeShippingDiscount.toLocaleString()}</span>
+                    </Box>
+                  )}
+                  {totals.subtotal > 0 && totals.subtotal < FREE_DELIVERY_THRESHOLD && (
+                    <Paper elevation={0} sx={{ bgcolor: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)', p: 1.5, borderRadius: 3, mt: 1.5, border: 'none' }}>
+                      <Typography variant="caption" sx={{ color: theme.palette.secondary.main, fontWeight: 600 }}>
+                        Add <strong>₹{(FREE_DELIVERY_THRESHOLD - totals.subtotal).toLocaleString()}</strong> more to unlock free shipping on this order.
+                      </Typography>
+                    </Paper>
+                  )}
+                  {totals.subtotal >= FREE_DELIVERY_THRESHOLD && (
+                    <Paper elevation={0} sx={{ bgcolor: 'rgba(255,255,255,0.1)', backdropFilter: 'blur(8px)', p: 1.5, borderRadius: 3, mt: 1.5, textAlign: 'center', border: 'none' }}>
+                      <Typography variant="overline" sx={{ color: theme.palette.secondary.main, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 16 }}>check_circle</span>
+                        Free shipping unlocked
+                      </Typography>
+                    </Paper>
+                  )}
+                </Box>
+
+                <Divider sx={{ borderColor: 'rgba(255,255,255,0.2)', my: 3 }} />
+
+                <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', position: 'relative', zIndex: 1 }}>
+                  <Box>
+                    <Typography variant="overline" sx={{ color: 'rgba(255,255,255,0.65)', fontSize: '0.625rem' }}>Pay on Delivery</Typography>
+                    <Typography sx={{ fontFamily: '"Plus Jakarta Sans", sans-serif', fontSize: { xs: '2.5rem', md: '3rem' }, fontWeight: 700, color: 'white', lineHeight: 1 }}>
+                      ₹{totals.grandTotal.toLocaleString()}
+                    </Typography>
+                  </Box>
+                </Box>
+
+                <Box sx={{ mt: 4, display: 'flex', flexDirection: 'column', gap: 1.5, position: 'relative', zIndex: 1 }}>
+                  <Button
+                    fullWidth
+                    onClick={handleCheckout}
+                    disabled={items.length === 0}
+                    variant="contained"
+                    endIcon={<span className="material-symbols-outlined" style={{ fontSize: 18 }}>arrow_forward</span>}
+                    sx={{
+                      bgcolor: 'secondary.main',
+                      color: 'white',
+                      py: { xs: 1.5, md: 2 },
+                      borderRadius: 4,
+                      fontWeight: 700,
+                      letterSpacing: '0.15em',
+                      textTransform: 'uppercase',
+                      fontSize: '0.6875rem',
+                      boxShadow: theme.shadows[4],
+                      '&:hover': { bgcolor: alpha(theme.palette.secondary.main, 0.9) },
+                      '&.Mui-disabled': { opacity: 0.5 },
+                    }}
+                  >
+                    Proceed to Checkout
+                  </Button>
+                  <Button
+                    component={Link}
+                    to="/products"
+                    fullWidth
+                    variant="outlined"
+                    sx={{
+                      color: 'white',
+                      borderColor: 'rgba(255,255,255,0.2)',
+                      py: 1.5,
+                      borderRadius: 4,
+                      fontWeight: 700,
+                      letterSpacing: '0.15em',
+                      textTransform: 'uppercase',
+                      fontSize: '0.6875rem',
+                      backdropFilter: 'blur(8px)',
+                      bgcolor: 'rgba(255,255,255,0.1)',
+                      '&:hover': { bgcolor: 'rgba(255,255,255,0.2)', borderColor: 'rgba(255,255,255,0.3)' },
+                    }}
+                  >
                     Continue Shopping
-                  </button>
-                </Link>
-              </div>
-            </div>
-            
-            <div className="bg-surface-container-lowest border border-outline-variant/30 mt-6 p-5 rounded-2xl flex items-start gap-4 shadow-sm">
-              <div className="w-10 h-10 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-                 <span className="material-symbols-outlined text-[20px]" style={{ fontVariationSettings: "'FILL' 1" }}>eco</span>
-              </div>
-              <p className="text-[11px] font-medium text-on-surface-variant leading-relaxed">
-                <strong className="text-primary tracking-wide block mb-0.5">Authenticity Guaranteed</strong>
-                Carefully packaged traditional ingredients. Pay exact cash directly at your doorstep on delivery.
-              </p>
-            </div>
-          </aside>
-        </div>
-      </div>
-    </main>
+                  </Button>
+                </Box>
+              </Paper>
+
+              {/* Authenticity badge */}
+              <Paper
+                elevation={0}
+                sx={{
+                  mt: 3,
+                  p: 2.5,
+                  borderRadius: 4,
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 2,
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: '50%',
+                    bgcolor: alpha(theme.palette.success.main, 0.08),
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                  }}
+                >
+                  <span className="material-symbols-outlined" style={{ fontSize: 20, color: theme.palette.success.main, fontVariationSettings: "'FILL' 1" }}>eco</span>
+                </Box>
+                <Box>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', letterSpacing: '0.05em', display: 'block', mb: 0.25 }}>
+                    Authenticity Guaranteed
+                  </Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 500, lineHeight: 1.6 }}>
+                    Carefully packaged traditional ingredients. Pay exact cash directly at your doorstep on delivery.
+                  </Typography>
+                </Box>
+              </Paper>
+            </Box>
+          </Grid>
+        </Grid>
+      </Container>
+    </Box>
   );
 }

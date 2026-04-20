@@ -21,9 +21,6 @@ export default function PickupLocationModal({ seller, location, saving, onClose,
     setErrors({});
   }, [location]);
 
-  const labelClass = 'block text-[10px] font-black uppercase tracking-[0.2em] text-on-surface-variant/70 mb-2';
-  const inputClass = 'w-full px-5 py-3.5 border border-outline-variant/30 rounded-2xl bg-surface-container-lowest focus:border-primary focus:bg-primary/5 focus:ring-4 focus:ring-primary/5 focus:outline-none transition-all font-body text-primary font-bold placeholder:font-normal placeholder:opacity-40';
-
   const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
 
   const validateForm = () => {
@@ -54,155 +51,104 @@ export default function PickupLocationModal({ seller, location, saving, onClose,
     onSave(formData);
   };
 
+  const labelClass = 'block text-[9px] font-semibold uppercase tracking-wider text-[#3f4942]/50 mb-1.5';
+  const inputClass = 'w-full h-9 px-3 text-xs font-medium rounded-lg border border-[#c8c8b9]/40 bg-white text-[#004a2b] focus:border-[#004a2b] focus:ring-2 focus:ring-[#004a2b]/10 focus:outline-none transition-all placeholder:text-[#3f4942]/30';
+
+  const sellerLabel = seller?.first_name || seller?.last_name
+    ? `${seller.first_name || ''} ${seller.last_name || ''}`.trim()
+    : seller?.email || 'Selected seller';
+
   return (
-    <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200" onClick={onClose}>
-      <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-[2.5rem] border border-outline-variant/30 bg-surface-container-lowest shadow-[0_28px_100px_rgba(0,0,0,0.45)]" onClick={(event) => event.stopPropagation()}>
-        <div className="sticky top-0 z-10 border-b border-outline-variant/10 bg-surface-container-lowest/95 backdrop-blur-sm px-8 py-6 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-secondary mb-1">Pickup Location</p>
-            <h3 className="font-brand text-3xl font-bold text-primary tracking-tight">
-              {location ? 'Edit Location' : 'Add Location'}
-            </h3>
-            <p className="mt-1 text-sm text-on-surface-variant">
-              {seller?.first_name || seller?.last_name
-                ? `${seller.first_name || ''} ${seller.last_name || ''}`.trim()
-                : seller?.email || 'Selected seller'}
-            </p>
+    <div className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="w-full max-w-xl max-h-[88vh] overflow-y-auto rounded-2xl border border-[#c8c8b9]/20 bg-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+
+        {/* Header */}
+        <div className="sticky top-0 z-10 border-b border-[#c8c8b9]/15 bg-white px-5 py-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: '#004a2b10' }}>
+              <span className="material-symbols-outlined text-[#004a2b]" style={{ fontSize: '16px' }}>location_on</span>
+            </div>
+            <div>
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-[#815500]">{location ? 'Edit' : 'New'} Location</p>
+              <h3 className="text-base font-bold text-[#004a2b] tracking-tight" style={{ fontFamily: '"Plus Jakarta Sans",sans-serif' }}>{sellerLabel}</h3>
+            </div>
           </div>
-          <button onClick={onClose} className="w-11 h-11 rounded-full border border-outline-variant/20 bg-surface-container-low hover:bg-surface-container transition-all flex items-center justify-center text-on-surface-variant hover:text-red-500">
-            <span className="material-symbols-outlined text-2xl">close</span>
+          <button onClick={onClose} className="w-8 h-8 rounded-lg flex items-center justify-center border border-[#c8c8b9]/20 text-[#3f4942]/60 hover:bg-red-50 hover:text-red-500 transition-colors">
+            <span className="material-symbols-outlined" style={{ fontSize: '16px' }}>close</span>
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-8 py-7 space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2 md:col-span-2">
+        <form onSubmit={handleSubmit} className="px-5 py-4 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
               <label className={labelClass}>Warehouse Name</label>
-              <input
-                type="text"
-                value={formData.warehouse_name}
-                onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_name: event.target.value }))}
-                className={inputClass}
-                placeholder="Warehouse name"
-                required
-              />
-              {errors.warehouse_name && <p className="text-xs font-semibold text-red-600">{errors.warehouse_name}</p>}
+              <input type="text" value={formData.warehouse_name} onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_name: event.target.value }))} className={inputClass} placeholder="Warehouse name" required />
+              {errors.warehouse_name && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.warehouse_name}</p>}
             </div>
-            <div className="space-y-2 md:col-span-2">
+            <div className="md:col-span-2">
               <label className={labelClass}>Street Address</label>
-              <input
-                type="text"
-                value={formData.street_address}
-                onChange={(event) => setFormData((prev) => ({ ...prev, street_address: event.target.value }))}
-                className={inputClass}
-                placeholder="Street address"
-                required
-              />
-              {errors.street_address && <p className="text-xs font-semibold text-red-600">{errors.street_address}</p>}
+              <input type="text" value={formData.street_address} onChange={(event) => setFormData((prev) => ({ ...prev, street_address: event.target.value }))} className={inputClass} placeholder="Street address" required />
+              {errors.street_address && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.street_address}</p>}
             </div>
-            <div className="space-y-2">
+            <div>
               <label className={labelClass}>Pincode</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={formData.pincode}
-                onChange={(event) => setFormData((prev) => ({ ...prev, pincode: normalizeDigits(event.target.value).slice(0, 6) }))}
-                className={inputClass}
-                placeholder="400001"
-                required
-              />
-              {errors.pincode && <p className="text-xs font-semibold text-red-600">{errors.pincode}</p>}
+              <input type="text" inputMode="numeric" maxLength={6} value={formData.pincode} onChange={(event) => setFormData((prev) => ({ ...prev, pincode: normalizeDigits(event.target.value).slice(0, 6) }))} className={inputClass} placeholder="400001" required />
+              {errors.pincode && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.pincode}</p>}
             </div>
-            <div className="space-y-2">
+            <div>
               <label className={labelClass}>City</label>
-              <input
-                type="text"
-                value={formData.city}
-                onChange={(event) => setFormData((prev) => ({ ...prev, city: event.target.value }))}
-                className={inputClass}
-                required
-              />
-              {errors.city && <p className="text-xs font-semibold text-red-600">{errors.city}</p>}
+              <input type="text" value={formData.city} onChange={(event) => setFormData((prev) => ({ ...prev, city: event.target.value }))} className={inputClass} required />
+              {errors.city && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.city}</p>}
             </div>
-            <div className="space-y-2">
+            <div>
               <label className={labelClass}>State</label>
-              <input
-                type="text"
-                value={formData.state}
-                onChange={(event) => setFormData((prev) => ({ ...prev, state: event.target.value }))}
-                className={inputClass}
-                required
-              />
-              {errors.state && <p className="text-xs font-semibold text-red-600">{errors.state}</p>}
+              <input type="text" value={formData.state} onChange={(event) => setFormData((prev) => ({ ...prev, state: event.target.value }))} className={inputClass} required />
+              {errors.state && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.state}</p>}
             </div>
-            <div className="space-y-2">
-              <label className={labelClass}>Warehouse Contact Person</label>
-              <input
-                type="text"
-                value={formData.warehouse_contact_person}
-                onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_contact_person: event.target.value }))}
-                className={inputClass}
-                required
-              />
-              {errors.warehouse_contact_person && <p className="text-xs font-semibold text-red-600">{errors.warehouse_contact_person}</p>}
+            <div>
+              <label className={labelClass}>Contact Person</label>
+              <input type="text" value={formData.warehouse_contact_person} onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_contact_person: event.target.value }))} className={inputClass} required />
+              {errors.warehouse_contact_person && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.warehouse_contact_person}</p>}
             </div>
-            <div className="space-y-2">
-              <label className={labelClass}>Warehouse Contact Number</label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={10}
-                value={formData.warehouse_contact_number}
-                onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_contact_number: normalizeDigits(event.target.value).slice(0, 10) }))}
-                className={inputClass}
-                placeholder="9876543210"
-                required
-              />
-              {errors.warehouse_contact_number && <p className="text-xs font-semibold text-red-600">{errors.warehouse_contact_number}</p>}
+            <div>
+              <label className={labelClass}>Contact Number</label>
+              <input type="text" inputMode="numeric" maxLength={10} value={formData.warehouse_contact_number} onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_contact_number: normalizeDigits(event.target.value).slice(0, 10) }))} className={inputClass} placeholder="9876543210" required />
+              {errors.warehouse_contact_number && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.warehouse_contact_number}</p>}
             </div>
-            <div className="space-y-2 md:col-span-2">
-              <label className={labelClass}>Warehouse Email Id</label>
-              <input
-                type="email"
-                value={formData.warehouse_email_id}
-                onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_email_id: event.target.value }))}
-                className={inputClass}
-                placeholder="warehouse@example.com"
-                required
-              />
-              {errors.warehouse_email_id && <p className="text-xs font-semibold text-red-600">{errors.warehouse_email_id}</p>}
+            <div className="md:col-span-2">
+              <label className={labelClass}>Email</label>
+              <input type="email" value={formData.warehouse_email_id} onChange={(event) => setFormData((prev) => ({ ...prev, warehouse_email_id: event.target.value }))} className={inputClass} placeholder="warehouse@example.com" required />
+              {errors.warehouse_email_id && <p className="text-[10px] font-semibold text-red-600 mt-1">{errors.warehouse_email_id}</p>}
             </div>
           </div>
 
-          <label className="flex items-start gap-3 p-4 rounded-2xl border border-outline-variant/20 bg-surface-container-low/40 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={formData.is_default}
-              onChange={(event) => setFormData((prev) => ({ ...prev, is_default: event.target.checked }))}
-              className="mt-1 w-5 h-5 rounded border-outline-variant text-primary focus:ring-primary"
-            />
+          <label className="flex items-center gap-3 p-3 rounded-xl border border-[#c8c8b9]/20 bg-[#f5f4eb]/50 cursor-pointer hover:shadow-sm transition-all">
+            <div className="w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-all"
+              style={{
+                borderColor: formData.is_default ? '#004a2b' : '#c8c8b960',
+                backgroundColor: formData.is_default ? '#004a2b' : 'transparent',
+              }}
+            >
+              {formData.is_default && <span className="material-symbols-outlined text-white" style={{ fontSize: '14px' }}>check</span>}
+            </div>
+            <input type="checkbox" checked={formData.is_default} onChange={(event) => setFormData((prev) => ({ ...prev, is_default: event.target.checked }))} className="sr-only" />
             <div>
-              <p className="font-bold text-primary">Set as default pickup location</p>
-              <p className="text-sm text-on-surface-variant mt-1">
-                This becomes the seller’s default pickup location in the admin workflow.
-              </p>
+              <p className="text-xs font-semibold text-[#004a2b]">Set as default pickup location</p>
+              <p className="text-[10px] text-[#3f4942]/50 mt-0.5">This becomes the seller's default pickup location.</p>
             </div>
           </label>
 
-          <div className="flex flex-col sm:flex-row justify-end gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-5 py-3 rounded-2xl border border-outline-variant/20 text-on-surface-variant font-semibold hover:bg-surface-container-low transition-colors"
-            >
+          {/* Footer */}
+          <div className="flex justify-end gap-2.5 pt-1">
+            <button type="button" onClick={onClose} className="h-9 px-4 rounded-lg text-xs font-semibold text-[#3f4942] bg-[#f5f4eb] hover:bg-[#f5f4eb]/80 transition-all">
               Cancel
             </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="px-5 py-3 rounded-2xl bg-primary text-white font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
-            >
+            <button type="submit" disabled={saving} className="h-9 px-5 rounded-lg bg-[#004a2b] text-white text-xs font-semibold hover:opacity-90 transition-all disabled:opacity-50 flex items-center gap-1.5">
+              {saving ? (
+                <span className="material-symbols-outlined animate-spin" style={{ fontSize: '14px' }}>progress_activity</span>
+              ) : (
+                <span className="material-symbols-outlined" style={{ fontSize: '14px' }}>check</span>
+              )}
               {saving ? 'Saving...' : location ? 'Save Changes' : 'Add Location'}
             </button>
           </div>

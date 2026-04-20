@@ -1,4 +1,7 @@
 import { Link } from 'react-router-dom';
+import Button from '@mui/material/Button';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
 
 // ── Figma asset URLs (retained existing placeholders) ──────────────────────────────────────────
 const imgHeroBg        = "https://www.figma.com/api/mcp/asset/310de7a5-23a3-430c-a32d-7213d3f7548f";

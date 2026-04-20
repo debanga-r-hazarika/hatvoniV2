@@ -3,137 +3,91 @@ import React from 'react';
 export default function CustomersTable({ data, onToggleBan, onEdit, onDelete }) {
   if (data.length === 0) {
     return (
-      <div className="text-center py-20 bg-surface-container-lowest rounded-3xl border border-outline-variant/30">
-        <span className="material-symbols-outlined text-[48px] text-on-surface-variant/30 block mb-3">group</span>
-        <p className="text-on-surface-variant font-medium">No customers found.</p>
+      <div className="text-center py-16 bg-white rounded-xl border border-[#bec9bf]/20">
+        <span className="material-symbols-outlined text-3xl text-[#3f4942]/20 block mb-2">group</span>
+        <p className="text-sm text-[#3f4942]/60">No customers found.</p>
       </div>
     );
   }
 
   return (
-    <div className="bg-surface-container-lowest rounded-[2rem] border border-outline-variant/30 overflow-hidden shadow-sm animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="bg-white rounded-xl border border-[#bec9bf]/20 overflow-hidden shadow-sm">
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse">
+        <table className="w-full">
           <thead>
-            <tr className="bg-surface-container-low border-b border-outline-variant/30">
-              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Customer</th>
-              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Contact & Role</th>
-              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Joined</th>
-              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Account Info</th>
-              <th className="px-6 py-4 text-left text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Status</th>
-              <th className="px-6 py-4 text-right text-[10px] font-bold uppercase tracking-[0.15em] text-on-surface-variant">Actions</th>
+            <tr className="bg-[#f5f4eb]/60 border-b border-[#bec9bf]/20">
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Customer</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Role</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Joined</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">ID</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Status</th>
+              <th className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-outline-variant/10">
+          <tbody className="divide-y divide-[#bec9bf]/10">
             {data.map((user) => {
-              const fullName = user.first_name || user.last_name
-                ? `${user.first_name || ''} ${user.last_name || ''}`.trim()
-                : null;
-              const initials = (user.first_name?.[0] || user.email?.[0] || '?').toUpperCase();
+              const name = user.first_name || user.last_name
+                ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : null;
+              const initial = (user.first_name?.[0] || user.email?.[0] || '?').toUpperCase();
               const joinDate = new Date(user.created_at);
-              const isRecent = (Date.now() - joinDate.getTime()) < 7 * 24 * 60 * 60 * 1000;
+              const isNew = (Date.now() - joinDate.getTime()) < 7 * 24 * 60 * 60 * 1000;
 
               return (
-                <tr key={user.id} className="hover:bg-primary/[0.02] transition-colors group">
-                  <td className="px-6 py-5">
-                    <div className="flex items-center gap-4">
-                      <div className={`w-12 h-12 rounded-[1.25rem] flex items-center justify-center shrink-0 font-brand font-bold text-lg border-2 ${
-                        user.is_banned 
-                          ? 'bg-red-50 text-red-600 border-red-100' 
-                          : 'bg-primary-container/30 text-primary border-primary-container/50'
-                      }`}>
-                        {initials}
-                      </div>
+                <tr key={user.id} className="hover:bg-[#004a2b]/[0.01] transition-colors">
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold border ${
+                        user.is_banned ? 'bg-red-50 text-red-500 border-red-100' : 'bg-[#004a2b]/[0.06] text-[#004a2b] border-[#004a2b]/10'
+                      }`}>{initial}</div>
                       <div className="min-w-0">
-                        <p className="font-brand font-bold text-primary text-base leading-tight">
-                          {fullName || <span className="text-on-surface-variant italic font-normal">Unnamed Customer</span>}
+                        <p className="text-xs font-semibold text-[#004a2b] leading-tight truncate">
+                          {name || <span className="text-[#3f4942]/40 italic font-normal">Unnamed</span>}
                         </p>
-                        <p className="text-xs text-on-surface-variant truncate mt-1 flex items-center gap-1">
-                          <span className="material-symbols-outlined text-[14px] opacity-60">mail</span>
-                          {user.email || 'No email provided'}
-                        </p>
+                        <p className="text-[10px] text-[#3f4942]/50 truncate">{user.email || '—'}</p>
                       </div>
                     </div>
                   </td>
 
-                  <td className="px-6 py-5">
-                    <div className="space-y-2">
-                       {user.phone && (
-                         <p className="flex items-center gap-2 text-sm text-on-surface-variant">
-                           <span className="material-symbols-outlined text-[16px] text-on-surface-variant/50">call</span>
-                           {user.phone}
-                         </p>
-                       )}
-                       <div className="flex flex-wrap gap-1.5">
-                        {user.is_admin && (
-                          <span className="inline-flex items-center gap-1 text-[9px] bg-amber-50 text-amber-700 border border-amber-100 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">
-                            <span className="material-symbols-outlined text-[11px]">shield</span>Admin
-                          </span>
-                        )}
-                        {user.is_seller && (
-                          <span className="inline-flex items-center gap-1 text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">
-                            <span className="material-symbols-outlined text-[11px]">storefront</span>Seller
-                          </span>
-                        )}
-                        {!user.is_admin && !user.is_seller && (
-                          <span className="inline-flex items-center gap-1 text-[9px] bg-slate-50 text-slate-600 border border-slate-100 px-2 py-0.5 rounded-full font-black uppercase tracking-widest">
-                            Customer
-                          </span>
-                        )}
-                      </div>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-wrap gap-1">
+                      {user.is_admin && <span className="text-[8px] font-semibold bg-amber-50 text-amber-700 border border-amber-100 px-1.5 py-0.5 rounded uppercase">Admin</span>}
+                      {user.is_seller && <span className="text-[8px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded uppercase">Seller</span>}
+                      {!user.is_admin && !user.is_seller && <span className="text-[8px] font-semibold bg-slate-50 text-slate-500 border border-slate-100 px-1.5 py-0.5 rounded uppercase">Customer</span>}
                     </div>
                   </td>
 
-                  <td className="px-6 py-5">
-                    <div>
-                      <p className="text-sm text-primary font-bold">{joinDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
-                      <p className="text-[10px] text-on-surface-variant/60 mt-0.5">{joinDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}</p>
-                      {isRecent && (
-                        <span className="mt-1.5 inline-block text-[9px] bg-emerald-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-widest scale-90 origin-left">New</span>
-                      )}
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-medium text-[#004a2b]">{joinDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: '2-digit' })}</p>
+                      {isNew && <span className="text-[7px] bg-emerald-500 text-white px-1 py-px rounded font-bold uppercase">New</span>}
                     </div>
                   </td>
 
-                  <td className="px-6 py-5">
-                     <div className="space-y-1">
-                        <p className="text-[11px] text-on-surface-variant/70 uppercase font-black tracking-tighter">ID: {user.id.slice(0, 8)}...</p>
-                        <p className="text-[11px] text-on-surface-variant">Orders: <span className="font-bold text-primary">N/A</span></p>
-                        <p className="text-[11px] text-on-surface-variant">Last Activity: <span className="font-bold text-primary">Recently</span></p>
-                     </div>
+                  <td className="px-4 py-3">
+                    <p className="text-[10px] text-[#3f4942]/50 font-mono">{user.id.slice(0, 8)}</p>
                   </td>
 
-                  <td className="px-6 py-5">
+                  <td className="px-4 py-3">
                     <button
                       onClick={() => onToggleBan(user)}
-                      className={`group/btn inline-flex items-center gap-2 px-4 py-2 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[9px] font-semibold uppercase transition-all border ${
                         user.is_banned
-                          ? 'bg-red-50 text-red-600 hover:bg-red-100 border border-red-100'
-                          : 'bg-green-50 text-green-700 hover:bg-green-100 border border-green-100'
+                          ? 'bg-red-50 text-red-600 border-red-100 hover:bg-red-100'
+                          : 'bg-green-50 text-green-700 border-green-100 hover:bg-green-100'
                       }`}
                     >
-                      <span className={`w-2 h-2 rounded-full animate-pulse ${user.is_banned ? 'bg-red-500' : 'bg-green-500'}`} />
+                      <span className={`w-1.5 h-1.5 rounded-full ${user.is_banned ? 'bg-red-500' : 'bg-green-500'}`} />
                       {user.is_banned ? 'Banned' : 'Active'}
-                      <span className="material-symbols-outlined text-[14px] opacity-0 group-hover/btn:opacity-100 transition-opacity">
-                        {user.is_banned ? 'lock_open' : 'block'}
-                      </span>
                     </button>
                   </td>
 
-                  <td className="px-6 py-5">
-                    <div className="flex items-center justify-end gap-2">
-                       <button
-                        onClick={() => onEdit(user)}
-                        className="w-10 h-10 rounded-xl bg-surface-container-low text-primary hover:bg-primary hover:text-white transition-all active:scale-95 flex items-center justify-center shadow-sm"
-                        title="Edit Profile"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">edit</span>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => onEdit(user)} className="w-7 h-7 rounded-md bg-[#f5f4eb] text-[#004a2b] hover:bg-[#004a2b] hover:text-white transition-all flex items-center justify-center" title="Edit">
+                        <span className="material-symbols-outlined text-sm">edit</span>
                       </button>
-                      <button
-                        onClick={() => onDelete(user)}
-                        className="w-10 h-10 rounded-xl bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all active:scale-95 flex items-center justify-center shadow-sm"
-                        title="Delete User"
-                      >
-                        <span className="material-symbols-outlined text-[18px]">delete</span>
+                      <button onClick={() => onDelete(user)} className="w-7 h-7 rounded-md bg-red-50 text-red-500 hover:bg-red-500 hover:text-white transition-all flex items-center justify-center" title="Delete">
+                        <span className="material-symbols-outlined text-sm">delete</span>
                       </button>
                     </div>
                   </td>
@@ -144,31 +98,13 @@ export default function CustomersTable({ data, onToggleBan, onEdit, onDelete }) 
         </table>
       </div>
 
-      <div className="px-8 py-5 border-t border-outline-variant/20 flex flex-col sm:flex-row items-center justify-between gap-4 bg-surface-container-low/30">
-        <div className="flex items-center gap-6">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-on-surface-variant/60 font-black uppercase tracking-widest">Total Population</span>
-            <span className="text-xl font-brand font-bold text-primary">{data.length}</span>
-          </div>
-          <div className="h-8 w-px bg-outline-variant/30 hidden sm:block"></div>
-          <div className="flex items-center gap-4">
-            <div className="flex flex-col">
-              <span className="text-[10px] text-green-600/70 font-black uppercase tracking-widest">Active</span>
-              <span className="text-sm font-bold text-green-700">{data.filter(u => !u.is_banned).length}</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-[10px] text-red-600/70 font-black uppercase tracking-widest">Restricted</span>
-              <span className="text-sm font-bold text-red-700">{data.filter(u => u.is_banned).length}</span>
-            </div>
-          </div>
+      <div className="px-4 py-3 border-t border-[#bec9bf]/15 flex items-center justify-between bg-[#f5f4eb]/30">
+        <div className="flex items-center gap-4 text-[10px] text-[#3f4942]/50 font-medium">
+          <span>Total: <strong className="text-[#004a2b]">{data.length}</strong></span>
+          <span>Active: <strong className="text-green-700">{data.filter(u => !u.is_banned).length}</strong></span>
+          <span>Banned: <strong className="text-red-600">{data.filter(u => u.is_banned).length}</strong></span>
         </div>
-        
-        <div className="flex items-center gap-4">
-           {/* Pagination placeholder if needed */}
-           <div className="text-[11px] text-on-surface-variant font-medium">
-             Viewing page 1 of 1
-           </div>
-        </div>
+        <span className="text-[10px] text-[#3f4942]/30 font-medium">Page 1 of 1</span>
       </div>
     </div>
   );
