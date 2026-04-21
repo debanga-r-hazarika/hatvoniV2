@@ -40,7 +40,7 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -60,7 +60,7 @@ export default function Login() {
     setError('');
     setLoading(true);
 
-    const { error: signInError } = await signIn(email, password);
+    const { error: signInError } = await signIn(email, password, rememberMe);
 
     if (signInError) {
       if (signInError.message.includes('Email not confirmed')) {
@@ -322,6 +322,27 @@ export default function Login() {
 
             {/* Actions */}
             <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: { xs: 2, lg: 3 } }}>
+              {/* Remember me */}
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    size="small"
+                    sx={{
+                      color: tokens.outlineVariant,
+                      '&.Mui-checked': { color: tokens.primary },
+                      p: 0.5,
+                    }}
+                  />
+                }
+                label={
+                  <Typography sx={{ fontFamily: fonts.body, fontSize: { xs: '0.8125rem', lg: '0.875rem' }, color: tokens.onSurfaceVariant }}>
+                    Remember me
+                  </Typography>
+                }
+                sx={{ m: 0, gap: 1 }}
+              />
               <Button
                 type="submit"
                 fullWidth
