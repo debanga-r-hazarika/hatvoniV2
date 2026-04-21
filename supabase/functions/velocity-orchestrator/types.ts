@@ -13,6 +13,8 @@ export const VELOCITY_ACTIONS = [
   'list_returns',
   'initiate_return',
   'assign_return_courier',
+  'resume_existing_shipping',
+  'reinitiate_shipping',
   'webhook_update',
   'webhook_health',
 ] as const;
@@ -100,6 +102,13 @@ export function validatePayloadForAction(action: VelocityAction, payload: Record
     case 'list_returns':
     case 'initiate_return':
     case 'assign_return_courier':
+    case 'resume_existing_shipping':
+      if (!hasString('order_id')) return 'resume_existing_shipping requires payload.order_id';
+      if (!hasString('shipment_id')) return 'resume_existing_shipping requires payload.shipment_id';
+      return null;
+    case 'reinitiate_shipping':
+      if (!hasString('order_id')) return 'reinitiate_shipping requires payload.order_id';
+      return null;
     case 'webhook_update':
     case 'webhook_health':
       return null;

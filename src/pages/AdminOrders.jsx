@@ -1422,6 +1422,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
   }, [shippingMode]);
 
   const velocityResumeKeyRef = useRef('');
+  const velocityAutoResumeKeyRef = useRef('');
 
   // Resume Velocity flow from DB after refresh (pending shipment id stored on order row).
   useEffect(() => {
@@ -1590,14 +1591,18 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       ? order.velocity_fulfillment
       : {};
     const next = mutator({ ...current });
-    await supabase
+    const { data, error } = await supabase
       .from('orders')
       .update({
         velocity_fulfillment: next,
         updated_at: new Date().toISOString(),
         admin_updated_at: new Date().toISOString(),
       })
-      .eq('id', orderId);
+      .eq('id', orderId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) throw new Error('Could not update Velocity workflow metadata for this order.');
   };
 
   const syncVelocityTrackingFromApi = async () => {
@@ -1781,20 +1786,10 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     setRestoringHistoricalShipment(true);
     setVelError('');
     try {
-      await persistVelocityFulfillmentMeta((meta) => ({
-        ...meta,
-        workflow_stage: 'order_created',
-        method_locked_after_order: true,
-        latest_velocity_shipment_id: historicalSid,
-      }));
-      await supabase
-        .from('orders')
-        .update({
-          velocity_pending_shipment_id: historicalSid,
-          updated_at: new Date().toISOString(),
-          admin_updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderId);
+      await callVelocityFn({
+        action: 'reinitiate_shipping',
+        payload: { shipment_id: historicalSid, mode: 'resume_existing' },
+      });
       setShippingMode('velocity');
       setVelShipmentId(historicalSid);
       setVelStep('pending_assign');
@@ -1807,6 +1802,20 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     }
   };
 
+  // After reinitiate (workflow_stage=selection), choosing Velocity should resume the existing shipment order.
+  useEffect(() => {
+    if (shippingMode !== 'velocity') return;
+    if (pendingVelocitySid) return;
+    const workflowStage = String(velocityFulfillment?.workflow_stage || '');
+    if (workflowStage !== 'selection') return;
+    const historicalSid = String(latestHistoricalVelocityOrder?.shipment_id || '').trim();
+    if (!historicalSid) return;
+    const key = `${orderId}:${historicalSid}:${workflowStage}`;
+    if (velocityAutoResumeKeyRef.current === key) return;
+    velocityAutoResumeKeyRef.current = key;
+    void continueWithExistingVelocityOrder();
+  }, [shippingMode, pendingVelocitySid, velocityFulfillment?.workflow_stage, latestHistoricalVelocityOrder?.shipment_id, orderId]);
+
   const reinitiateShipping = async () => {
     const sid = velShipmentId || pendingVelocitySid;
     if (!sid) {
@@ -1817,32 +1826,10 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     setReinitiatingShipping(true);
     setVelError('');
     try {
-      await persistVelocityFulfillmentMeta((meta) => {
-        const history = Array.isArray(meta.historical_velocity_orders) ? [...meta.historical_velocity_orders] : [];
-        const exists = history.some((h) => String(h?.shipment_id || '') === sid);
-        if (!exists) {
-          history.push({
-            shipment_id: sid,
-            source: 'reinitiate_shipping',
-            saved_at: new Date().toISOString(),
-          });
-        }
-        return {
-          ...meta,
-          historical_velocity_orders: history,
-          workflow_stage: 'selection',
-          method_locked_after_order: false,
-          latest_velocity_shipment_id: null,
-        };
+      await callVelocityFn({
+        action: 'reinitiate_shipping',
+        payload: { shipment_id: sid },
       });
-      await supabase
-        .from('orders')
-        .update({
-          velocity_pending_shipment_id: null,
-          updated_at: new Date().toISOString(),
-          admin_updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderId);
       // Immediately unlock step UI locally; DB refresh will reconcile shortly after.
       setSuppressPendingVelocitySid(true);
       velocityResumeKeyRef.current = '';
@@ -1851,8 +1838,8 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       setVelServiceability(null);
       setVelResult(null);
       setVelCarrierId('');
-      setShippingMode('velocity');
-      onNotice('Shipping workflow reinitiated. You can continue in Velocity from step 1.');
+      setShippingMode('manual');
+      onNotice('Shipping workflow reinitiated. Choose shipping mode again (Manual or Velocity).');
       await onRefresh();
     } catch (e) {
       setVelError(toUserError(e, 'Could not reinitiate shipping.'));
@@ -2018,16 +2005,12 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         <div className="rounded-xl border border-outline-variant/25 bg-surface-container-low/90 px-4 py-3 mb-4 flex flex-col gap-2 text-[11px]">
           <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2 sm:gap-x-8">
             <span className="font-black uppercase tracking-[0.12em] text-gray-900-variant">Shipping integration</span>
-            <span className={`font-semibold ${velEnvHealth.velocity_webhook_secret_configured ? 'text-emerald-700' : 'text-amber-800'}`}>
-              Webhook secret: {velEnvHealth.velocity_webhook_secret_configured ? 'configured (auto order status)' : 'missing — set VELOCITY_WEBHOOK_SECRET for live updates'}
-            </span>
             <span className={`font-semibold ${velEnvHealth.velocity_api_credentials_configured ? 'text-emerald-700' : 'text-amber-800'}`}>
               Velocity API: {velEnvHealth.velocity_api_credentials_configured ? 'secrets present' : 'secrets missing'}
             </span>
           </div>
           {velEnvHealth.velocity_probe && (
             <div className="mt-1 pt-2 border-t border-outline-variant/20 text-[10px] text-gray-800 space-y-1.5">
-              <p className="font-bold uppercase tracking-wider text-gray-900-variant">Velocity upstream probe</p>
               {velEnvHealth.velocity_probe.skipped ? (
                 <p className="text-amber-900/90">{String(velEnvHealth.velocity_probe.reason || 'Probe skipped.')}</p>
               ) : (
@@ -2038,29 +2021,6 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                   {velEnvHealth.velocity_probe.probe_error && (
                     <p className="text-red-800 font-mono break-words">{String(velEnvHealth.velocity_probe.probe_error)}</p>
                   )}
-                  <div className="grid gap-1 sm:grid-cols-2 font-mono text-[9px] text-gray-700/95">
-                    {velEnvHealth.velocity_probe.base_http && (
-                      <span>
-                        Base URL: HTTP {velEnvHealth.velocity_probe.base_http.status}{' '}
-                        {velEnvHealth.velocity_probe.base_http.ok ? 'ok' : 'fail'}
-                        {typeof velEnvHealth.velocity_probe.base_http.ms === 'number' && ` · ${velEnvHealth.velocity_probe.base_http.ms}ms`}
-                      </span>
-                    )}
-                    {velEnvHealth.velocity_probe.auth_token && (
-                      <span>
-                        Auth token: HTTP {velEnvHealth.velocity_probe.auth_token.http_status ?? '—'}{' '}
-                        {velEnvHealth.velocity_probe.auth_token.token_received ? 'token received' : 'no token'}
-                        {typeof velEnvHealth.velocity_probe.auth_token.ms === 'number' && ` · ${velEnvHealth.velocity_probe.auth_token.ms}ms`}
-                      </span>
-                    )}
-                    {velEnvHealth.velocity_probe.serviceability_smoke && (
-                      <span className="sm:col-span-2">
-                        Serviceability smoke: HTTP {velEnvHealth.velocity_probe.serviceability_smoke.http_status}{' '}
-                        {velEnvHealth.velocity_probe.serviceability_smoke.invalid_credentials ? 'INVALID_CREDENTIALS' : velEnvHealth.velocity_probe.serviceability_smoke.ok ? 'ok' : 'not ok'}
-                        {typeof velEnvHealth.velocity_probe.serviceability_smoke.ms === 'number' && ` · ${velEnvHealth.velocity_probe.serviceability_smoke.ms}ms`}
-                      </span>
-                    )}
-                  </div>
                 </>
               )}
             </div>
@@ -2077,7 +2037,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       {latestHistoricalVelocityOrder && order.status === 'processing' && (
         <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <p className="text-xs text-indigo-900 font-semibold">
-            A previous shipping order exists for this order.
+            A previous shipping order exists for this order: <span className="font-mono">{String(latestHistoricalVelocityOrder?.shipment_id || '—')}</span>
           </p>
           <Button
             size="small"
@@ -2150,14 +2110,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                 </Button>
               )}
             </div>
-            {!order.velocity_label_url && (order.tracking_number || order.velocity_awb) && (
-              <p className="text-[10px] text-blue-800/85">
-                If <strong>Print shipping label</strong> says Velocity has no link yet, wait a few minutes after pickup booking, click again, or use your Velocity merchant portal with this AWB.
-              </p>
-            )}
-            <p className="text-[10px] text-blue-800/80">
-              Webhooks: set Shipfast/Velocity to POST to this project’s <code className="text-[9px]">/functions/v1/velocity-orchestrator</code> with the same API key or Bearer as <code className="text-[9px]">VELOCITY_WEBHOOK_SECRET</code>. Use <code className="text-[9px]">order_external_id</code> = this order’s UUID.
-            </p>
+            {!order.velocity_label_url && (order.tracking_number || order.velocity_awb) && null}
           </div>
         </div>
       )}
@@ -2240,15 +2193,8 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       {/* ── Velocity Shipping mode (doc: serviceability → forward-order → forward-order-shipment) ── */}
       {shippingMode === 'velocity' && !alreadyShippedViaVelocity && order.status === 'processing' && (
         <div className="space-y-5">
-          <p className="text-xs text-gray-900-variant -mt-1 mb-1">
-            Flow: check serviceability → create <strong>shipment order</strong> (no courier yet) → <strong>assign courier</strong> to manifest and generate the AWB/label.
-          </p>
 
-          {velocityMethodLocked && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
-              Velocity order already created for this session. Shipping method is locked to Velocity until admin reinitiates shipping.
-            </div>
-          )}
+          {velocityMethodLocked && null}
 
           <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-low/50 p-4">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-900-variant mb-3">Fulfillment steps</p>
@@ -2283,7 +2229,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                 </p>
                 <p className="text-xs text-blue-900/85 mt-1 leading-relaxed max-w-2xl">
                   Shipment order is already created on Velocity. Continue with courier assignment to generate the AWB and label.
-                  Use <strong> Reinitiate Shipping </strong> if you need to restart this workflow while keeping historical Velocity records.
+                  Use <strong> Reinitiate shipping </strong> if you need to restart this workflow while keeping historical Velocity records.
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:flex sm:flex-wrap gap-2 shrink-0 w-full sm:w-auto">
@@ -2293,7 +2239,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                   color="primary"
                   onClick={trackVelocityShipment}
                   disabled={trackingVelocity || !order.tracking_number}
-                  title={!order.tracking_number ? 'Available after courier assigns an AWB' : 'Pull latest tracking from Velocity'}
+                  title={!order.tracking_number ? 'Available after a courier assigns an AWB' : 'Pull latest tracking from Velocity'}
                   sx={{ width: { xs: '100%', sm: 'auto' } }}
                 >
                   {trackingVelocity ? 'Refreshing...' : 'Refresh tracking'}
@@ -2338,7 +2284,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                         value={value}
                         onChange={(e) => setter(e.target.value)}
                         readOnly={!!pendingVelocitySid}
-                        title={pendingVelocitySid ? 'Reinitiate shipping to change dimensions.' : ''}
+                        title={pendingVelocitySid ? 'Use Reinitiate shipping to change dimensions.' : ''}
                         className={`w-full px-3 py-2.5 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary ${pendingVelocitySid ? 'opacity-75 cursor-not-allowed' : ''}`}
                       />
                     </div>
@@ -2350,7 +2296,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                     value={pickupLocationId}
                     onChange={(e) => setPickupLocationId(e.target.value)}
                     disabled={!!pendingVelocitySid}
-                    title={pendingVelocitySid ? 'Reinitiate shipping to change pickup.' : ''}
+                    title={pendingVelocitySid ? 'Use Reinitiate shipping to change pickup.' : ''}
                     className={`w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary ${pendingVelocitySid ? 'opacity-75 cursor-not-allowed' : ''}`}
                   >
                     {pickupLocations.length === 0 && (
@@ -2363,9 +2309,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-900-variant mt-1.5">
-                    Maps to Velocity fields <code className="text-[10px]">pickup_location</code> and <code className="text-[10px]">warehouse_id</code> after warehouse sync.
-                  </p>
+                  {null}
                 </div>
               </div>
             </div>
@@ -2378,9 +2322,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                 <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">2</span>
                 Check serviceability
               </p>
-              <p className="text-xs text-gray-900-variant ml-0 sm:ml-8 mb-4">
-                Uses pickup PIN → customer shipping PIN per Velocity <code className="text-[10px]">/serviceability</code> (payment mode from order).
-              </p>
+              {null}
               <Button
                 type="button"
                 onClick={checkServiceability}
@@ -2428,12 +2370,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
           {/* After serviceability: carrier + create order (no AWB) */}
           {(velStep === 'ready' || velStep === 'creating_order') && velServiceability && !pendingVelocitySid && (
             <>
-              {velError && (
-                <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-xs text-red-800 font-semibold flex items-start gap-2">
-                  <span className="material-symbols-outlined text-red-600 text-base shrink-0">warning</span>
-                  {velError}
-                </div>
-              )}
+              {null}
               <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3 shadow-sm">
                 <span className="material-symbols-outlined text-emerald-600 text-xl shrink-0 mt-0.5">check_circle</span>
                 <div className="flex-1 min-w-0 space-y-2">
@@ -2480,11 +2417,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                       })()}
                     </div>
                   )}
-                  {velServiceability.rates_note && (
-                    <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-                      {velServiceability.rates_note}
-                    </p>
-                  )}
+                  {null}
                 </div>
               </div>
 
@@ -2493,9 +2426,6 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <p className="text-[11px] font-bold text-gray-900 uppercase tracking-wider">
                       Available couriers &amp; quotes
-                    </p>
-                    <p className="text-[10px] text-gray-900-variant mt-1">
-                      Carriers with pricing first, then lowest total forward charge. Rows without a quote usually mean Velocity did not return rates for that weight slab.
                     </p>
                   </div>
                   <div className="overflow-x-auto">
@@ -2606,9 +2536,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                   <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">3</span>
                   Create shipment order <span className="text-xs font-normal text-gray-900-variant">(forward-order — no courier selection yet)</span>
                 </p>
-                <p className="text-xs text-gray-900-variant ml-0 sm:ml-8">
-                  Couriers and rates above are <strong>informational</strong>. Velocity creates the shipment record here; you choose the courier in the next step when generating the AWB.
-                </p>
+                {null}
                 <Button
                   type="button"
                   onClick={createVelocityForwardOrder}
@@ -2639,7 +2567,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
               <div className="ml-0 sm:ml-8 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <p className="text-[11px] font-bold uppercase tracking-wider text-gray-900-variant">Choose courier</p>
-                  <p className="text-[10px] text-gray-900-variant">Tip: select Auto-assign for best-fit carrier by Velocity rules.</p>
+                  {null}
                 </div>
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <button
@@ -2751,10 +2679,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                   Download shipping label
                 </a>
               )}
-              <p className="text-[10px] text-emerald-900/85 mt-3 ml-7 max-w-xl leading-relaxed">
-                Tracking data was fetched from Velocity. Configure Shipfast webhooks so delivery and transit updates sync automatically;
-                customers see status on this order page in real time (subscription refresh).
-              </p>
+              {null}
             </div>
           )}
         </div>

@@ -344,6 +344,10 @@ function getEndpointMap(baseUrl: string): Record<VelocityAction, string> {
     list_returns: endpoint('/custom/api/v1/returns', 'VELOCITY_ENDPOINT_RETURNS'),
     initiate_return: endpoint('/custom/api/v1/reverse-order', 'VELOCITY_ENDPOINT_REVERSE_ORDER'),
     assign_return_courier: endpoint('/custom/api/v1/reverse-order-shipment', 'VELOCITY_ENDPOINT_REVERSE_ORDER_SHIPMENT'),
+    /** Internal admin workflow resume route; handled before Velocity token flow. */
+    resume_existing_shipping: `${baseUrl}/`,
+    /** Internal admin workflow reset route; handled before Velocity token flow. */
+    reinitiate_shipping: `${baseUrl}/`,
     webhook_update: endpoint('/custom/api/v1/order-tracking', 'VELOCITY_ENDPOINT_ORDER_TRACKING'),
     /** Not a Velocity HTTP route — satisfied for typing; handled before endpoint resolution. */
     webhook_health: `${baseUrl}/`,
@@ -1202,6 +1206,10 @@ function vendorDetailsFromPickupRow(row: Record<string, unknown>, pickupLocation
   };
 }
 
+function baseVelocityOrderCode(orderId: string): string {
+  return `HAT-${orderId.replace(/-/g, '').slice(0, 10).toUpperCase()}`;
+}
+
 async function handleCheckServiceability(
   adminClient: ReturnType<typeof createAdminClient>,
   endpoint: string,
@@ -1424,6 +1432,15 @@ async function handleCreateOrder(
   if (order.velocity_shipment_id) {
     throw new Error('Shipment already exists for this order.');
   }
+  {
+    const vf = order.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
+      ? order.velocity_fulfillment as Record<string, unknown>
+      : null;
+    const history = Array.isArray(vf?.historical_velocity_orders) ? vf?.historical_velocity_orders : [];
+    if (history.length > 0) {
+      throw new Error('A Velocity shipment order already exists for this order. Resume the existing shipment order instead of creating a new one.');
+    }
+  }
 
   const addr = (order.shipping_address || {}) as Record<string, unknown>;
   const method = String(order.payment_method || '').toLowerCase();
@@ -1433,7 +1450,7 @@ async function handleCreateOrder(
   const items = buildForwardOrderLineItems(orderItems, subTotal);
 
   const requestPayload: Json = {
-    order_id: `HAT-${orderId.replace(/-/g, '').slice(0, 10).toUpperCase()}`,
+    order_id: baseVelocityOrderCode(orderId),
     order_date: new Date(String(order.created_at || nowIso())).toISOString().replace('T', ' ').slice(0, 16),
     carrier_id: typeof payload.carrier_id === 'string' ? payload.carrier_id : '',
     billing_customer_name: String(addr.first_name || addr.name || 'Customer'),
@@ -1526,6 +1543,15 @@ async function handleCreateForwardOrder(
       'A Velocity shipment draft already exists for this order. Assign a courier to generate the AWB, or cancel the draft before creating another.',
     );
   }
+  {
+    const vf = order.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
+      ? order.velocity_fulfillment as Record<string, unknown>
+      : null;
+    const history = Array.isArray(vf?.historical_velocity_orders) ? vf?.historical_velocity_orders : [];
+    if (history.length > 0) {
+      throw new Error('A Velocity shipment order already exists for this order. Resume the existing shipment order instead of creating a new one.');
+    }
+  }
 
   const pickupRow = await fetchPickupLocationById(adminClient, pickupLocationId);
   if (!pickupRow) throw new Error('Pickup location was not found.');
@@ -1547,7 +1573,7 @@ async function handleCreateForwardOrder(
   const channelId = getEnvOptional('VELOCITY_CHANNEL_ID');
 
   const requestPayload: Json = {
-    order_id: `HAT-${orderId.replace(/-/g, '').slice(0, 10).toUpperCase()}`,
+    order_id: baseVelocityOrderCode(orderId),
     order_date: new Date(String(order.created_at || nowIso())).toISOString().replace('T', ' ').slice(0, 16),
     billing_customer_name: String(addr.first_name || addr.name || 'Customer'),
     billing_last_name: String(addr.last_name || ''),
@@ -2173,6 +2199,171 @@ async function handleWebhookUpdate(
   });
 }
 
+/** Internal admin-only action: reset Velocity workflow to step 1 while preserving history. */
+async function handleReinitiateShipping(
+  adminClient: ReturnType<typeof createAdminClient>,
+  payload: Json,
+) {
+  const orderId = typeof payload.order_id === 'string' ? payload.order_id.trim() : '';
+  if (!orderId) {
+    return new Response(JSON.stringify({ error: 'reinitiate_shipping requires payload.order_id' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: orderRow, error: orderErr } = await adminClient
+    .from('orders')
+    .select('id, velocity_pending_shipment_id, velocity_fulfillment')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (orderErr) throw orderErr;
+  if (!orderRow) {
+    return new Response(JSON.stringify({ error: 'Order not found' }), {
+      status: 404,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const sid = typeof payload.shipment_id === 'string' && payload.shipment_id.trim()
+    ? payload.shipment_id.trim()
+    : String(orderRow.velocity_pending_shipment_id || '').trim();
+  const mode = typeof payload.mode === 'string' ? payload.mode.trim().toLowerCase() : '';
+  const isResumeExisting = mode === 'resume_existing';
+  const vf = orderRow.velocity_fulfillment && typeof orderRow.velocity_fulfillment === 'object'
+    ? orderRow.velocity_fulfillment as Record<string, unknown>
+    : {};
+  const history = Array.isArray(vf.historical_velocity_orders) ? [...vf.historical_velocity_orders] : [];
+  if (!isResumeExisting && sid && !history.some((h) => String((h as Record<string, unknown>)?.shipment_id || '') === sid)) {
+    history.push({
+      shipment_id: sid,
+      source: 'reinitiate_shipping',
+      saved_at: nowIso(),
+    });
+  }
+
+  const nextFulfillment = {
+    ...vf,
+    historical_velocity_orders: history,
+    workflow_stage: isResumeExisting ? 'order_created' : 'selection',
+    method_locked_after_order: isResumeExisting,
+    latest_velocity_shipment_id: isResumeExisting ? sid || null : null,
+  };
+
+  const { error: updateErr } = await adminClient
+    .from('orders')
+    .update({
+      velocity_fulfillment: nextFulfillment,
+      velocity_pending_shipment_id: isResumeExisting ? (sid || null) : null,
+      updated_at: nowIso(),
+      admin_updated_at: nowIso(),
+    })
+    .eq('id', orderId);
+  if (updateErr) throw updateErr;
+
+  await logVelocityCall(adminClient, {
+    action: 'reinitiate_shipping',
+    requestPayload: payload,
+    responsePayload: { ok: true, order_id: orderId, shipment_id: sid || null },
+    statusCode: 200,
+    success: true,
+    orderId,
+  });
+
+  return new Response(JSON.stringify({
+    ok: true,
+    action: 'reinitiate_shipping',
+    endpoint: '',
+    status: 200,
+    data: {
+      order_id: orderId,
+      shipment_id: sid || null,
+      workflow_stage: isResumeExisting ? 'order_created' : 'selection',
+      method_locked_after_order: isResumeExisting,
+      pending_shipment_cleared: !isResumeExisting,
+      pending_shipment_id: isResumeExisting ? sid || null : null,
+    },
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
+/** Internal admin-only action: resume workflow from an existing historical Velocity shipment id. */
+async function handleResumeExistingShipping(
+  adminClient: ReturnType<typeof createAdminClient>,
+  payload: Json,
+) {
+  const orderId = typeof payload.order_id === 'string' ? payload.order_id.trim() : '';
+  const shipmentId = typeof payload.shipment_id === 'string' ? payload.shipment_id.trim() : '';
+  if (!orderId || !shipmentId) {
+    return new Response(JSON.stringify({ error: 'resume_existing_shipping requires payload.order_id and payload.shipment_id' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: orderRow, error: orderErr } = await adminClient
+    .from('orders')
+    .select('id, velocity_fulfillment')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (orderErr) throw orderErr;
+  if (!orderRow) {
+    return new Response(JSON.stringify({ error: 'Order not found' }), {
+      status: 404,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const vf = orderRow.velocity_fulfillment && typeof orderRow.velocity_fulfillment === 'object'
+    ? orderRow.velocity_fulfillment as Record<string, unknown>
+    : {};
+  const nextFulfillment = {
+    ...vf,
+    workflow_stage: 'order_created',
+    method_locked_after_order: true,
+    latest_velocity_shipment_id: shipmentId,
+  };
+
+  const { error: updateErr } = await adminClient
+    .from('orders')
+    .update({
+      velocity_fulfillment: nextFulfillment,
+      velocity_pending_shipment_id: shipmentId,
+      updated_at: nowIso(),
+      admin_updated_at: nowIso(),
+    })
+    .eq('id', orderId);
+  if (updateErr) throw updateErr;
+
+  await logVelocityCall(adminClient, {
+    action: 'resume_existing_shipping',
+    requestPayload: payload,
+    responsePayload: { ok: true, order_id: orderId, shipment_id: shipmentId },
+    statusCode: 200,
+    success: true,
+    orderId,
+  });
+
+  return new Response(JSON.stringify({
+    ok: true,
+    action: 'resume_existing_shipping',
+    endpoint: '',
+    status: 200,
+    data: {
+      order_id: orderId,
+      shipment_id: shipmentId,
+      workflow_stage: 'order_created',
+      method_locked_after_order: true,
+      pending_shipment_id: shipmentId,
+    },
+  }), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -2237,6 +2428,13 @@ Deno.serve(async (req: Request) => {
   const auth = await requireOrdersStaffOrAdmin(req, adminClient);
   if (!auth.ok) {
     return auth.response;
+  }
+
+  if (action === 'reinitiate_shipping') {
+    return await handleReinitiateShipping(adminClient, payload);
+  }
+  if (action === 'resume_existing_shipping') {
+    return await handleResumeExistingShipping(adminClient, payload);
   }
 
   if (action === 'webhook_health') {
