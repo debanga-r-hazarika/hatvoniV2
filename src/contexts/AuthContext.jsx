@@ -149,13 +149,6 @@ export const AuthProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    // Restore session from sessionStorage if it was stored there (non-remember-me login)
-    const storageKey = 'hatvoni-auth-token';
-    const sessionStored = sessionStorage.getItem(storageKey);
-    if (sessionStored && !localStorage.getItem(storageKey)) {
-      localStorage.setItem(storageKey, sessionStored);
-    }
-
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       setUser(session?.user ?? null);
       await fetchProfile(session?.user?.id, session?.user);
@@ -192,26 +185,11 @@ export const AuthProvider = ({ children }) => {
       email,
       password,
     });
-
-    if (!error && !rememberMe) {
-      // Move the session to sessionStorage so it's cleared on tab/browser close
-      const storageKey = 'hatvoni-auth-token';
-      const stored = localStorage.getItem(storageKey);
-      if (stored) {
-        sessionStorage.setItem(storageKey, stored);
-        localStorage.removeItem(storageKey);
-      }
-    }
-
     return { data, error };
   };
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
-    // Clean up both storage locations
-    const storageKey = 'hatvoni-auth-token';
-    localStorage.removeItem(storageKey);
-    sessionStorage.removeItem(storageKey);
     return { error };
   };
 
