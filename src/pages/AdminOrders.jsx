@@ -1365,11 +1365,120 @@ function WorkflowLog({ orderId }) {
   );
 }
 
+/** Inline warehouse pills — shows first warehouse, +N more expands on click */
+function WarehousePills({ warehouses }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!warehouses || warehouses.length === 0) {
+    return <span className="text-[10px] text-gray-900-variant/50 italic">No warehouse</span>;
+  }
+  const first = warehouses[0];
+  const rest = warehouses.slice(1);
+  return (
+    <span className="inline-flex items-center gap-1 flex-wrap">
+      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[10px] font-semibold text-gray-900">
+        <span className="material-symbols-outlined text-[11px] text-secondary">warehouse</span>
+        {first.name}
+        {first.pincode && <span className="text-gray-900-variant font-normal">· {first.pincode}</span>}
+        {first.isDefault && <span className="text-[9px] text-secondary font-bold ml-0.5">★</span>}
+      </span>
+      {rest.length > 0 && !expanded && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
+          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-secondary/10 border border-secondary/20 text-[10px] font-bold text-secondary hover:bg-secondary/20 transition-colors"
+        >
+          +{rest.length} more
+        </button>
+      )}
+      {expanded && rest.map((wh) => (
+        <span key={wh.id} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-container border border-outline-variant/30 text-[10px] font-semibold text-gray-900">
+          <span className="material-symbols-outlined text-[11px] text-secondary">warehouse</span>
+          {wh.name}
+          {wh.pincode && <span className="text-gray-900-variant font-normal">· {wh.pincode}</span>}
+          {wh.isDefault && <span className="text-[9px] text-secondary font-bold ml-0.5">★</span>}
+        </span>
+      ))}
+      {expanded && rest.length > 0 && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded(false); }}
+          className="text-[10px] text-gray-900-variant hover:text-gray-900 font-semibold"
+        >
+          less
+        </button>
+      )}
+    </span>
+  );
+}
+
 /** One physical lot: manual tracking or Velocity flow (multi-shipment orders). */
 function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefresh, onNotice, onError }) {
   const [lotTab, setLotTab] = useState('manual');
   const [lotTracking, setLotTracking] = useState(() => String(lot?.tracking_number || ''));
   const [savingLot, setSavingLot] = useState(false);
+
+  // ── Lot items info popover ──
+  const [showLotItems, setShowLotItems] = useState(false);
+  const [lotItems, setLotItems] = useState(null); // null = not loaded yet
+  const [lotItemsLoading, setLotItemsLoading] = useState(false);
+  const popoverRef = useRef(null);
+
+  // Close popover on outside click
+  useEffect(() => {
+    if (!showLotItems) return;
+    const handler = (e) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target)) {
+        setShowLotItems(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showLotItems]);
+
+  const openLotItems = async () => {
+    setShowLotItems((v) => !v);
+    if (lotItems !== null) return; // already loaded
+    setLotItemsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('order_items')
+        .select('id, quantity, price, lot_name, lot_snapshot, products(id, key, name, image_url)')
+        .eq('order_shipment_id', lot.id);
+      if (error) throw error;
+      setLotItems(data || []);
+    } catch {
+      setLotItems([]);
+    } finally {
+      setLotItemsLoading(false);
+    }
+  };
+
+  // Flatten items + lot snapshots into display lines
+  const lotDisplayLines = useMemo(() => {
+    if (!lotItems) return [];
+    return lotItems.flatMap((item) => {
+      if (Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0) {
+        return item.lot_snapshot.map((s) => ({
+          key: `${item.id}-${s.product_key}`,
+          name: s.product_name || s.product_key || 'Product',
+          productKey: s.product_key,
+          qty: (s.quantity || 1) * item.quantity,
+          unitPrice: s.unit_price,
+          lotName: item.lot_name,
+          imageUrl: null,
+        }));
+      }
+      return [{
+        key: item.id,
+        name: item.products?.name || item.lot_name || 'Product',
+        productKey: item.products?.key || null,
+        qty: item.quantity,
+        unitPrice: item.price,
+        lotName: item.lot_name || null,
+        imageUrl: item.products?.image_url || null,
+      }];
+    });
+  }, [lotItems]);
 
   useEffect(() => {
     setLotTracking(String(lot?.tracking_number || ''));
@@ -1380,7 +1489,26 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
     const wh = lot?.warehouse;
     if (!wh?.id) return rows.filter((r) => r.velocity_warehouse_id);
     const matched = rows.filter((r) => pickupMatchesWarehouseRow(r, wh));
-    return matched.length ? matched : rows.filter((r) => r.velocity_warehouse_id);
+    if (matched.length) return matched;
+    const wv = String(wh.velocity_warehouse_id || '').trim();
+    if (wv) {
+      const byVid = rows.filter(
+        (r) => String(r.velocity_warehouse_id || '').trim().toLowerCase() === wv.toLowerCase(),
+      );
+      if (byVid.length) return byVid;
+    }
+    const wName = String(wh.warehouse_name || wh.name || '').trim();
+    if (wName) {
+      const byCode = rows.filter(
+        (r) => String(r.velocity_warehouse_id || '').trim().toLowerCase() === wName.toLowerCase(),
+      );
+      if (byCode.length) return byCode;
+      const byPickupName = rows.filter(
+        (r) => String(r.warehouse_name || '').trim().toLowerCase() === wName.toLowerCase(),
+      );
+      if (byPickupName.length) return byPickupName;
+    }
+    return [];
   }, [allPickupLocations, lot?.warehouse]);
 
   const hasAwb = !!(lot?.tracking_number || '').trim();
@@ -1412,19 +1540,82 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   return (
     <div className="rounded-2xl border border-secondary/25 bg-surface-container-lowest/80 overflow-hidden shadow-sm">
       <div className="px-4 py-3 border-b border-outline-variant/20 bg-secondary/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary">Shipment lot {lot.lot_index}</p>
-          <p className="text-sm font-bold text-gray-900">{lot.label || `Shipment ${lot.lot_index}`}</p>
-          <p className="text-xs text-gray-900-variant mt-0.5">
-            {whLabel}
-            {whPin != null && whPin !== '' ? ` · PIN ${whPin}` : ''}
-            {whVelocity ? (
-              <span className="ml-1 font-mono text-[10px] text-gray-900">· Velocity {whVelocity}</span>
-            ) : null}
-            {lot.velocity_external_code ? (
-              <span className="ml-1 font-mono text-[10px]">· {lot.velocity_external_code}</span>
-            ) : null}
-          </p>
+        <div className="flex items-start gap-2">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary">Shipment lot {lot.lot_index}</p>
+            <p className="text-sm font-bold text-gray-900">{lot.label || `Shipment ${lot.lot_index}`}</p>
+            <p className="text-xs text-gray-900-variant mt-0.5">
+              {whLabel}
+              {whPin != null && whPin !== '' ? ` · PIN ${whPin}` : ''}
+              {whVelocity ? (
+                <span className="ml-1 font-mono text-[10px] text-gray-900">· Velocity {whVelocity}</span>
+              ) : null}
+              {lot.velocity_external_code ? (
+                <span className="ml-1 font-mono text-[10px]">· {lot.velocity_external_code}</span>
+              ) : null}
+            </p>
+          </div>
+          {/* ⓘ Products in this lot */}
+          <div className="relative mt-0.5" ref={popoverRef}>
+            <button
+              type="button"
+              onClick={openLotItems}
+              title="View products assigned to this lot"
+              className="w-6 h-6 rounded-full bg-secondary/15 hover:bg-secondary/30 text-secondary flex items-center justify-center transition-colors shrink-0"
+            >
+              <span className="material-symbols-outlined text-[15px]">info</span>
+            </button>
+            {showLotItems && (
+              <div className="absolute left-0 top-8 z-50 w-72 rounded-2xl border border-outline-variant/30 bg-white shadow-xl p-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary mb-2">
+                  Products in this lot
+                </p>
+                {lotItemsLoading ? (
+                  <div className="flex items-center gap-2 py-2">
+                    <span className="material-symbols-outlined animate-spin text-secondary text-base">progress_activity</span>
+                    <span className="text-xs text-gray-900-variant">Loading…</span>
+                  </div>
+                ) : lotDisplayLines.length === 0 ? (
+                  <p className="text-xs text-gray-900-variant py-1">No products assigned to this lot yet.</p>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {lotDisplayLines.map((line) => (
+                      <div key={line.key} className="flex items-center gap-2.5 rounded-xl bg-surface-container-low p-2">
+                        {line.imageUrl ? (
+                          <img src={line.imageUrl} alt={line.name} className="w-9 h-9 rounded-lg object-cover border border-outline-variant/20 shrink-0" />
+                        ) : (
+                          <div className="w-9 h-9 rounded-lg bg-surface-container flex items-center justify-center shrink-0 border border-outline-variant/20">
+                            <span className="material-symbols-outlined text-outline text-sm">inventory_2</span>
+                          </div>
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-gray-900 truncate">{line.name}</p>
+                          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                            {line.productKey && (
+                              <span className="text-[9px] font-mono text-gray-900-variant bg-surface-container px-1 py-0.5 rounded">
+                                {line.productKey}
+                              </span>
+                            )}
+                            {line.lotName && (
+                              <span className="text-[9px] font-bold text-secondary uppercase tracking-wide">
+                                {line.lotName}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-right shrink-0">
+                          <p className="text-xs font-bold text-gray-900">×{line.qty}</p>
+                          {line.unitPrice != null && (
+                            <p className="text-[10px] text-gray-900-variant">₹{Number(line.unitPrice).toLocaleString('en-IN')}</p>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex rounded-xl bg-surface-container-low p-1 gap-1 shrink-0">
           {[
@@ -1473,7 +1664,7 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
               </p>
             ) : (
               <>
-                {!whVid && (
+                {!whVelocity && (
                   <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">
                     Link this warehouse to a Velocity warehouse id so pickup locations can be filtered for this lot.
                   </p>
@@ -1497,7 +1688,7 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
 
 // ─── ShippingPanel ────────────────────────────────────────────────────────────
 
-function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
+function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice, onError }) {
   const { user, loading: authLoading, isAdmin } = useAuth();
   // 'manual' | 'velocity'
   const [shippingMode, setShippingMode] = useState('manual');
@@ -1534,14 +1725,17 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
 
   const [shipmentLots, setShipmentLots] = useState([]);
   const [activeLotId, setActiveLotId] = useState('');
-  const [fulfillmentModalOpen, setFulfillmentModalOpen] = useState(false);
-  const [preparingLots, setPreparingLots] = useState(false);
-  const [warehousePreview, setWarehousePreview] = useState({
-    loading: true,
-    distinctWarehouseIds: [],
-    distinctCount: 0,
-    warehousesById: {},
-  });
+
+  // ── Lot builder state (multi-shipment manual assignment) ──
+  const [lotBuilderOpen, setLotBuilderOpen] = useState(false);
+  const [lotBuilderItems, setLotBuilderItems] = useState([]); // all order items for this order
+  const [lotBuilderLots, setLotBuilderLots] = useState([]); // local lot rows (id, label, lot_index)
+  // assignment map: order_item_id → lot_id (local, not yet persisted until "Proceed")
+  const [lotAssignments, setLotAssignments] = useState({});
+  const [lotBuilderLoading, setLotBuilderLoading] = useState(false);
+  const [lotBuilderSaving, setLotBuilderSaving] = useState(false);
+  const [lotBuilderError, setLotBuilderError] = useState('');
+  const [revertingLots, setRevertingLots] = useState(false);
 
   const [retryingRefund, setRetryingRefund] = useState(false);
   const isPartialOrder = order?.partial_fulfillment === true;
@@ -1586,120 +1780,46 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     shipmentLots.length > 0 &&
     order?.status === 'processing';
 
+  // True when the order has multiple products or contains a lot (bundle) item —
+  // only in those cases do we need to ask Single vs Multiple shipment routing.
+  const isMultiProductOrder = useMemo(() => {
+    const rows = orderItems || [];
+    if (rows.length > 1) return true;
+    if (rows.length === 1) {
+      const snap = rows[0]?.lot_snapshot;
+      return Array.isArray(snap) && snap.length > 1;
+    }
+    return false;
+  }, [orderItems]);
+
   const showFulfillmentRouting =
+    isMultiProductOrder &&
+    !lotBuilderOpen &&
     order?.status === 'processing' &&
     !order?.fulfillment_mode &&
     !String(order?.velocity_pending_shipment_id || '').trim() &&
     !String(order?.velocity_shipment_id || '').trim() &&
     !String(order?.tracking_number || '').trim();
 
-  useEffect(() => {
-    if (!orderId || !isUuidLike(orderId) || order?.status !== 'processing') {
-      setWarehousePreview((p) => ({ ...p, loading: false }));
-      return undefined;
-    }
-    let cancelled = false;
-    (async () => {
-      setWarehousePreview((p) => ({ ...p, loading: true }));
-      try {
-        const { data: items, error: ie } = await supabase
-          .from('order_items')
-          .select('id, product_id, lot_id')
-          .eq('order_id', orderId);
-        if (ie) throw ie;
-        const lotIds = [...new Set((items || []).map((i) => i.lot_id).filter((id) => isUuidLike(String(id))))];
-        const lotSources = {};
-        if (lotIds.length) {
-          const { data: lots, error: lotsErr } = await supabase
-            .from('lots')
-            .select('id, source_product_id')
-            .in('id', lotIds);
-          if (lotsErr) throw lotsErr;
-          for (const l of lots || []) {
-            if (isUuidLike(String(l.source_product_id))) lotSources[l.id] = l.source_product_id;
-          }
-        }
-        const productIds = new Set();
-        for (const it of items || []) {
-          if (isUuidLike(String(it.product_id))) productIds.add(it.product_id);
-          const lid = it.lot_id && isUuidLike(String(it.lot_id)) ? it.lot_id : null;
-          const sp = lid ? lotSources[lid] : null;
-          if (sp && isUuidLike(String(sp))) productIds.add(sp);
-        }
-        const pidList = [...productIds].filter((id) => isUuidLike(String(id)));
-        if (pidList.length === 0) {
-          if (!cancelled) {
-            setWarehousePreview({
-              loading: false,
-              distinctWarehouseIds: [],
-              distinctCount: 0,
-              warehousesById: {},
-            });
-          }
-          return;
-        }
-        const { data: pws, error: pwErr } = await supabase
-          .from('product_warehouses')
-          .select('product_id, warehouse_id, is_default, assigned_at')
-          .in('product_id', pidList);
-        if (pwErr) throw pwErr;
-        const pwByProduct = {};
-        for (const pw of pws || []) {
-          const pid = pw.product_id;
-          const wid = pw.warehouse_id;
-          if (!isUuidLike(String(pid)) || !isUuidLike(String(wid))) continue;
-          if (!pwByProduct[pid]) pwByProduct[pid] = [];
-          pwByProduct[pid].push(pw);
-        }
-        const resolvePid = (pid) => {
-          if (!isUuidLike(String(pid))) return null;
-          const list = pwByProduct[pid];
-          if (!list?.length) return null;
-          const sorted = [...list].sort((a, b) => {
-            if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
-            return new Date(a.assigned_at) - new Date(b.assigned_at);
-          });
-          const chosen = sorted[0]?.warehouse_id;
-          return isUuidLike(String(chosen)) ? chosen : null;
-        };
-        const whIds = new Set();
-        for (const it of items || []) {
-          let w = resolvePid(it.product_id);
-          const lid = it.lot_id && isUuidLike(String(it.lot_id)) ? it.lot_id : null;
-          if (!w && lid && lotSources[lid]) w = resolvePid(lotSources[lid]);
-          if (w && isUuidLike(String(w))) whIds.add(w);
-        }
-        const distinctWarehouseIds = [...whIds].filter((id) => isUuidLike(String(id)));
-        let warehousesById = {};
-        if (distinctWarehouseIds.length) {
-          const { data: whRows, error: whErr } = await supabase
-            .from('warehouses')
-            .select('id, warehouse_name, velocity_warehouse_id, pincode')
-            .in('id', distinctWarehouseIds);
-          if (whErr) throw whErr;
-          for (const w of whRows || []) warehousesById[w.id] = w;
-        }
-        if (!cancelled) {
-          setWarehousePreview({
-            loading: false,
-            distinctWarehouseIds,
-            distinctCount: distinctWarehouseIds.length,
-            warehousesById,
-          });
-        }
-      } catch {
-        if (!cancelled) {
-          setWarehousePreview({
-            loading: false,
-            distinctWarehouseIds: [],
-            distinctCount: 0,
-            warehousesById: {},
-          });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [orderId, order?.status]);
+  // Show a "change mode" banner when single was chosen but nothing shipped yet
+  const showSingleChosenBanner =
+    order?.status === 'processing' &&
+    order?.fulfillment_mode === 'legacy_single' &&
+    !String(order?.velocity_pending_shipment_id || '').trim() &&
+    !String(order?.velocity_shipment_id || '').trim() &&
+    !String(order?.tracking_number || '').trim();
+
+  // Show a "change mode" banner when multi was chosen but builder is closed and nothing booked yet
+  const showMultiChosenBanner =
+    order?.status === 'processing' &&
+    order?.fulfillment_mode === 'multi_shipment' &&
+    !lotBuilderOpen &&
+    !hideGlobalVelocityForLots &&
+    shipmentLots.length > 0 &&
+    shipmentLots.every((l) => !String(l.tracking_number || '').trim() && !String(l.velocity_pending_shipment_id || '').trim()) &&
+    !String(order?.velocity_pending_shipment_id || '').trim() &&
+    !String(order?.velocity_shipment_id || '').trim() &&
+    !String(order?.tracking_number || '').trim();
 
   useEffect(() => {
     // Re-enable DB-driven pending SID once refreshed order confirms it is cleared.
@@ -1914,23 +2034,10 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     return list;
   }, [velServiceability?.carriers]);
 
-  /** Legacy single shipment but products map to multiple warehouses — show every pickup that maps to any of those warehouse rows (Velocity id + name fallbacks). */
+  /** All pickup locations — for legacy_single mode just show all synced rows. */
   const velocityPickupOptions = useMemo(() => {
-    const rows = pickupLocations || [];
-    const mode = order?.fulfillment_mode;
-    const ids = warehousePreview?.distinctWarehouseIds;
-    const meta = warehousePreview?.warehousesById;
-    const multiWarehouses =
-      (mode === 'legacy_single' || mode == null) &&
-      ids?.length > 1 &&
-      meta &&
-      Object.keys(meta).length > 0;
-    if (!multiWarehouses) return rows;
-    const filtered = rows.filter((p) =>
-      ids.some((wid) => pickupMatchesWarehouseRow(p, meta[wid])),
-    );
-    return filtered.length ? filtered : rows;
-  }, [pickupLocations, order?.fulfillment_mode, warehousePreview]);
+    return (pickupLocations || []);
+  }, [pickupLocations]);
 
   useEffect(() => {
     if (!pickupLocationId) return;
@@ -1975,27 +2082,261 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         })
         .eq('id', orderId);
       if (error) throw error;
-      setFulfillmentModalOpen(false);
-      onNotice('Single-shipment mode selected. Continue with Velocity as one package from one warehouse.');
+      onNotice('Single-shipment mode selected. Continue with Velocity or manual entry below.');
       await onRefresh();
     } catch (e) {
       onError(toUserError(e, 'Could not update fulfillment mode.'));
     }
   };
 
-  const prepareMultiShipmentLots = async () => {
-    setPreparingLots(true);
+  /** Reset fulfillment_mode back to null so admin can re-choose — only safe when nothing has shipped yet */
+  const resetFulfillmentMode = async () => {
     onError('');
     try {
-      const { data, error } = await supabase.rpc('admin_prepare_multi_shipment_lots', { p_order_id: orderId });
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          fulfillment_mode: null,
+          updated_at: new Date().toISOString(),
+          admin_updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
       if (error) throw error;
-      setFulfillmentModalOpen(false);
-      onNotice(`Created ${data} shipment lot(s) from product warehouse assignments. Book each lot on Velocity separately.`);
       await onRefresh();
     } catch (e) {
-      onError(toUserError(e, 'Could not create shipment lots. Ensure each line has a default warehouse on the product.'));
+      onError(toUserError(e, 'Could not reset fulfillment mode.'));
+    }
+  };
+
+  // ── Lot builder helpers ──────────────────────────────────────────────────────
+
+  const openLotBuilder = async () => {
+    setLotBuilderLoading(true);
+    setLotBuilderError('');
+    try {
+      const { data: itemRows, error: itemErr } = await supabase
+        .from('order_items')
+        .select('id, quantity, price, lot_name, lot_snapshot, order_shipment_id, products(id, key, name, image_url)')
+        .eq('order_id', orderId)
+        .order('created_at', { ascending: true });
+      if (itemErr) throw itemErr;
+
+      const { error: rpcErr } = await supabase.rpc('admin_create_empty_shipment_lots', {
+        p_order_id: orderId,
+        p_lot_count: 2,
+      });
+      if (rpcErr) throw rpcErr;
+
+      const { data: lotRows, error: lotErr } = await supabase
+        .from('order_shipments')
+        .select('id, lot_index, label, velocity_external_code')
+        .eq('order_id', orderId)
+        .order('lot_index', { ascending: true });
+      if (lotErr) throw lotErr;
+
+      // ── Collect all product keys from bundle snapshots to resolve their IDs ──
+      const bundleProductKeys = new Set();
+      for (const item of itemRows || []) {
+        if (Array.isArray(item.lot_snapshot)) {
+          for (const s of item.lot_snapshot) {
+            if (s.product_key) bundleProductKeys.add(s.product_key);
+          }
+        }
+      }
+
+      // Resolve bundle product keys → product IDs
+      let bundleKeyToId = {};
+      if (bundleProductKeys.size > 0) {
+        const { data: bundleProds } = await supabase
+          .from('products')
+          .select('id, key')
+          .in('key', [...bundleProductKeys]);
+        for (const p of bundleProds || []) bundleKeyToId[p.key] = p.id;
+      }
+
+      // ── Collect all product IDs (plain + bundle) ──
+      const allProductIds = new Set();
+      for (const item of itemRows || []) {
+        if (item.products?.id) allProductIds.add(item.products.id);
+        if (Array.isArray(item.lot_snapshot)) {
+          for (const s of item.lot_snapshot) {
+            const pid = bundleKeyToId[s.product_key];
+            if (pid) allProductIds.add(pid);
+          }
+        }
+      }
+
+      // ── Fetch warehouses for all products ──
+      let warehousesByProductId = {};
+      if (allProductIds.size > 0) {
+        const { data: pwRows } = await supabase
+          .from('product_warehouses')
+          .select('product_id, is_default, warehouse:warehouses(id, warehouse_name, pincode)')
+          .in('product_id', [...allProductIds])
+          .order('is_default', { ascending: false });
+        for (const pw of pwRows || []) {
+          if (!pw.warehouse) continue;
+          if (!warehousesByProductId[pw.product_id]) warehousesByProductId[pw.product_id] = [];
+          warehousesByProductId[pw.product_id].push({
+            id: pw.warehouse.id,
+            name: pw.warehouse.warehouse_name,
+            pincode: pw.warehouse.pincode,
+            isDefault: pw.is_default,
+          });
+        }
+      }
+
+      // ── Expand every order_item into individual assignable rows ──
+      const displayItems = (itemRows || []).flatMap((item) => {
+        const isBundle = Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0;
+        if (isBundle) {
+          return item.lot_snapshot.map((s) => {
+            const pid = bundleKeyToId[s.product_key];
+            return {
+              id: `${item.id}::${s.product_key}`,
+              orderId: item.id,
+              productKey: s.product_key,
+              quantity: (s.quantity || 1) * item.quantity,
+              price: s.unit_price || 0,
+              order_shipment_id: item.order_shipment_id,
+              name: s.product_name || s.product_key || 'Product',
+              imageUrl: null,
+              bundleParent: item.lot_name || 'Bundle',
+              warehouses: pid ? (warehousesByProductId[pid] || []) : [],
+            };
+          });
+        }
+        return [{
+          id: item.id,
+          orderId: item.id,
+          productKey: item.products?.key || null,
+          quantity: item.quantity,
+          price: item.price,
+          order_shipment_id: item.order_shipment_id,
+          name: item.products?.name || item.lot_name || 'Product',
+          imageUrl: item.products?.image_url || null,
+          bundleParent: null,
+          warehouses: item.products?.id ? (warehousesByProductId[item.products.id] || []) : [],
+        }];
+      });
+
+      const seedAssignments = {};
+      for (const item of displayItems) {
+        if (item.order_shipment_id) seedAssignments[item.id] = item.order_shipment_id;
+      }
+
+      setLotBuilderItems(displayItems);
+      setLotBuilderLots(lotRows || []);
+      setLotAssignments(seedAssignments);
+      setLotBuilderOpen(true);
+      // NOTE: intentionally NOT calling onRefresh() here — the builder manages
+      // its own local state. onRefresh() would cause a parent re-render that
+      // races with setLotBuilderOpen(true) and hides the builder.
+      // onRefresh() is called after commitLotAssignments() instead.
+    } catch (e) {
+      setLotBuilderError(toUserError(e, 'Could not open lot builder.'));
     } finally {
-      setPreparingLots(false);
+      setLotBuilderLoading(false);
+    }
+  };
+
+  const addLotToBuilder = async () => {
+    setLotBuilderError('');
+    try {
+      const { error } = await supabase.rpc('admin_add_shipment_lot', { p_order_id: orderId });
+      if (error) throw error;
+      const { data: lotRows } = await supabase
+        .from('order_shipments')
+        .select('id, lot_index, label, velocity_external_code')
+        .eq('order_id', orderId)
+        .order('lot_index', { ascending: true });
+      setLotBuilderLots(lotRows || []);
+    } catch (e) {
+      setLotBuilderError(toUserError(e, 'Could not add lot.'));
+    }
+  };
+
+  const removeLotFromBuilder = async (lotId) => {
+    setLotBuilderError('');
+    try {
+      const { error } = await supabase.rpc('admin_remove_shipment_lot', { p_order_shipment_id: lotId });
+      if (error) throw error;
+      // Remove from local lots list and clear any assignments to this lot
+      setLotBuilderLots((prev) => prev.filter((l) => l.id !== lotId));
+      setLotAssignments((prev) => {
+        const next = { ...prev };
+        for (const [itemId, assignedLotId] of Object.entries(next)) {
+          if (assignedLotId === lotId) delete next[itemId];
+        }
+        return next;
+      });
+    } catch (e) {
+      setLotBuilderError(toUserError(e, 'Could not remove lot.'));
+    }
+  };
+
+  const assignItemToLot = (itemId, lotId) => {
+    setLotAssignments((prev) => ({ ...prev, [itemId]: lotId }));
+  };
+
+  const unassignItem = (itemId) => {
+    setLotAssignments((prev) => {
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+  };
+
+  const allItemsAssigned = lotBuilderItems.length > 0 &&
+    lotBuilderItems.every((item) => !!lotAssignments[item.id]);
+
+  const commitLotAssignments = async () => {
+    if (!allItemsAssigned) return;
+    setLotBuilderSaving(true);
+    setLotBuilderError('');
+    try {
+      // Build a map of orderId → lotId (deduplicated for bundle products).
+      // Bundle products from the same order_item all share the same orderId —
+      // they must all go to the same lot (validated by allItemsAssigned check).
+      const orderItemToLot = {};
+      for (const [virtualId, lotId] of Object.entries(lotAssignments)) {
+        const item = lotBuilderItems.find((i) => i.id === virtualId);
+        if (!item) continue;
+        orderItemToLot[item.orderId] = lotId;
+      }
+      for (const [orderItemId, lotId] of Object.entries(orderItemToLot)) {
+        const { error } = await supabase.rpc('admin_assign_item_to_lot', {
+          p_order_item_id: orderItemId,
+          p_order_shipment_id: lotId,
+        });
+        if (error) throw error;
+      }
+      setLotBuilderOpen(false);
+      onNotice('Shipment lots configured. Book each lot below.');
+      await onRefresh();
+    } catch (e) {
+      setLotBuilderError(toUserError(e, 'Could not save lot assignments.'));
+    } finally {
+      setLotBuilderSaving(false);
+    }
+  };
+
+  const revertLots = async () => {
+    setRevertingLots(true);
+    onError('');
+    try {
+      const { error } = await supabase.rpc('admin_revert_shipment_lots', { p_order_id: orderId });
+      if (error) throw error;
+      setLotBuilderOpen(false);
+      setLotBuilderItems([]);
+      setLotBuilderLots([]);
+      setLotAssignments({});
+      onNotice('Shipment lots reverted. Choose fulfillment mode again.');
+      await onRefresh();
+    } catch (e) {
+      onError(toUserError(e, 'Could not revert lots.'));
+    } finally {
+      setRevertingLots(false);
     }
   };
 
@@ -2580,6 +2921,51 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         </div>
       )}
 
+      {showSingleChosenBanner && (
+        <div className="rounded-2xl border border-outline-variant/25 bg-surface-container-low p-4 mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-primary text-[20px]">inventory</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900">Single shipment selected</p>
+              <p className="text-xs text-gray-900-variant mt-0.5">Changed your mind? You can switch to multiple shipments — nothing has been booked yet.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={resetFulfillmentMode}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-secondary/40 bg-white text-secondary text-xs font-bold hover:bg-secondary/5 transition-colors shrink-0 whitespace-nowrap"
+          >
+            <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+            Change mode
+          </button>
+        </div>
+      )}
+
+      {showMultiChosenBanner && (
+        <div className="rounded-2xl border border-secondary/25 bg-secondary/5 p-4 mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-3 flex-1 min-w-0">
+            <div className="w-9 h-9 rounded-xl bg-secondary/15 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-secondary text-[20px]">splitscreen</span>
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900">Multiple shipments selected</p>
+              <p className="text-xs text-gray-900-variant mt-0.5">Changed your mind? You can switch to single shipment — nothing has been booked yet.</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={revertLots}
+            disabled={revertingLots}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-outline-variant/40 bg-white text-gray-900 text-xs font-bold hover:bg-surface-container transition-colors shrink-0 whitespace-nowrap disabled:opacity-50"
+          >
+            <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+            {revertingLots ? 'Switching…' : 'Change mode'}
+          </button>
+        </div>
+      )}
+
       {showFulfillmentRouting && (
         <div className="rounded-2xl border border-outline-variant/25 bg-white p-5 shadow-sm space-y-4 mb-6">
           <div className="flex items-start gap-3">
@@ -2590,51 +2976,220 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
               <p className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-900-variant mb-1">Fulfillment routing</p>
               <p className="text-sm font-bold text-gray-900 leading-snug">How should this order ship?</p>
               <p className="text-xs text-gray-900-variant mt-1.5 leading-relaxed">
-                Choose before Velocity or manual booking. Multiple shipments only applies when line items resolve to{' '}
-                <strong className="text-gray-900">different warehouses</strong> (from product warehouse assignments).
+                <strong className="text-gray-900">Single shipment</strong> — one package from one location.{' '}
+                <strong className="text-gray-900">Multiple shipments</strong> — split into separate lots, each booked independently.
               </p>
-              {!warehousePreview.loading && warehousePreview.distinctCount > 0 && (
-                <p className="text-[11px] text-secondary font-semibold mt-2">
-                  Detected {warehousePreview.distinctCount} distinct warehouse
-                  {warehousePreview.distinctCount !== 1 ? 's' : ''} from current line items.
-                </p>
-              )}
-              {warehousePreview.loading && (
-                <p className="text-[11px] text-gray-900-variant mt-2">Analyzing warehouse assignments…</p>
-              )}
             </div>
           </div>
+          {lotBuilderError && (
+            <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{lotBuilderError}</p>
+          )}
           <div className="flex flex-col sm:flex-row gap-2">
             <Button variant="outlined" color="primary" onClick={confirmLegacySingleFulfillment} sx={{ flex: 1 }}>
+              <span className="material-symbols-outlined text-base mr-1">inventory</span>
               Single shipment
             </Button>
             <Button
               variant="contained"
               color="primary"
-              disabled={
-                warehousePreview.loading ||
-                warehousePreview.distinctCount < 2
-              }
-              title={
-                warehousePreview.distinctCount < 2 && !warehousePreview.loading
-                  ? 'Multiple shipments requires at least two different product warehouses.'
-                  : ''
-              }
-              onClick={() => setFulfillmentModalOpen(true)}
+              disabled={lotBuilderLoading}
+              onClick={openLotBuilder}
               sx={{ flex: 1 }}
             >
-              Multiple shipments
+              {lotBuilderLoading
+                ? <><span className="material-symbols-outlined animate-spin text-base mr-1">progress_activity</span>Opening…</>
+                : <><span className="material-symbols-outlined text-base mr-1">splitscreen</span>Multiple shipments</>
+              }
             </Button>
           </div>
         </div>
       )}
 
-      {hideGlobalVelocityForLots && !alreadyShippedViaVelocity && (
+      {/* ── Lot Builder — inline manual assignment UI ── */}
+      {lotBuilderOpen && (
+        <div className="rounded-2xl border border-secondary/30 bg-white shadow-sm mb-6 overflow-hidden">
+          {/* Header */}
+          <div className="px-5 py-4 bg-secondary/5 border-b border-secondary/15 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary">Lot Builder</p>
+              <p className="text-sm font-bold text-gray-900">Assign every product to a shipment lot</p>
+              <p className="text-xs text-gray-900-variant mt-0.5">Each product must be in exactly one lot. Bundle products are listed individually.</p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={revertLots}
+                disabled={revertingLots}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 bg-white text-gray-900 text-xs font-bold hover:bg-surface-container transition-colors disabled:opacity-50"
+              >
+                <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+                {revertingLots ? 'Switching…' : 'Change mode'}
+              </button>
+            </div>
+          </div>
+
+          <div className="p-4 space-y-4">
+            {lotBuilderError && (
+              <p className="text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{lotBuilderError}</p>
+            )}
+
+            {/* Unassigned pool */}
+            {(() => {
+              const unassigned = lotBuilderItems.filter((item) => !lotAssignments[item.id]);
+              if (unassigned.length === 0) return null;
+              return (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-amber-800 mb-2 flex items-center gap-1.5">
+                    <span className="material-symbols-outlined text-[14px]">warning</span>
+                    Unassigned ({unassigned.length})
+                  </p>
+                  <div className="space-y-1.5">
+                    {unassigned.map((item) => (
+                      <div key={item.id} className="flex items-start gap-2.5 bg-white rounded-xl px-3 py-2.5 border border-amber-100 shadow-sm">
+                        <span className="material-symbols-outlined text-amber-400 text-[18px] shrink-0 mt-0.5">package_2</span>
+                        <div className="flex-1 min-w-0 space-y-1">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="text-xs font-semibold text-gray-900">{item.name}</span>
+                            <span className="text-[10px] text-gray-900-variant">×{item.quantity}</span>
+                          </div>
+                          {item.bundleParent && (
+                            <span className="text-[9px] text-secondary font-bold uppercase tracking-wide block">from {item.bundleParent}</span>
+                          )}
+                          <WarehousePills warehouses={item.warehouses} />
+                        </div>
+                        <div className="flex gap-1 shrink-0 mt-0.5">
+                          {lotBuilderLots.map((lot) => (
+                            <button
+                              key={lot.id}
+                              type="button"
+                              onClick={() => assignItemToLot(item.id, lot.id)}
+                              className="px-2.5 py-1.5 rounded-lg bg-primary text-on-primary text-[10px] font-bold hover:bg-primary/90 transition-colors"
+                            >
+                              → L{lot.lot_index}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Lot columns */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {lotBuilderLots.map((lot) => {
+                const assignedItems = lotBuilderItems.filter((item) => lotAssignments[item.id] === lot.id);
+                const canRemove = lot.lot_index > 2;
+                return (
+                  <div key={lot.id} className="rounded-xl border border-outline-variant/30 bg-surface-container-lowest overflow-hidden">
+                    <div className="px-3 py-2 bg-primary/5 border-b border-outline-variant/20 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-primary">Shipment Lot {lot.lot_index}</p>
+                        <p className="text-xs font-bold text-gray-900">{lot.label}</p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-mono text-gray-900-variant hidden sm:block">{lot.velocity_external_code}</span>
+                        {canRemove && (
+                          <button
+                            type="button"
+                            onClick={() => removeLotFromBuilder(lot.id)}
+                            title="Remove this lot"
+                            className="w-6 h-6 rounded-lg flex items-center justify-center text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <span className="material-symbols-outlined text-[15px]">delete</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="p-2 min-h-[80px] space-y-1.5">
+                      {assignedItems.length === 0 ? (
+                        <p className="text-[11px] text-gray-900-variant/50 text-center py-4">No products assigned</p>
+                      ) : (
+                        assignedItems.map((item) => (
+                          <div key={item.id} className="flex items-start gap-2 bg-white rounded-lg px-2.5 py-2 border border-outline-variant/20 group">
+                            {item.imageUrl ? (
+                              <img src={item.imageUrl} alt={item.name} className="w-7 h-7 rounded-md object-cover shrink-0 mt-0.5" />
+                            ) : (
+                              <span className="material-symbols-outlined text-[16px] text-gray-900-variant shrink-0 mt-0.5">package_2</span>
+                            )}
+                            <div className="flex-1 min-w-0 space-y-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-semibold text-gray-900 truncate">{item.name}</span>
+                                <span className="text-[10px] text-gray-900-variant shrink-0">×{item.quantity}</span>
+                              </div>
+                              {item.bundleParent && (
+                                <span className="text-[9px] text-secondary font-bold uppercase tracking-wide block">from {item.bundleParent}</span>
+                              )}
+                              <WarehousePills warehouses={item.warehouses} />
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => unassignItem(item.id)}
+                              title="Remove from this lot"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-red-400 hover:text-red-600 mt-0.5"
+                            >
+                              <span className="material-symbols-outlined text-[15px]">close</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Add lot + Proceed row */}
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-2 border-t border-outline-variant/15">
+              <button
+                type="button"
+                onClick={addLotToBuilder}
+                className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-dashed border-primary/40 text-primary text-xs font-bold hover:bg-primary/5 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                Add lot
+              </button>
+              <div className="flex-1" />
+              {!allItemsAssigned && (
+                <p className="text-[11px] text-amber-700 font-semibold text-center sm:text-right">
+                  Assign all products before proceeding
+                </p>
+              )}
+              <Button
+                variant="contained"
+                color="primary"
+                disabled={!allItemsAssigned || lotBuilderSaving}
+                onClick={commitLotAssignments}
+                sx={{ minWidth: 140 }}
+              >
+                {lotBuilderSaving
+                  ? <><span className="material-symbols-outlined animate-spin text-base mr-1">progress_activity</span>Saving…</>
+                  : <><span className="material-symbols-outlined text-base mr-1">check_circle</span>Proceed</>
+                }
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hideGlobalVelocityForLots && !alreadyShippedViaVelocity && !lotBuilderOpen && (
         <div className="space-y-4 mb-6">
-          <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">Fulfillment by shipment lot</p>
-          <p className="text-[11px] text-gray-900-variant leading-relaxed">
-            Each lot ships from one warehouse. Book Velocity or enter tracking separately per lot below.
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">Fulfillment by shipment lot</p>
+              <p className="text-[11px] text-gray-900-variant mt-0.5">Each lot ships from one warehouse. Book Velocity or enter tracking separately per lot below.</p>
+            </div>
+            <button
+              type="button"
+              onClick={revertLots}
+              disabled={revertingLots}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-outline-variant/40 bg-white text-gray-900 text-xs font-bold hover:bg-surface-container transition-colors disabled:opacity-50 shrink-0"
+            >
+              <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
+              {revertingLots ? 'Switching…' : 'Change mode'}
+            </button>
+          </div>
           {shipmentLots.map((lot) => (
             <ShipmentLotFulfillmentCard
               key={lot.id}
@@ -2650,7 +3205,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       )}
 
       {/* Mode tabs — locked after Velocity order creation */}
-      {!alreadyShippedViaVelocity && order.status === 'processing' && !shouldHideManualMethod && !hideGlobalVelocityForLots && (
+      {!alreadyShippedViaVelocity && order.status === 'processing' && !shouldHideManualMethod && !hideGlobalVelocityForLots && !lotBuilderOpen && !showFulfillmentRouting && (
         <div className="flex gap-2 mb-6 bg-surface-container-low rounded-xl p-1">
           {[
             { key: 'manual', label: 'Manual Entry', icon: 'edit' },
@@ -2682,6 +3237,8 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       {/* ── Manual mode — hidden while Velocity tab + order still processing (switch tab for manual AWB). Also shown when status left "processing" so shipped/delivered edits work. ── */}
       {(shippingMode === 'manual' || order.status !== 'processing') &&
         !shouldHideManualMethod &&
+        !lotBuilderOpen &&
+        !showFulfillmentRouting &&
         !(hideGlobalVelocityForLots && order.status === 'processing') && (
         <div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
@@ -2730,7 +3287,9 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       {shippingMode === 'velocity' &&
         !alreadyShippedViaVelocity &&
         order.status === 'processing' &&
-        !hideGlobalVelocityForLots && (
+        !hideGlobalVelocityForLots &&
+        !lotBuilderOpen &&
+        !showFulfillmentRouting && (
         <div className="space-y-5">
 
           {velocityMethodLocked && null}
@@ -3236,64 +3795,6 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         </div>
       )}
 
-      {fulfillmentModalOpen && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-surface-container-lowest rounded-3xl max-w-md w-full p-8 shadow-2xl border border-outline-variant/20">
-            <div className="flex items-center gap-4 mb-4">
-              <div className="w-12 h-12 rounded-2xl bg-secondary/15 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-2xl text-secondary">splitscreen</span>
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-900-variant">Multiple warehouses detected</p>
-                <h3 className="font-brand text-xl text-gray-900 leading-tight">How would you like to proceed?</h3>
-              </div>
-            </div>
-            <p className="text-sm text-gray-900-variant mb-6 leading-relaxed">
-              <strong className="text-gray-900">Multiple shipments (recommended)</strong> groups line items by default product warehouse,
-              assigns a unique Velocity reference per lot, and routes webhooks to shipment-level tracking — order status is aggregated automatically.
-            </p>
-            <div className="flex flex-col gap-2">
-              <Button
-                variant="contained"
-                color="primary"
-                fullWidth
-                disabled={
-                  preparingLots ||
-                  warehousePreview.loading ||
-                  warehousePreview.distinctCount < 2
-                }
-                title={
-                  warehousePreview.distinctCount < 2 && !warehousePreview.loading
-                    ? 'Requires at least two warehouses on line items.'
-                    : ''
-                }
-                onClick={prepareMultiShipmentLots}
-              >
-                {preparingLots ? 'Creating lots…' : 'Multiple shipments (recommended)'}
-              </Button>
-              <Button
-                variant="outlined"
-                color="inherit"
-                fullWidth
-                disabled={preparingLots}
-                onClick={() => {
-                  setFulfillmentModalOpen(false);
-                  confirmLegacySingleFulfillment();
-                }}
-              >
-                Single shipment
-              </Button>
-              <button
-                type="button"
-                className="mt-2 text-xs font-semibold text-gray-900-variant hover:text-gray-900"
-                onClick={() => setFulfillmentModalOpen(false)}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -3503,6 +4004,7 @@ function OrderDetail({ orderId, onBack }) {
               <ShippingPanel
                 order={order}
                 orderId={orderId}
+                items={items}
                 onRefresh={load}
                 onNotice={setNotice}
                 onError={setError}

@@ -29,6 +29,44 @@ const velocityInnerPayload = (raw) => {
   return { ...inner, label_url: label_url || inner.label_url };
 };
 
+function normVid(s) {
+  return String(s || '').trim().toLowerCase();
+}
+
+/** Default pickup row for this shipment lot — must match warehouses.velocity_warehouse_id, not merely the first synced pickup in the list. */
+function defaultPickupLocationId(rows, warehouse) {
+  const list = Array.isArray(rows) ? rows.filter((r) => r?.velocity_warehouse_id) : [];
+  if (!list.length) return '';
+
+  const wv = normVid(warehouse?.velocity_warehouse_id);
+  const wName = String(warehouse?.warehouse_name || warehouse?.name || '').trim();
+
+  if (wv) {
+    const hit = list.find((r) => normVid(r.velocity_warehouse_id) === wv);
+    if (hit?.id) return hit.id;
+  }
+  if (wName) {
+    const byVidAsName = list.find((r) => normVid(r.velocity_warehouse_id) === normVid(wName));
+    if (byVidAsName?.id) return byVidAsName.id;
+    const byLocName = list.find(
+      (r) => String(r.warehouse_name || '').trim().toLowerCase() === wName.toLowerCase(),
+    );
+    if (byLocName?.id) return byLocName.id;
+  }
+  return list[0]?.id || '';
+}
+
+function pickupMatchesLotWarehouse(loc, warehouse) {
+  if (!loc?.velocity_warehouse_id || !warehouse) return false;
+  const wv = normVid(warehouse.velocity_warehouse_id);
+  const wName = String(warehouse.warehouse_name || warehouse.name || '').trim();
+  const lv = normVid(loc.velocity_warehouse_id);
+  if (wv && lv === wv) return true;
+  if (wName && lv === normVid(wName)) return true;
+  if (wName && String(loc.warehouse_name || '').trim().toLowerCase() === wName.toLowerCase()) return true;
+  return false;
+}
+
 function toUserError(err, fallback = 'Something went wrong.') {
   const msg = String(err?.message || err || '').trim();
   if (!msg) return fallback;
@@ -72,9 +110,13 @@ export default function VelocityLotWorkflow({
 
   useEffect(() => {
     const rows = pickupLocations || [];
-    const first = rows.find((r) => r.velocity_warehouse_id)?.id || '';
-    setPickupLocationId((prev) => (prev && rows.some((r) => r.id === prev) ? prev : first));
-  }, [pickupLocations]);
+    const preferred = defaultPickupLocationId(rows, lot?.warehouse);
+    setPickupLocationId((prev) => {
+      const prevLoc = prev ? rows.find((r) => r.id === prev) : null;
+      if (prevLoc && pickupMatchesLotWarehouse(prevLoc, lot?.warehouse)) return prev;
+      return preferred;
+    });
+  }, [pickupLocations, lot?.warehouse]);
 
   useEffect(() => {
     if (!effectivePending || !lotId) return;
@@ -94,7 +136,8 @@ export default function VelocityLotWorkflow({
   };
 
   const velocityPickupReady = () => {
-    const loc = pickupLocations.find((r) => r.id === pickupLocationId);
+    const rows = pickupLocations || [];
+    const loc = rows.find((r) => r.id === pickupLocationId);
     return !!(loc && loc.velocity_warehouse_id);
   };
 
