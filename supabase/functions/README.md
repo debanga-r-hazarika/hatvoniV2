@@ -27,13 +27,20 @@ This Customer Site Supabase project exposes and uses three edge functions:
   - Public inbound endpoint for Razorpay webhook retries and eventual consistency.
   - Verifies `x-razorpay-signature`, deduplicates events, and reconciles payment status.
 
+- `create-phonepe-order`
+  - Authenticated endpoint to initialize a PhonePe payment for an existing local order.
+  - Validates ownership, generates `merchantTransactionId`, and returns PhonePe redirect URL.
+
+- `verify-phonepe-payment`
+  - Authenticated endpoint to fetch PhonePe payment status for an order.
+  - Reconciles local `orders.payment_status` as `paid`, `failed`, or pending.
+
+- `phonepe-webhook`
+  - Public callback endpoint dedicated to PhonePe webhook notifications.
+  - Reconciles payment state by merchant transaction id and updates the linked local order.
+
 ## Function URLs
 
-- `sync-customer-to-insider`
-  - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/sync-customer-to-insider`
-- `forward-order-to-insider`
-  - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/forward-order-to-insider`
-- `insider-order-sync`
   - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/insider-order-sync`
 - `create-razorpay-order`
   - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/create-razorpay-order`
@@ -41,27 +48,48 @@ This Customer Site Supabase project exposes and uses three edge functions:
   - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/verify-razorpay-payment`
 - `razorpay-webhook`
   - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/razorpay-webhook`
+- `create-phonepe-order`
+  - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/create-phonepe-order`
+- `verify-phonepe-payment`
+  - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/verify-phonepe-payment`
+- `phonepe-webhook`
+  - `https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/phonepe-webhook`
 
 ## Required Secrets (Customer Site Supabase Edge Function secrets)
 
 Set these in the Customer Site Supabase project:
 
-- `INSIDER_CUSTOMER_SYNC_URL`
-  - `https://<INSIDER_PROJECT>.supabase.co/functions/v1/ingest-online-customer`
-- `INSIDER_CUSTOMER_SYNC_SECRET`
-  - Shared secret sent in header `Authorization: Bearer ${INSIDER_CUSTOMER_SYNC_SECRET}`
-- `INSIDER_INGEST_URL`
-  - `https://<INSIDER_PROJECT>.supabase.co/functions/v1/ingest-order-from-customer-site`
-- `INSIDER_INGEST_SECRET`
-  - Shared secret sent in header `x-customer-site-ingest-secret`
-- `INSIDER_SYNC_SHARED_SECRET`
-  - Shared HMAC secret for Insider -> Customer sync calls
 - `RAZORPAY_KEY_ID`
   - Razorpay Key ID used by backend and sent to checkout session
 - `RAZORPAY_KEY_SECRET`
   - Razorpay Key Secret used to create orders and verify signatures
 - `RAZORPAY_WEBHOOK_SECRET`
   - Razorpay webhook signing secret (must match dashboard webhook config)
+- `PHONEPE_MERCHANT_ID`
+  - PhonePe merchant ID (for dashboard/webhook context)
+- `PHONEPE_CLIENT_ID`
+  - PhonePe client ID for OAuth token generation
+- `PHONEPE_CLIENT_SECRET`
+  - PhonePe client secret for OAuth token generation
+- `PHONEPE_CLIENT_VERSION`
+  - PhonePe client version for OAuth token generation
+- `PHONEPE_WEBHOOK_USERNAME`
+  - Username configured in PhonePe dashboard webhook settings
+- `PHONEPE_WEBHOOK_PASSWORD`
+  - Password configured in PhonePe dashboard webhook settings
+
+Optional PhonePe secrets:
+
+- `PHONEPE_ENV`
+  - `sandbox` or `production` (defaults to `production`)
+- `PHONEPE_API_BASE_URL`
+  - Override API base URL for checkout/status APIs
+- `APP_BASE_URL`
+  - Public storefront URL used to build payment redirect return path
+- `PHONEPE_CALLBACK_URL`
+  - Explicit callback URL for payment create request metadata
+- `PHONEPE_EXPIRE_AFTER`
+  - Optional checkout expiry in seconds, default `1200`
 
 ## Razorpay Checkout Flow
 

@@ -7,7 +7,6 @@ export default function SellersTable({
   sellerDefaultPickupLocationTitles = {},
   onToggleBan,
   onToggleOwnSeller,
-  onManagePickupLocations,
 }) {
   if (data.length === 0) {
     return (
@@ -27,7 +26,6 @@ export default function SellersTable({
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Seller</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Type</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Products</th>
-              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Pickup</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Status</th>
               <th className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Actions</th>
             </tr>
@@ -82,13 +80,6 @@ export default function SellersTable({
                   </td>
 
                   <td className="px-4 py-3">
-                    <div className="text-[10px] text-[#3f4942]/60">
-                      <span className="font-medium">{pickupCount} locations</span>
-                      {defaultPickup && <p className="text-[9px] text-[#3f4942]/40 truncate max-w-[100px]">{defaultPickup}</p>}
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-3">
                     <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[9px] font-semibold uppercase border ${
                       seller.is_banned ? 'bg-red-50 text-red-600 border-red-100' : 'bg-green-50 text-green-700 border-green-100'
                     }`}>
@@ -107,13 +98,6 @@ export default function SellersTable({
                         title={seller.is_banned ? 'Reactivate' : 'Suspend'}
                       >
                         <span className="material-symbols-outlined text-sm">{seller.is_banned ? 'lock_open' : 'block'}</span>
-                      </button>
-                      <button
-                        onClick={() => onManagePickupLocations?.(seller)}
-                        className="w-7 h-7 rounded-md bg-[#f5f4eb] text-[#004a2b] hover:bg-[#004a2b] hover:text-white transition-all flex items-center justify-center border border-[#bec9bf]/15"
-                        title="Pickup Locations"
-                      >
-                        <span className="material-symbols-outlined text-sm">pin_drop</span>
                       </button>
                     </div>
                   </td>

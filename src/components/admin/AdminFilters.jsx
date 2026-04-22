@@ -107,6 +107,7 @@ export default function AdminFilters({ tab, filters, setFilters, sellerOptions }
               <option value="all">Any</option>
               <option value="cod">C.O.D</option>
               <option value="razorpay">Razorpay</option>
+              <option value="phonepe">PhonePe</option>
             </select>
           </div>
           <div>

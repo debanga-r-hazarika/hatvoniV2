@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import {
@@ -137,7 +137,7 @@ export default function AdminSupport() {
 
   useEffect(() => {
     if (!loading && !isAdmin && !hasModule('support')) {
-      navigate('/');
+      navigate('/access-denied');
     }
   }, [hasModule, isAdmin, loading, navigate]);
 
@@ -209,7 +209,9 @@ export default function AdminSupport() {
   };
 
   if (loading || (!isAdmin && !hasModule('support'))) {
-    return null;
+    return (!isAdmin && !hasModule('support') && !loading)
+      ? <Navigate to="/access-denied" replace />
+      : null;
   }
 
   return (

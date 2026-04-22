@@ -32,7 +32,7 @@ const HatvoniLogo = ({ size = 40, color = 'currentColor' }) => (
 
 /* ── Background image URL ────────────────────────────── */
 const HERO_IMG =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuCdgo3BIB-1SY7EDeIk5jINmSIHU_0aV21C6SNWRjpB-6H1fRaFBPZ1NFldAPzbQLS1s4tonuA5vnLq7H3ktVsNJs7Hv0s_98m-J2JffOc_-d07ZVfn5cz7X-e6_qwNgsCE7G8VAh5O9zRv9rVIpbgOBlNIJcmSlfm2PyNOQEjXBz-21i53qnNCSDx-NOavTrsff7Q5SU2V5Mll8ISY6UCkOt83oj8BIxwfFH4754BmLvnBzRyUC5wWaLr1gSn2ckfKQUbTVmc7JQGW';
+  'https://images.unsplash.com/photo-1605806616949-1e87b487cb2a?q=80&w=1470&auto=format&fit=crop';
 
 export default function Login() {
   const theme = useTheme();
@@ -388,7 +388,7 @@ export default function Login() {
                   googleLoading ? (
                     <CircularProgress size={20} />
                   ) : (
-                    <Box component="img" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBZ6EOI2O3lkH60tifX6LhCLUtFR9HyHALGctV9cJL4GAW5JisfWbCAfmlv2FvJjvZqUeuYfu0CPnSGcmPWLEO7zHumy4dENzzZLp2fThW-7mV2ALWww9XREaD65aX880wXVoM4sldC9ujmdEJCXXABfywvmf-rdVQQJd5J66qrwepVlxZ4U0vXxNAUnr-wdtipG1-XwMVzcXF6TzFILpECO6ydxsR9Lc_YXroGiZTQW3oFBxBfUtpHg93rF2MLVYheZnhV-kmUNelA" alt="Google" sx={{ width: 20, height: 20 }} />
+                    <Box component="img" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" sx={{ width: 20, height: 20 }} />
                   )
                 }
                 sx={{

@@ -1,10 +1,11 @@
 // HATVONI ADMIN ORDERS - ORDER WORKFLOW SYSTEM
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Button from '@mui/material/Button';
+import VelocityLotWorkflow from '../components/admin/VelocityLotWorkflow';
 
 /** Velocity Get Rates: format currency */
 const fmtInr = (v) => {
@@ -113,6 +114,30 @@ const ITEM_DECISION_COLORS = {
   approved:        'bg-emerald-100 text-emerald-800',
   rejected:        'bg-red-100 text-red-800',
 };
+
+/** Avoids PostgREST passing non-uuid strings (e.g. literal "null") into uuid filters — fixes 22P02. */
+function isUuidLike(v) {
+  if (v == null) return false;
+  const s = String(v).trim();
+  if (!s || s.toLowerCase() === 'null' || s.toLowerCase() === 'undefined') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+/**
+ * Links `seller_pickup_locations` to `warehouses` when Velocity id lives on the pickup row
+ * but the warehouse row only has a human label (or vice versa).
+ */
+function pickupMatchesWarehouseRow(pickup, warehouseRow) {
+  if (!pickup || !warehouseRow) return false;
+  const pv = String(pickup.velocity_warehouse_id || '').trim();
+  const wv = String(warehouseRow.velocity_warehouse_id || '').trim();
+  if (pv && wv && pv.toLowerCase() === wv.toLowerCase()) return true;
+  const wName = String(warehouseRow.warehouse_name || warehouseRow.name || '').trim();
+  const pLocName = String(pickup.warehouse_name || '').trim();
+  if (wName && pLocName && wName.toLowerCase() === pLocName.toLowerCase()) return true;
+  if (pv && wName && pv.toLowerCase() === wName.toLowerCase()) return true;
+  return false;
+}
 
 function Badge({ label, colorClass }) {
   return (
@@ -524,7 +549,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
       </h2>
       <p className="text-xs text-gray-900-variant mb-6">
         All items must be approved or rejected before the order can be finalized.
-        Admin can approve/reject own-seller items directly, and override any seller decision.
+        Admin can approve/reject own-seller items directly, decide on behalf of third-party sellers (with a mandatory reason), and override any existing seller decision.
       </p>
 
       <div className="space-y-3">
@@ -544,7 +569,13 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
             decisionSource = 'admin';
           } else if (isSellerItem) {
             effectiveStatus = sd.decision; // pending | approved | rejected
-            decisionSource = isOverridden ? 'admin_override' : 'seller';
+            if (isOverridden && sd.decision !== 'pending') {
+              // Admin overrode a seller decision, or acted on behalf of a pending seller
+              const wasOriginallyPending = !sd.original_decision || sd.original_decision === 'pending';
+              decisionSource = wasOriginallyPending ? 'admin_on_behalf' : 'admin_override';
+            } else {
+              decisionSource = 'seller';
+            }
           }
 
           const statusLabel = {
@@ -611,6 +642,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                     {decisionSource && (
                       <p className="text-[10px] text-gray-900-variant mt-1">
                         {decisionSource === 'admin_override' ? '⚡ Admin override' :
+                         decisionSource === 'admin_on_behalf' ? '🔑 Admin (on behalf)' :
                          decisionSource === 'admin' ? '🔑 Admin decision' :
                          '🏪 Seller decision'}
                       </p>
@@ -657,22 +689,29 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                       </button>
                     )}
 
-                    {/* Seller items: admin override button */}
-                    {isSellerItem && !isAdminItem && (
+                    {/* Seller items: admin can act on behalf (pending) or override (already decided) */}
+                    {!isAdminItem && line.seller_id && (
                       <button
                         onClick={() => {
                           setOverrideTarget({
                             order_item_id: line.order_item_id,
                             product_key: line.product_key,
-                            seller_id: sd.seller_id,
-                            current_decision: sd.decision,
+                            seller_id: sd?.seller_id || line.seller_id,
+                            current_decision: sd?.decision || 'pending',
                           });
-                          setOverrideDecision(sd.decision === 'approved' ? 'rejected' : 'approved');
+                          // Default to opposite of current, or 'approved' if pending
+                          const defaultDecision = sd?.decision === 'approved' ? 'rejected' : 'approved';
+                          setOverrideDecision(defaultDecision);
                           setOverrideReason('');
+                          setOverrideError('');
                         }}
-                        className="px-3 py-1.5 rounded-lg border border-amber-400 bg-amber-50 text-amber-800 text-xs font-bold hover:bg-amber-100 transition-colors"
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                          !sd || sd.decision === 'pending'
+                            ? 'border border-blue-400 bg-blue-50 text-blue-800 hover:bg-blue-100'
+                            : 'border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                        }`}
                       >
-                        Override
+                        {!sd || sd.decision === 'pending' ? 'Decide' : 'Override'}
                       </button>
                     )}
                   </div>
@@ -865,23 +904,30 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
         </div>
       )}
 
-      {/* Override Modal */}
+      {/* Admin Act on Behalf / Override Modal */}
       {overrideTarget && (
         <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-neutral-200">
             <div className="flex items-center gap-2 mb-2">
-              <span className="material-symbols-outlined text-amber-500 text-xl">warning</span>
-              <h3 className="font-bold text-lg text-gray-900">Override Decision</h3>
+              <span className={`material-symbols-outlined text-xl ${overrideTarget.current_decision === 'pending' ? 'text-blue-500' : 'text-amber-500'}`}>
+                {overrideTarget.current_decision === 'pending' ? 'admin_panel_settings' : 'warning'}
+              </span>
+              <h3 className="font-bold text-lg text-gray-900">
+                {overrideTarget.current_decision === 'pending' ? 'Decide on Behalf of Seller' : 'Override Seller Decision'}
+              </h3>
             </div>
             <p className="text-xs text-gray-500 mb-1">
-              Current decision: <strong className="text-gray-900 uppercase">{overrideTarget.current_decision}</strong>
+              {overrideTarget.current_decision === 'pending'
+                ? 'Seller has not yet decided. You are acting on their behalf.'
+                : <>Current decision: <strong className="text-gray-900 uppercase">{overrideTarget.current_decision}</strong></>
+              }
             </p>
-            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-100 rounded p-2 mb-4">
-              Override logged with your admin ID & timestamp.
+            <p className="text-[10px] text-blue-700 bg-blue-50 border border-blue-100 rounded p-2 mb-4">
+              This action is logged in the audit trail with your admin ID, timestamp, and reason.
             </p>
             
             <div className="mb-4">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">New Decision</label>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Decision</label>
               <div className="flex gap-2">
                 {['approved', 'rejected'].map((d) => (
                   <button key={d}
@@ -897,10 +943,19 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
             </div>
             
             <div className="mb-5">
-              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Override Reason</label>
-              <input type="text" value={overrideReason} onChange={(e) => setOverrideReason(e.target.value)}
-                placeholder="Reason for overriding..."
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none" />
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                Reason <span className="text-red-500">*</span>
+              </label>
+              <textarea
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                placeholder={overrideDecision === 'rejected'
+                  ? 'Why is this item rejected? (required)'
+                  : 'Why are you approving on behalf of the seller? (required)'}
+                rows={3}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none resize-none"
+              />
+              <p className="text-[10px] text-gray-400 mt-1">Required — stored in audit log and visible to the seller.</p>
             </div>
             
             {overrideError && (
@@ -912,9 +967,14 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                 className="flex-1 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition-colors">
                 Cancel
               </button>
-              <button onClick={handleOverride} disabled={overriding || !overrideReason.trim()}
-                className="flex-1 py-2.5 rounded-lg bg-gray-900 text-white text-xs font-bold hover:bg-gray-800 disabled:opacity-60 transition-all shadow-sm">
-                {overriding ? 'Wait...' : 'Confirm'}
+              <button
+                onClick={handleOverride}
+                disabled={overriding || !overrideReason.trim()}
+                className={`flex-1 py-2.5 rounded-lg text-white text-xs font-bold disabled:opacity-60 transition-all shadow-sm ${
+                  overrideDecision === 'approved' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'
+                }`}
+              >
+                {overriding ? 'Saving...' : `Confirm ${overrideDecision === 'approved' ? 'Approval' : 'Rejection'}`}
               </button>
             </div>
           </div>
@@ -1305,6 +1365,136 @@ function WorkflowLog({ orderId }) {
   );
 }
 
+/** One physical lot: manual tracking or Velocity flow (multi-shipment orders). */
+function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefresh, onNotice, onError }) {
+  const [lotTab, setLotTab] = useState('manual');
+  const [lotTracking, setLotTracking] = useState(() => String(lot?.tracking_number || ''));
+  const [savingLot, setSavingLot] = useState(false);
+
+  useEffect(() => {
+    setLotTracking(String(lot?.tracking_number || ''));
+  }, [lot?.id, lot?.tracking_number]);
+
+  const filteredPickups = useMemo(() => {
+    const rows = allPickupLocations || [];
+    const wh = lot?.warehouse;
+    if (!wh?.id) return rows.filter((r) => r.velocity_warehouse_id);
+    const matched = rows.filter((r) => pickupMatchesWarehouseRow(r, wh));
+    return matched.length ? matched : rows.filter((r) => r.velocity_warehouse_id);
+  }, [allPickupLocations, lot?.warehouse]);
+
+  const hasAwb = !!(lot?.tracking_number || '').trim();
+  const whLabel = lot?.warehouse?.warehouse_name || lot?.warehouse?.name || 'Warehouse';
+  const whPin = lot?.warehouse?.pincode;
+  const whVelocity = lot?.warehouse?.velocity_warehouse_id;
+
+  const saveLotManual = async () => {
+    setSavingLot(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('order_shipments')
+        .update({
+          tracking_number: lotTracking.trim() || null,
+          updated_at: now,
+        })
+        .eq('id', lot.id);
+      if (error) throw error;
+      onNotice(`Saved tracking for ${lot.label || `shipment ${lot.lot_index}`}.`);
+      await onRefresh();
+    } catch (e) {
+      onError(String(e?.message || e || 'Could not save shipment lot.'));
+    } finally {
+      setSavingLot(false);
+    }
+  };
+
+  return (
+    <div className="rounded-2xl border border-secondary/25 bg-surface-container-lowest/80 overflow-hidden shadow-sm">
+      <div className="px-4 py-3 border-b border-outline-variant/20 bg-secondary/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div>
+          <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary">Shipment lot {lot.lot_index}</p>
+          <p className="text-sm font-bold text-gray-900">{lot.label || `Shipment ${lot.lot_index}`}</p>
+          <p className="text-xs text-gray-900-variant mt-0.5">
+            {whLabel}
+            {whPin != null && whPin !== '' ? ` · PIN ${whPin}` : ''}
+            {whVelocity ? (
+              <span className="ml-1 font-mono text-[10px] text-gray-900">· Velocity {whVelocity}</span>
+            ) : null}
+            {lot.velocity_external_code ? (
+              <span className="ml-1 font-mono text-[10px]">· {lot.velocity_external_code}</span>
+            ) : null}
+          </p>
+        </div>
+        <div className="flex rounded-xl bg-surface-container-low p-1 gap-1 shrink-0">
+          {[
+            { key: 'manual', label: 'Manual', icon: 'edit' },
+            { key: 'velocity', label: 'Velocity', icon: 'electric_bolt' },
+          ].map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setLotTab(t.key)}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                lotTab === t.key ? 'bg-primary text-on-primary shadow-sm' : 'text-gray-900-variant hover:bg-white/80'
+              }`}
+            >
+              <span className="material-symbols-outlined text-[16px]">{t.icon}</span>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="p-4">
+        {lotTab === 'manual' && (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[10px] font-bold text-gray-900-variant uppercase tracking-wider mb-1">Tracking / AWB (this lot)</label>
+              <input
+                type="text"
+                value={lotTracking}
+                onChange={(e) => setLotTracking(e.target.value)}
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm font-mono focus:ring-2 focus:ring-secondary"
+                placeholder="Carrier tracking or AWB"
+              />
+            </div>
+            <Button variant="contained" color="primary" size="small" onClick={saveLotManual} disabled={savingLot}>
+              {savingLot ? 'Saving…' : 'Save lot tracking'}
+            </Button>
+          </div>
+        )}
+
+        {lotTab === 'velocity' && (
+          <div className="space-y-2">
+            {hasAwb ? (
+              <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
+                This lot already has an AWB: <span className="font-mono font-bold">{lot.tracking_number}</span>. Use customer order view or Velocity portal for label reprint if needed.
+              </p>
+            ) : (
+              <>
+                {!whVid && (
+                  <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">
+                    Link this warehouse to a Velocity warehouse id so pickup locations can be filtered for this lot.
+                  </p>
+                )}
+                <VelocityLotWorkflow
+                  orderId={orderId}
+                  lot={lot}
+                  pickupLocations={filteredPickups}
+                  onRefresh={onRefresh}
+                  onNotice={onNotice}
+                  onError={onError}
+                />
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ShippingPanel ────────────────────────────────────────────────────────────
 
 function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
@@ -1342,6 +1532,17 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
   const [velEnvHealth, setVelEnvHealth] = useState(null);
   const [suppressPendingVelocitySid, setSuppressPendingVelocitySid] = useState(false);
 
+  const [shipmentLots, setShipmentLots] = useState([]);
+  const [activeLotId, setActiveLotId] = useState('');
+  const [fulfillmentModalOpen, setFulfillmentModalOpen] = useState(false);
+  const [preparingLots, setPreparingLots] = useState(false);
+  const [warehousePreview, setWarehousePreview] = useState({
+    loading: true,
+    distinctWarehouseIds: [],
+    distinctCount: 0,
+    warehousesById: {},
+  });
+
   const [retryingRefund, setRetryingRefund] = useState(false);
   const isPartialOrder = order?.partial_fulfillment === true;
   const isRazorpay = ['razorpay', 'razorpay_upi', 'razorpay_cards'].includes(order?.payment_method);
@@ -1349,8 +1550,23 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
   const pendingVelocitySidFromOrder = order?.velocity_pending_shipment_id
     ? String(order.velocity_pending_shipment_id).trim()
     : '';
-  const pendingVelocitySid = suppressPendingVelocitySid ? '' : pendingVelocitySidFromOrder;
-  const alreadyShippedViaVelocity = !!(order?.velocity_shipment_id && order?.tracking_number);
+
+  const activeLot = shipmentLots.find((s) => s.id === activeLotId) || null;
+  const pendingVelocitySidFromLot = activeLot?.velocity_pending_shipment_id
+    ? String(activeLot.velocity_pending_shipment_id).trim()
+    : '';
+
+  const pendingVelocitySid = suppressPendingVelocitySid
+    ? ''
+    : (order?.fulfillment_mode === 'multi_shipment'
+      ? pendingVelocitySidFromLot
+      : pendingVelocitySidFromOrder);
+
+  const alreadyShippedViaVelocity =
+    order?.fulfillment_mode === 'multi_shipment'
+      ? (shipmentLots.length > 0 &&
+        shipmentLots.every((l) => String(l.tracking_number || '').trim()))
+      : !!(order?.velocity_shipment_id && order?.tracking_number);
   const velocityFulfillment = order?.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
     ? order.velocity_fulfillment
     : null;
@@ -1364,6 +1580,126 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     : null;
   const canReinitiateShipping = Boolean(isAdmin) && order?.status === 'processing' && !order?.tracking_number && velocityOrderCreated;
   const shouldHideManualMethod = order?.status === 'processing' && velocityMethodLocked;
+
+  const hideGlobalVelocityForLots =
+    order?.fulfillment_mode === 'multi_shipment' &&
+    shipmentLots.length > 0 &&
+    order?.status === 'processing';
+
+  const showFulfillmentRouting =
+    order?.status === 'processing' &&
+    !order?.fulfillment_mode &&
+    !String(order?.velocity_pending_shipment_id || '').trim() &&
+    !String(order?.velocity_shipment_id || '').trim() &&
+    !String(order?.tracking_number || '').trim();
+
+  useEffect(() => {
+    if (!orderId || !isUuidLike(orderId) || order?.status !== 'processing') {
+      setWarehousePreview((p) => ({ ...p, loading: false }));
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      setWarehousePreview((p) => ({ ...p, loading: true }));
+      try {
+        const { data: items, error: ie } = await supabase
+          .from('order_items')
+          .select('id, product_id, lot_id')
+          .eq('order_id', orderId);
+        if (ie) throw ie;
+        const lotIds = [...new Set((items || []).map((i) => i.lot_id).filter((id) => isUuidLike(String(id))))];
+        const lotSources = {};
+        if (lotIds.length) {
+          const { data: lots, error: lotsErr } = await supabase
+            .from('lots')
+            .select('id, source_product_id')
+            .in('id', lotIds);
+          if (lotsErr) throw lotsErr;
+          for (const l of lots || []) {
+            if (isUuidLike(String(l.source_product_id))) lotSources[l.id] = l.source_product_id;
+          }
+        }
+        const productIds = new Set();
+        for (const it of items || []) {
+          if (isUuidLike(String(it.product_id))) productIds.add(it.product_id);
+          const lid = it.lot_id && isUuidLike(String(it.lot_id)) ? it.lot_id : null;
+          const sp = lid ? lotSources[lid] : null;
+          if (sp && isUuidLike(String(sp))) productIds.add(sp);
+        }
+        const pidList = [...productIds].filter((id) => isUuidLike(String(id)));
+        if (pidList.length === 0) {
+          if (!cancelled) {
+            setWarehousePreview({
+              loading: false,
+              distinctWarehouseIds: [],
+              distinctCount: 0,
+              warehousesById: {},
+            });
+          }
+          return;
+        }
+        const { data: pws, error: pwErr } = await supabase
+          .from('product_warehouses')
+          .select('product_id, warehouse_id, is_default, assigned_at')
+          .in('product_id', pidList);
+        if (pwErr) throw pwErr;
+        const pwByProduct = {};
+        for (const pw of pws || []) {
+          const pid = pw.product_id;
+          const wid = pw.warehouse_id;
+          if (!isUuidLike(String(pid)) || !isUuidLike(String(wid))) continue;
+          if (!pwByProduct[pid]) pwByProduct[pid] = [];
+          pwByProduct[pid].push(pw);
+        }
+        const resolvePid = (pid) => {
+          if (!isUuidLike(String(pid))) return null;
+          const list = pwByProduct[pid];
+          if (!list?.length) return null;
+          const sorted = [...list].sort((a, b) => {
+            if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
+            return new Date(a.assigned_at) - new Date(b.assigned_at);
+          });
+          const chosen = sorted[0]?.warehouse_id;
+          return isUuidLike(String(chosen)) ? chosen : null;
+        };
+        const whIds = new Set();
+        for (const it of items || []) {
+          let w = resolvePid(it.product_id);
+          const lid = it.lot_id && isUuidLike(String(it.lot_id)) ? it.lot_id : null;
+          if (!w && lid && lotSources[lid]) w = resolvePid(lotSources[lid]);
+          if (w && isUuidLike(String(w))) whIds.add(w);
+        }
+        const distinctWarehouseIds = [...whIds].filter((id) => isUuidLike(String(id)));
+        let warehousesById = {};
+        if (distinctWarehouseIds.length) {
+          const { data: whRows, error: whErr } = await supabase
+            .from('warehouses')
+            .select('id, warehouse_name, velocity_warehouse_id, pincode')
+            .in('id', distinctWarehouseIds);
+          if (whErr) throw whErr;
+          for (const w of whRows || []) warehousesById[w.id] = w;
+        }
+        if (!cancelled) {
+          setWarehousePreview({
+            loading: false,
+            distinctWarehouseIds,
+            distinctCount: distinctWarehouseIds.length,
+            warehousesById,
+          });
+        }
+      } catch {
+        if (!cancelled) {
+          setWarehousePreview({
+            loading: false,
+            distinctWarehouseIds: [],
+            distinctCount: 0,
+            warehousesById: {},
+          });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [orderId, order?.status]);
 
   useEffect(() => {
     // Re-enable DB-driven pending SID once refreshed order confirms it is cleared.
@@ -1417,9 +1753,48 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       }
     };
 
-    if (shippingMode === 'velocity') loadPickupLocations();
+    if (
+      shippingMode === 'velocity' ||
+      (order?.fulfillment_mode === 'multi_shipment' && order?.status === 'processing')
+    ) {
+      loadPickupLocations();
+    }
     return () => { active = false; };
-  }, [shippingMode]);
+  }, [shippingMode, order?.fulfillment_mode, order?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (order?.fulfillment_mode !== 'multi_shipment') {
+      setShipmentLots([]);
+      setActiveLotId('');
+      return undefined;
+    }
+    (async () => {
+      const { data } = await supabase
+        .from('order_shipments')
+        .select(`
+          id,
+          lot_index,
+          label,
+          warehouse_id,
+          velocity_external_code,
+          velocity_pending_shipment_id,
+          tracking_number,
+          warehouse:warehouses(id, warehouse_name, velocity_warehouse_id, pincode)
+        `)
+        .eq('order_id', orderId)
+        .order('lot_index', { ascending: true });
+      if (cancelled) return;
+      const rows = data || [];
+      setShipmentLots(rows);
+      setActiveLotId((prev) =>
+        prev && rows.some((r) => r.id === prev)
+          ? prev
+          : (rows[0]?.id || ''),
+      );
+    })();
+    return () => { cancelled = true; };
+  }, [order?.fulfillment_mode, orderId]);
 
   const velocityResumeKeyRef = useRef('');
   const velocityAutoResumeKeyRef = useRef('');
@@ -1521,7 +1896,7 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
   };
 
   const velocityPickupReady = () => {
-    const loc = pickupLocations.find((r) => r.id === pickupLocationId);
+    const loc = velocityPickupOptions.find((r) => r.id === pickupLocationId);
     return !!(loc && loc.velocity_warehouse_id);
   };
 
@@ -1539,6 +1914,31 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     return list;
   }, [velServiceability?.carriers]);
 
+  /** Legacy single shipment but products map to multiple warehouses — show every pickup that maps to any of those warehouse rows (Velocity id + name fallbacks). */
+  const velocityPickupOptions = useMemo(() => {
+    const rows = pickupLocations || [];
+    const mode = order?.fulfillment_mode;
+    const ids = warehousePreview?.distinctWarehouseIds;
+    const meta = warehousePreview?.warehousesById;
+    const multiWarehouses =
+      (mode === 'legacy_single' || mode == null) &&
+      ids?.length > 1 &&
+      meta &&
+      Object.keys(meta).length > 0;
+    if (!multiWarehouses) return rows;
+    const filtered = rows.filter((p) =>
+      ids.some((wid) => pickupMatchesWarehouseRow(p, meta[wid])),
+    );
+    return filtered.length ? filtered : rows;
+  }, [pickupLocations, order?.fulfillment_mode, warehousePreview]);
+
+  useEffect(() => {
+    if (!pickupLocationId) return;
+    if (velocityPickupOptions.some((r) => r.id === pickupLocationId)) return;
+    const first = velocityPickupOptions.find((r) => r.velocity_warehouse_id)?.id || '';
+    setPickupLocationId(first);
+  }, [velocityPickupOptions, pickupLocationId]);
+
   const toUserError = (err, fallback = 'Something went wrong. Please try again.') => {
     const msg = String(err?.message || err || '').trim();
     if (!msg) return fallback;
@@ -1553,7 +1953,50 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     }
     if (lower.includes('http 5')) return 'Shipping service is temporarily unavailable. Please retry in a moment.';
     if (lower.includes('http 4')) return 'Request could not be processed. Please verify the shipping details and retry.';
+    if (
+      lower.includes('unsupported jwt algorithm') ||
+      lower.includes('unsupported_token_algorithm') ||
+      lower.includes('unauthorized_unsupported_token_algorithm')
+    ) {
+      return 'Session token was rejected by the edge gateway. Refresh the page or sign in again; if it persists, confirm velocity-orchestrator allows your JWT (verify_jwt false in config / dashboard).';
+    }
     return msg;
+  };
+
+  const confirmLegacySingleFulfillment = async () => {
+    onError('');
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          fulfillment_mode: 'legacy_single',
+          updated_at: new Date().toISOString(),
+          admin_updated_at: new Date().toISOString(),
+        })
+        .eq('id', orderId);
+      if (error) throw error;
+      setFulfillmentModalOpen(false);
+      onNotice('Single-shipment mode selected. Continue with Velocity as one package from one warehouse.');
+      await onRefresh();
+    } catch (e) {
+      onError(toUserError(e, 'Could not update fulfillment mode.'));
+    }
+  };
+
+  const prepareMultiShipmentLots = async () => {
+    setPreparingLots(true);
+    onError('');
+    try {
+      const { data, error } = await supabase.rpc('admin_prepare_multi_shipment_lots', { p_order_id: orderId });
+      if (error) throw error;
+      setFulfillmentModalOpen(false);
+      onNotice(`Created ${data} shipment lot(s) from product warehouse assignments. Book each lot on Velocity separately.`);
+      await onRefresh();
+    } catch (e) {
+      onError(toUserError(e, 'Could not create shipment lots. Ensure each line has a default warehouse on the product.'));
+    } finally {
+      setPreparingLots(false);
+    }
   };
 
   // ── Helper to call velocity-orchestrator edge function ──
@@ -1718,20 +2161,28 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       setVelError('Enter valid package dimensions (length, breadth, height, weight must be greater than zero).');
       return;
     }
+    if (order?.fulfillment_mode === 'multi_shipment' && !activeLotId) {
+      setVelError('Choose a shipment lot — rate quotes use that lot\'s declared value.');
+      return;
+    }
     setVelStep('checking');
     setVelError('');
     setVelServiceability(null);
     setVelResult(null);
     try {
+      const svcPayload = {
+        pickup_location_id: pickupLocationId,
+        length: parseFloat(velLength),
+        breadth: parseFloat(velBreadth),
+        height: parseFloat(velHeight),
+        weight: parseFloat(velWeight),
+      };
+      if (order?.fulfillment_mode === 'multi_shipment') {
+        svcPayload.order_shipment_id = activeLotId;
+      }
       const data = await callVelocityFn({
         action: 'check_serviceability',
-        payload: {
-          pickup_location_id: pickupLocationId,
-          length: parseFloat(velLength),
-          breadth: parseFloat(velBreadth),
-          height: parseFloat(velHeight),
-          weight: parseFloat(velWeight),
-        },
+        payload: svcPayload,
       });
       setVelServiceability(data);
       setVelStep(data.serviceable ? 'ready' : 'error');
@@ -1748,16 +2199,21 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     setVelStep('creating_order');
     setVelError('');
     try {
+      const createPayload = {
+        pickup_location_id: pickupLocationId,
+        length: parseFloat(velLength),
+        breadth: parseFloat(velBreadth),
+        height: parseFloat(velHeight),
+        weight: parseFloat(velWeight),
+        serviceability_snapshot: velServiceability,
+      };
+      if (order?.fulfillment_mode === 'multi_shipment') {
+        if (!activeLotId) throw new Error('Choose a shipment lot before creating the Velocity shipment order.');
+        createPayload.order_shipment_id = activeLotId;
+      }
       const data = await callVelocityFn({
         action: 'create_forward_order',
-        payload: {
-          pickup_location_id: pickupLocationId,
-          length: parseFloat(velLength),
-          breadth: parseFloat(velBreadth),
-          height: parseFloat(velHeight),
-          weight: parseFloat(velWeight),
-          serviceability_snapshot: velServiceability,
-        },
+        payload: createPayload,
       });
       const inner = velocityInnerPayload(data);
       const sid = String(inner.shipment_id || '').trim();
@@ -1766,14 +2222,19 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       }
       setVelShipmentId(sid);
       setVelStep('pending_assign');
-      await persistVelocityFulfillmentMeta((meta) => ({
-        ...meta,
-        method_locked_after_order: true,
-        workflow_stage: 'order_created',
-        latest_velocity_shipment_id: sid,
-      }));
+      if (order?.fulfillment_mode !== 'multi_shipment') {
+        await persistVelocityFulfillmentMeta((meta) => ({
+          ...meta,
+          method_locked_after_order: true,
+          workflow_stage: 'order_created',
+          latest_velocity_shipment_id: sid,
+        }));
+      }
       await onRefresh();
-      onNotice(`Velocity shipment order created. Shipment ID: ${sid}. Manual shipping is now locked; continue with courier/AWB step.`);
+      const lotHint = order?.fulfillment_mode === 'multi_shipment'
+        ? ` — lot ${activeLot?.label || ''} (${activeLot?.velocity_external_code || ''})`.trim()
+        : '';
+      onNotice(`Velocity shipment order created${lotHint}. Shipment ID: ${sid}. Continue with courier assignment for this lot.`);
     } catch (e) {
       setVelStep('ready');
       setVelError(toUserError(e, 'Shipment order could not be created. Please try again.'));
@@ -1877,12 +2338,16 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
     setVelStep('assigning');
     setVelError('');
     try {
+      const assignPayload = {
+        shipment_id: sid,
+        carrier_id: velCarrierId || '',
+      };
+      if (order?.fulfillment_mode === 'multi_shipment' && activeLotId) {
+        assignPayload.order_shipment_id = activeLotId;
+      }
       const data = await callVelocityFn({
         action: 'assign_courier',
-        payload: {
-          shipment_id: sid,
-          carrier_id: velCarrierId || '',
-        },
+        payload: assignPayload,
       });
       setVelResult(data);
       setVelStep('done');
@@ -2115,8 +2580,77 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
         </div>
       )}
 
+      {showFulfillmentRouting && (
+        <div className="rounded-2xl border border-outline-variant/25 bg-white p-5 shadow-sm space-y-4 mb-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-primary text-[22px]">warehouse</span>
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-[0.15em] text-gray-900-variant mb-1">Fulfillment routing</p>
+              <p className="text-sm font-bold text-gray-900 leading-snug">How should this order ship?</p>
+              <p className="text-xs text-gray-900-variant mt-1.5 leading-relaxed">
+                Choose before Velocity or manual booking. Multiple shipments only applies when line items resolve to{' '}
+                <strong className="text-gray-900">different warehouses</strong> (from product warehouse assignments).
+              </p>
+              {!warehousePreview.loading && warehousePreview.distinctCount > 0 && (
+                <p className="text-[11px] text-secondary font-semibold mt-2">
+                  Detected {warehousePreview.distinctCount} distinct warehouse
+                  {warehousePreview.distinctCount !== 1 ? 's' : ''} from current line items.
+                </p>
+              )}
+              {warehousePreview.loading && (
+                <p className="text-[11px] text-gray-900-variant mt-2">Analyzing warehouse assignments…</p>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Button variant="outlined" color="primary" onClick={confirmLegacySingleFulfillment} sx={{ flex: 1 }}>
+              Single shipment
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              disabled={
+                warehousePreview.loading ||
+                warehousePreview.distinctCount < 2
+              }
+              title={
+                warehousePreview.distinctCount < 2 && !warehousePreview.loading
+                  ? 'Multiple shipments requires at least two different product warehouses.'
+                  : ''
+              }
+              onClick={() => setFulfillmentModalOpen(true)}
+              sx={{ flex: 1 }}
+            >
+              Multiple shipments
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {hideGlobalVelocityForLots && !alreadyShippedViaVelocity && (
+        <div className="space-y-4 mb-6">
+          <p className="text-xs font-bold text-gray-900 uppercase tracking-wider">Fulfillment by shipment lot</p>
+          <p className="text-[11px] text-gray-900-variant leading-relaxed">
+            Each lot ships from one warehouse. Book Velocity or enter tracking separately per lot below.
+          </p>
+          {shipmentLots.map((lot) => (
+            <ShipmentLotFulfillmentCard
+              key={lot.id}
+              lot={lot}
+              orderId={orderId}
+              allPickupLocations={pickupLocations}
+              onRefresh={onRefresh}
+              onNotice={onNotice}
+              onError={onError}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Mode tabs — locked after Velocity order creation */}
-      {!alreadyShippedViaVelocity && order.status === 'processing' && !shouldHideManualMethod && (
+      {!alreadyShippedViaVelocity && order.status === 'processing' && !shouldHideManualMethod && !hideGlobalVelocityForLots && (
         <div className="flex gap-2 mb-6 bg-surface-container-low rounded-xl p-1">
           {[
             { key: 'manual', label: 'Manual Entry', icon: 'edit' },
@@ -2146,7 +2680,9 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       )}
 
       {/* ── Manual mode — hidden while Velocity tab + order still processing (switch tab for manual AWB). Also shown when status left "processing" so shipped/delivered edits work. ── */}
-      {(shippingMode === 'manual' || order.status !== 'processing') && !shouldHideManualMethod && (
+      {(shippingMode === 'manual' || order.status !== 'processing') &&
+        !shouldHideManualMethod &&
+        !(hideGlobalVelocityForLots && order.status === 'processing') && (
         <div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
             <div>
@@ -2191,7 +2727,10 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
       )}
 
       {/* ── Velocity Shipping mode (doc: serviceability → forward-order → forward-order-shipment) ── */}
-      {shippingMode === 'velocity' && !alreadyShippedViaVelocity && order.status === 'processing' && (
+      {shippingMode === 'velocity' &&
+        !alreadyShippedViaVelocity &&
+        order.status === 'processing' &&
+        !hideGlobalVelocityForLots && (
         <div className="space-y-5">
 
           {velocityMethodLocked && null}
@@ -2202,8 +2741,20 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
               {[
                 { id: 'dims', label: 'Package & pickup', done: velocityDimsValid() && velocityPickupReady() },
                 { id: 'svc', label: 'Check serviceability', done: !!velServiceability },
-                { id: 'fo', label: 'Shipment order only', done: !!(pendingVelocitySid || velShipmentId) },
-                { id: 'awb', label: 'AWB & courier', done: velStep === 'done' || !!order.tracking_number },
+                {
+                  id: 'fo',
+                  label: 'Shipment order only',
+                  done: order?.fulfillment_mode === 'multi_shipment'
+                    ? !!(pendingVelocitySidFromLot || velShipmentId)
+                    : !!(pendingVelocitySid || velShipmentId),
+                },
+                {
+                  id: 'awb',
+                  label: 'AWB & courier',
+                  done: order?.fulfillment_mode === 'multi_shipment'
+                    ? velStep === 'done' || !!(activeLot?.tracking_number || '').trim()
+                    : velStep === 'done' || !!order.tracking_number,
+                },
               ].map((s, i) => (
                 <div key={s.id} className="text-center min-w-0">
                   <div
@@ -2299,10 +2850,10 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
                     title={pendingVelocitySid ? 'Use Reinitiate shipping to change pickup.' : ''}
                     className={`w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary ${pendingVelocitySid ? 'opacity-75 cursor-not-allowed' : ''}`}
                   >
-                    {pickupLocations.length === 0 && (
+                    {velocityPickupOptions.length === 0 && (
                       <option value="">No pickup locations — add one under seller settings</option>
                     )}
-                    {pickupLocations.map((loc) => (
+                    {velocityPickupOptions.map((loc) => (
                       <option key={loc.id} value={loc.id} disabled={!loc.velocity_warehouse_id}>
                         {loc.warehouse_name} · PIN {loc.pincode}
                         {loc.velocity_warehouse_id ? ` · ${loc.velocity_warehouse_id}` : ' (not synced to Velocity)'}
@@ -2682,6 +3233,65 @@ function ShippingPanel({ order, orderId, onRefresh, onNotice, onError }) {
               {null}
             </div>
           )}
+        </div>
+      )}
+
+      {fulfillmentModalOpen && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-surface-container-lowest rounded-3xl max-w-md w-full p-8 shadow-2xl border border-outline-variant/20">
+            <div className="flex items-center gap-4 mb-4">
+              <div className="w-12 h-12 rounded-2xl bg-secondary/15 flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined text-2xl text-secondary">splitscreen</span>
+              </div>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-900-variant">Multiple warehouses detected</p>
+                <h3 className="font-brand text-xl text-gray-900 leading-tight">How would you like to proceed?</h3>
+              </div>
+            </div>
+            <p className="text-sm text-gray-900-variant mb-6 leading-relaxed">
+              <strong className="text-gray-900">Multiple shipments (recommended)</strong> groups line items by default product warehouse,
+              assigns a unique Velocity reference per lot, and routes webhooks to shipment-level tracking — order status is aggregated automatically.
+            </p>
+            <div className="flex flex-col gap-2">
+              <Button
+                variant="contained"
+                color="primary"
+                fullWidth
+                disabled={
+                  preparingLots ||
+                  warehousePreview.loading ||
+                  warehousePreview.distinctCount < 2
+                }
+                title={
+                  warehousePreview.distinctCount < 2 && !warehousePreview.loading
+                    ? 'Requires at least two warehouses on line items.'
+                    : ''
+                }
+                onClick={prepareMultiShipmentLots}
+              >
+                {preparingLots ? 'Creating lots…' : 'Multiple shipments (recommended)'}
+              </Button>
+              <Button
+                variant="outlined"
+                color="inherit"
+                fullWidth
+                disabled={preparingLots}
+                onClick={() => {
+                  setFulfillmentModalOpen(false);
+                  confirmLegacySingleFulfillment();
+                }}
+              >
+                Single shipment
+              </Button>
+              <button
+                type="button"
+                className="mt-2 text-xs font-semibold text-gray-900-variant hover:text-gray-900"
+                onClick={() => setFulfillmentModalOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
@@ -3077,7 +3687,7 @@ export default function AdminOrders() {
   }, [selectedId, orderId, navigate]);
 
   useEffect(() => {
-    if (!loading && !isAdmin && !hasModule?.('orders')) navigate('/');
+    if (!loading && !isAdmin && !hasModule?.('orders')) navigate('/access-denied');
   }, [isAdmin, hasModule, loading, navigate]);
 
   if (loading) {
@@ -3088,7 +3698,7 @@ export default function AdminOrders() {
     );
   }
 
-  if (!isAdmin && !hasModule?.('orders')) return null;
+  if (!isAdmin && !hasModule?.('orders')) return <Navigate to="/access-denied" replace />;
 
   if (selectedId) {
     return <OrderDetail orderId={selectedId} onBack={() => setSelectedId(null)} />;

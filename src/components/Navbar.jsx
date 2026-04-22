@@ -325,7 +325,6 @@ export default function Navbar() {
                       to="/admin"
                       size="small"
                       sx={{
-                        display: { xs: 'none', xl: 'inline-flex' },
                         bgcolor: '#f59e0b',
                         color: '#fff',
                         fontSize: '0.6875rem',

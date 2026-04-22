@@ -157,7 +157,7 @@ export default function Seller() {
       if (orderItemIds.length > 0) {
         const { data: decisions, error: decisionsError } = await supabase
           .from('seller_order_item_decisions')
-          .select('order_item_id, product_key, decision, decision_reason, decided_at')
+          .select('order_item_id, product_key, decision, decision_reason, decided_at, override_by, override_reason, overridden_at')
           .eq('seller_id', user.id)
           .in('order_item_id', orderItemIds);
 
@@ -182,6 +182,9 @@ export default function Seller() {
               seller_decision: decision?.decision || 'pending',
               seller_decision_reason: decision?.decision_reason || '',
               seller_decided_at: decision?.decided_at || null,
+              admin_override_by: decision?.override_by || null,
+              admin_override_reason: decision?.override_reason || null,
+              admin_overridden_at: decision?.overridden_at || null,
             };
           });
 
@@ -222,6 +225,9 @@ export default function Seller() {
     const ch = supabase
       .channel('seller-orders-list-' + user.id)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'orders' }, () => {
+        fetchSellerOrders();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'seller_order_item_decisions' }, () => {
         fetchSellerOrders();
       })
       .subscribe();
@@ -656,27 +662,43 @@ export default function Seller() {
                         {/* Item summary — read-only, no actions */}
                         <div className="mt-4 space-y-1.5">
                           {order.seller_items.map((item) => (
-                            <div key={item.id} className={`flex items-center justify-between gap-3 px-3 py-2 rounded-xl text-xs ${
+                            <div key={item.id} className={`flex flex-col gap-1 px-3 py-2 rounded-xl text-xs ${
                               item.seller_decision === 'approved' ? 'bg-emerald-50 border border-emerald-100'
                               : item.seller_decision === 'rejected' ? 'bg-red-50 border border-red-100'
                               : 'bg-surface-container border border-outline-variant/20'
                             }`}>
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                  item.seller_decision === 'approved' ? 'bg-emerald-500'
-                                  : item.seller_decision === 'rejected' ? 'bg-red-500'
-                                  : 'bg-amber-400'
-                                }`} />
-                                <span className="font-medium text-on-surface truncate">{item.product_name}</span>
-                                <span className="text-on-surface-variant font-mono hidden sm:inline">· {item.product_key}</span>
-                                <span className="text-on-surface-variant">× {item.quantity}</span>
+                              <div className="flex items-center justify-between gap-3">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                    item.seller_decision === 'approved' ? 'bg-emerald-500'
+                                    : item.seller_decision === 'rejected' ? 'bg-red-500'
+                                    : 'bg-amber-400'
+                                  }`} />
+                                  <span className="font-medium text-on-surface truncate">{item.product_name}</span>
+                                  <span className="text-on-surface-variant font-mono hidden sm:inline">· {item.product_key}</span>
+                                  <span className="text-on-surface-variant">× {item.quantity}</span>
+                                </div>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span className="font-semibold text-primary">₹{Number(item.line_total || 0).toLocaleString('en-IN')}</span>
+                                  {item.seller_decision === 'rejected' && item.seller_decision_reason && (
+                                    <span className="text-red-600 hidden sm:inline">· {item.seller_decision_reason}</span>
+                                  )}
+                                </div>
                               </div>
-                              <div className="flex items-center gap-2 shrink-0">
-                                <span className="font-semibold text-primary">₹{Number(item.line_total || 0).toLocaleString('en-IN')}</span>
-                                {item.seller_decision === 'rejected' && item.seller_decision_reason && (
-                                  <span className="text-red-600 hidden sm:inline">· {item.seller_decision_reason}</span>
-                                )}
-                              </div>
+                              {/* Admin override / on-behalf indicator */}
+                              {item.admin_override_by && item.seller_decision !== 'pending' && (
+                                <div className={`flex items-center gap-1.5 mt-0.5 px-2 py-1 rounded-lg text-[10px] font-semibold ${
+                                  item.seller_decision === 'approved'
+                                    ? 'bg-emerald-100/60 text-emerald-800'
+                                    : 'bg-red-100/60 text-red-800'
+                                }`}>
+                                  <span className="material-symbols-outlined text-[11px]">admin_panel_settings</span>
+                                  {item.seller_decision === 'approved' ? 'Approved' : 'Rejected'} by admin
+                                  {item.admin_override_reason && (
+                                    <span className="font-normal opacity-80 truncate max-w-[140px]">· {item.admin_override_reason}</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
                           ))}
                         </div>

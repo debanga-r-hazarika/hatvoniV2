@@ -758,6 +758,127 @@ function verifyVelocityWebhookSecret(req: Request): boolean {
   return configured === h1 || configured === h2 || configured === bearer;
 }
 
+type VelocityWebhookRouting =
+  | { kind: 'shipment'; shipmentId: string; orderId: string }
+  | { kind: 'order'; orderId: string };
+
+async function resolveVelocityWebhookRouting(
+  adminClient: ReturnType<typeof createAdminClient>,
+  externalId: string,
+): Promise<VelocityWebhookRouting | null> {
+  const t = externalId.trim();
+  if (!t) return null;
+
+  const { data: ship } = await adminClient
+    .from('order_shipments')
+    .select('id, order_id')
+    .eq('velocity_external_code', t)
+    .maybeSingle();
+  if (ship?.id && ship.order_id) {
+    return { kind: 'shipment', shipmentId: ship.id, orderId: ship.order_id };
+  }
+
+  const { data: byUuid } = await adminClient.from('orders').select('id').eq('id', t).maybeSingle();
+  if (byUuid?.id) return { kind: 'order', orderId: byUuid.id };
+
+  const { data: oid } = await adminClient.rpc('resolve_order_from_velocity_external_id', {
+    p_ext: t,
+  });
+  if (typeof oid === 'string' && oid) {
+    return { kind: 'order', orderId: oid };
+  }
+
+  return null;
+}
+
+async function recomputeFulfillmentAggregate(
+  adminClient: ReturnType<typeof createAdminClient>,
+  orderId: string,
+): Promise<void> {
+  await adminClient.rpc('recompute_order_fulfillment_aggregate', { p_order_id: orderId });
+}
+
+function buildShipmentLotPatchFromWebhook(
+  data: Record<string, unknown>,
+  velocityStatus: string,
+  event: string,
+): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    carrier_shipment_status: velocityStatus || null,
+    updated_at: nowIso(),
+  };
+
+  const tn = typeof data.tracking_number === 'string' ? data.tracking_number.trim() : '';
+  if (tn) {
+    patch.tracking_number = tn;
+    patch.velocity_awb = tn;
+  }
+
+  const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
+  if (tu) patch.velocity_tracking_url = tu;
+
+  const cn = typeof data.carrier_name === 'string' ? data.carrier_name.trim() : '';
+  if (cn) patch.velocity_carrier_name = cn;
+
+  const labelFromWebhook = extractVelocityLabelUrl(data);
+  if (labelFromWebhook) patch.velocity_label_url = labelFromWebhook;
+
+  if (event === 'tracking_addition' && data.new_tracking && typeof data.new_tracking === 'object') {
+    patch.velocity_tracking_snapshot = {
+      webhook_at: nowIso(),
+      event,
+      last_event: data.new_tracking,
+    };
+  }
+
+  return patch;
+}
+
+async function appendInboundWebhookShipmentEvent(
+  adminClient: ReturnType<typeof createAdminClient>,
+  shipmentId: string,
+  data: Record<string, unknown>,
+  velocityStatus: string,
+): Promise<void> {
+  const nt = data.new_tracking && typeof data.new_tracking === 'object'
+    ? data.new_tracking as Record<string, unknown>
+    : null;
+  const acts = nt && Array.isArray(nt.shipment_track_activities)
+    ? nt.shipment_track_activities as unknown[]
+    : [];
+
+  if (acts.length > 0) {
+    const rows = acts.slice(0, 80).map((ev) => {
+      const r = typeof ev === 'object' && ev !== null ? ev as Record<string, unknown> : {};
+      return {
+        order_shipment_id: shipmentId,
+        source: 'webhook',
+        raw_payload: r as Json,
+        activity: typeof r.activity === 'string'
+          ? r.activity
+          : typeof r.description === 'string'
+          ? r.description
+          : null,
+        location: typeof r.location === 'string' ? r.location : null,
+        carrier_remark: typeof r.remark === 'string' ? r.remark : null,
+        event_time: typeof r.date === 'string' ? r.date : null,
+      };
+    });
+    await adminClient.from('order_shipment_tracking_events').insert(rows);
+    return;
+  }
+
+  await adminClient.from('order_shipment_tracking_events').insert({
+    order_shipment_id: shipmentId,
+    source: 'webhook',
+    raw_payload: data as Json,
+    activity: velocityStatus || null,
+    location: typeof data.location === 'string' ? String(data.location) : null,
+    carrier_remark: typeof data.ndr_reason === 'string' ? String(data.ndr_reason) : null,
+    event_time: nowIso(),
+  });
+}
+
 /**
  * Inbound webhook as sent by Velocity/Shipfast portal (not wrapped in { action, payload }).
  * Docs: Shipfast Webhook Guide — event + data.order_external_id + data.status + data.tracking_url
@@ -824,11 +945,77 @@ async function handleShipfastInboundWebhook(
     });
   }
 
-  const { data: orderRow } = await adminClient
+  const routing = await resolveVelocityWebhookRouting(adminClient, externalId);
+  if (!routing) {
+    await logVelocityCall(adminClient, {
+      action: 'webhook_update',
+      requestPayload: body,
+      responsePayload: { applied: false, reason: 'unknown_external_reference', external_id: externalId },
+      statusCode: 200,
+      success: true,
+      orderId: null,
+    });
+    return new Response(JSON.stringify({ ok: true, ignored: true }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  /* ── Shipment-lot webhook: update lot only; aggregate order status separately ── */
+  if (routing.kind === 'shipment') {
+    const lotPatch = buildShipmentLotPatchFromWebhook(data, velocityStatus, event);
+    const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', routing.shipmentId);
+    if (lotErr) console.error('webhook shipment lot update', lotErr);
+
+    await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, velocityStatus);
+    await recomputeFulfillmentAggregate(adminClient, routing.orderId);
+
+    await logVelocityCall(adminClient, {
+      action: 'webhook_update',
+      requestPayload: body,
+      responsePayload: {
+        applied: !lotErr,
+        route: 'shipment_lot',
+        order_id: routing.orderId,
+        shipment_id: routing.shipmentId,
+        event,
+      },
+      statusCode: 200,
+      success: true,
+      orderId: routing.orderId,
+    });
+
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: orderMeta } = await adminClient
     .from('orders')
-    .select('id, status')
-    .eq('id', externalId)
+    .select('id, status, fulfillment_mode')
+    .eq('id', routing.orderId)
     .maybeSingle();
+
+  if (orderMeta?.fulfillment_mode === 'multi_shipment') {
+    await logVelocityCall(adminClient, {
+      action: 'webhook_update',
+      requestPayload: body,
+      responsePayload: {
+        applied: false,
+        reason: 'multi_shipment_use_lot_external_id',
+        order_id: routing.orderId,
+        hint: 'Velocity must send order_external_id matching order_shipments.velocity_external_code per lot.',
+      },
+      statusCode: 200,
+      success: true,
+      orderId: routing.orderId,
+    });
+    return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'multi_shipment_order_level' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
 
   const patch: Record<string, unknown> = {
     updated_at: nowIso(),
@@ -855,7 +1042,7 @@ async function handleShipfastInboundWebhook(
   mergeOrderPatchFromShipmentStatus(
     patch,
     velocityStatus,
-    orderRow?.status as string | undefined,
+    orderMeta?.status as string | undefined,
     ndrReason ? { carrierReason: ndrReason } : undefined,
   );
 
@@ -868,7 +1055,7 @@ async function handleShipfastInboundWebhook(
     patch.velocity_tracking_snapshot = snap;
   }
 
-  const { error: upErr } = await adminClient.from('orders').update(patch).eq('id', externalId);
+  const { error: upErr } = await adminClient.from('orders').update(patch).eq('id', routing.orderId);
   if (upErr) {
     console.error('webhook order update', upErr);
   }
@@ -876,10 +1063,10 @@ async function handleShipfastInboundWebhook(
   await logVelocityCall(adminClient, {
     action: 'webhook_update',
     requestPayload: body,
-    responsePayload: { applied: !upErr, order_id: externalId, event },
+    responsePayload: { applied: !upErr, order_id: routing.orderId, event, route: 'legacy_order' },
     statusCode: 200,
     success: true,
-    orderId: externalId,
+    orderId: routing.orderId,
   });
 
   return new Response(JSON.stringify({ ok: true }), {
@@ -1075,7 +1262,7 @@ async function loadOrderContext(
 }> {
   const { data: order, error: orderErr } = await adminClient
     .from('orders')
-    .select('id,status,payment_method,total_amount,shipping_address,created_at,velocity_shipment_id,velocity_pending_shipment_id,velocity_fulfillment')
+    .select('id,status,payment_method,total_amount,shipping_address,created_at,velocity_shipment_id,velocity_pending_shipment_id,velocity_fulfillment,fulfillment_mode')
     .eq('id', orderId)
     .maybeSingle();
 
@@ -1083,7 +1270,7 @@ async function loadOrderContext(
 
   const { data: orderItems, error: orderItemsErr } = await adminClient
     .from('order_items')
-    .select('id,quantity,price,lot_name,lot_snapshot,products(id,key,name,seller_id)')
+    .select('id,quantity,price,lot_name,lot_snapshot,order_shipment_id,products(id,key,name,seller_id)')
     .eq('order_id', orderId);
 
   if (orderItemsErr) throw new Error('Unable to load order items');
@@ -1225,6 +1412,27 @@ async function handleCheckServiceability(
     const { order, orderItems, customerPincode } = await loadOrderContext(adminClient, orderId);
     const pickupLocationId = typeof payload.pickup_location_id === 'string' ? payload.pickup_location_id.trim() : '';
 
+    let itemsForRates = orderItems;
+    let codShipmentValue = Number(order.total_amount || 0);
+    const shipmentLotForSvc = typeof (payload as Record<string, unknown>).order_shipment_id === 'string'
+      ? String((payload as Record<string, unknown>).order_shipment_id).trim()
+      : '';
+
+    if (shipmentLotForSvc && String(order.fulfillment_mode || '') === 'multi_shipment') {
+      const { data: lotOk } = await adminClient
+        .from('order_shipments')
+        .select('id')
+        .eq('id', shipmentLotForSvc)
+        .eq('order_id', orderId)
+        .maybeSingle();
+      if (!lotOk) throw new Error('order_shipment_id does not match this order for serviceability.');
+      itemsForRates = orderItems.filter((i) => String(i.order_shipment_id || '') === shipmentLotForSvc);
+      codShipmentValue = itemsForRates.reduce((a, i) => a + Number(i.price || 0) * Number(i.quantity || 0), 0);
+      if (itemsForRates.length === 0) {
+        throw new Error('No order items linked to this shipment lot.');
+      }
+    }
+
     let pickupPincode: string;
     let pickupLocationLabel: string;
 
@@ -1240,7 +1448,7 @@ async function handleCheckServiceability(
     } else {
       const fallbackPickupPincode = String(getEnvOptional('VELOCITY_WAREHOUSE_PINCODE') || '').replace(/\s/g, '');
       const fallbackPickupLocation = getEnvOptional('VELOCITY_PICKUP_LOCATION') || 'Main Warehouse';
-      const pickup = await resolvePickupForOrder(adminClient, orderItems, fallbackPickupLocation, fallbackPickupPincode);
+      const pickup = await resolvePickupForOrder(adminClient, itemsForRates, fallbackPickupLocation, fallbackPickupPincode);
       pickupPincode = String(pickup.pickupPincode || '').replace(/\s/g, '');
       pickupLocationLabel = pickup.pickupLocation;
       sellerId = pickup.sellerId;
@@ -1252,7 +1460,7 @@ async function handleCheckServiceability(
     }
 
     const method = String(order.payment_method || '').toLowerCase();
-    const paymentMode = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'online'].includes(method) ? 'prepaid' : 'cod';
+    const paymentMode = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'phonepe', 'online'].includes(method) ? 'prepaid' : 'cod';
     requestPayload = {
       from: pickupPincode,
       to: customerPincode,
@@ -1296,7 +1504,7 @@ async function handleCheckServiceability(
           payment_method: paymentMode,
         };
         if (paymentMode === 'cod') {
-          const sv = Number(order.total_amount || 0);
+          const sv = codShipmentValue;
           if (sv > 0) ratesPayload.shipment_value = sv;
         }
 
@@ -1444,7 +1652,7 @@ async function handleCreateOrder(
 
   const addr = (order.shipping_address || {}) as Record<string, unknown>;
   const method = String(order.payment_method || '').toLowerCase();
-  const paymentMethod = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'online'].includes(method) ? 'PREPAID' : 'COD';
+  const paymentMethod = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'phonepe', 'online'].includes(method) ? 'PREPAID' : 'COD';
   const subTotal = Number(order.total_amount || 0);
 
   const items = buildForwardOrderLineItems(orderItems, subTotal);
@@ -1529,27 +1737,66 @@ async function handleCreateForwardOrder(
 
   const { order, orderItems, customerPincode } = await loadOrderContext(adminClient, orderId);
 
+  const orderShipmentId = typeof (payload as Record<string, unknown>).order_shipment_id === 'string'
+    ? String((payload as Record<string, unknown>).order_shipment_id).trim()
+    : '';
+
+  let shipmentLot: Record<string, unknown> | null = null;
+  let velocityOrderRef = baseVelocityOrderCode(orderId);
+
+  if (orderShipmentId) {
+    const { data: lotRow, error: lotErr } = await adminClient
+      .from('order_shipments')
+      .select(
+        'id, order_id, warehouse_id, velocity_external_code, velocity_pending_shipment_id, velocity_shipment_id, tracking_number',
+      )
+      .eq('id', orderShipmentId)
+      .eq('order_id', orderId)
+      .maybeSingle();
+    if (lotErr || !lotRow) throw new Error('order_shipment_id does not match this order.');
+    shipmentLot = lotRow as Record<string, unknown>;
+    velocityOrderRef = String(shipmentLot.velocity_external_code || velocityOrderRef);
+    if (String(order.fulfillment_mode || '') !== 'multi_shipment') {
+      throw new Error('order_shipment_id can only be used when the order uses multi_shipment fulfillment.');
+    }
+    const pend = String(shipmentLot.velocity_pending_shipment_id || '').trim();
+    const sidExisting = String(shipmentLot.velocity_shipment_id || '').trim();
+    const tnLot = String(shipmentLot.tracking_number || '').trim();
+    if (pend || sidExisting || tnLot) {
+      throw new Error('This shipment lot already has a Velocity draft or AWB. Cancel it before creating another.');
+    }
+  } else if (String(order.fulfillment_mode || '') === 'multi_shipment') {
+    throw new Error(
+      'Multi-shipment orders require payload.order_shipment_id (select which shipment lot to book on Velocity).',
+    );
+  }
+
   if (String(order.status || '') !== 'processing') {
     throw new Error("Order must be in 'processing' state to create shipment.");
   }
-  if (order.velocity_shipment_id) {
-    throw new Error('Shipment already exists for this order.');
-  }
-  const existingDraft = typeof order.velocity_pending_shipment_id === 'string'
-    ? order.velocity_pending_shipment_id.trim()
-    : '';
-  if (existingDraft) {
-    throw new Error(
-      'A Velocity shipment draft already exists for this order. Assign a courier to generate the AWB, or cancel the draft before creating another.',
-    );
-  }
-  {
-    const vf = order.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
-      ? order.velocity_fulfillment as Record<string, unknown>
-      : null;
-    const history = Array.isArray(vf?.historical_velocity_orders) ? vf?.historical_velocity_orders : [];
-    if (history.length > 0) {
-      throw new Error('A Velocity shipment order already exists for this order. Resume the existing shipment order instead of creating a new one.');
+
+  if (!orderShipmentId) {
+    if (order.velocity_shipment_id) {
+      throw new Error('Shipment already exists for this order.');
+    }
+    const existingDraft = typeof order.velocity_pending_shipment_id === 'string'
+      ? order.velocity_pending_shipment_id.trim()
+      : '';
+    if (existingDraft) {
+      throw new Error(
+        'A Velocity shipment draft already exists for this order. Assign a courier to generate the AWB, or cancel the draft before creating another.',
+      );
+    }
+    {
+      const vf = order.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
+        ? order.velocity_fulfillment as Record<string, unknown>
+        : null;
+      const history = Array.isArray(vf?.historical_velocity_orders) ? vf?.historical_velocity_orders : [];
+      if (history.length > 0) {
+        throw new Error(
+          'A Velocity shipment order already exists for this order. Resume the existing shipment order instead of creating a new one.',
+        );
+      }
     }
   }
 
@@ -1563,17 +1810,39 @@ async function handleCreateForwardOrder(
   const pickupLocationName = String(pickupRow.warehouse_name || 'Warehouse');
   const sellerId = typeof pickupRow.seller_id === 'string' ? pickupRow.seller_id : null;
 
+  if (shipmentLot?.warehouse_id) {
+    const { data: whRow } = await adminClient
+      .from('warehouses')
+      .select('velocity_warehouse_id')
+      .eq('id', shipmentLot.warehouse_id as string)
+      .maybeSingle();
+    const expectVel = String(whRow?.velocity_warehouse_id || '').trim();
+    const pickVel = String(pickupRow.velocity_warehouse_id || '').trim();
+    if (expectVel && pickVel && expectVel !== pickVel) {
+      throw new Error('Pickup location Velocity warehouse does not match this shipment lot warehouse.');
+    }
+  }
+
+  let scopedItems = orderItems;
+  let financeSubTotal = Number(order.total_amount || 0);
+  if (orderShipmentId && shipmentLot) {
+    scopedItems = orderItems.filter((i) => String(i.order_shipment_id || '') === orderShipmentId);
+    if (scopedItems.length === 0) {
+      throw new Error('No order line items linked to this shipment lot.');
+    }
+    financeSubTotal = scopedItems.reduce((a, i) => a + Number(i.price || 0) * Number(i.quantity || 0), 0);
+  }
+
   const addr = (order.shipping_address || {}) as Record<string, unknown>;
   const method = String(order.payment_method || '').toLowerCase();
-  const paymentMethod = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'online'].includes(method) ? 'PREPAID' : 'COD';
-  const subTotal = Number(order.total_amount || 0);
+  const paymentMethod = ['razorpay', 'razorpay_upi', 'razorpay_cards', 'phonepe', 'online'].includes(method) ? 'PREPAID' : 'COD';
 
-  const items = buildForwardOrderLineItems(orderItems, subTotal);
+  const items = buildForwardOrderLineItems(scopedItems, financeSubTotal);
 
   const channelId = getEnvOptional('VELOCITY_CHANNEL_ID');
 
   const requestPayload: Json = {
-    order_id: baseVelocityOrderCode(orderId),
+    order_id: velocityOrderRef,
     order_date: new Date(String(order.created_at || nowIso())).toISOString().replace('T', ' ').slice(0, 16),
     billing_customer_name: String(addr.first_name || addr.name || 'Customer'),
     billing_last_name: String(addr.last_name || ''),
@@ -1588,8 +1857,8 @@ async function handleCreateForwardOrder(
     print_label: true,
     order_items: items,
     payment_method: paymentMethod,
-    sub_total: subTotal,
-    cod_collectible: paymentMethod === 'COD' ? subTotal : 0,
+    sub_total: financeSubTotal,
+    cod_collectible: paymentMethod === 'COD' ? financeSubTotal : 0,
     length,
     breadth,
     height,
@@ -1639,12 +1908,19 @@ async function handleCreateForwardOrder(
       };
     }
 
-    await adminClient.from('orders').update({
-      velocity_pending_shipment_id: sid,
-      velocity_fulfillment: fulfillmentMeta,
-      updated_at: nowIso(),
-      admin_updated_at: nowIso(),
-    }).eq('id', orderId).then(() => {}, () => {});
+    if (orderShipmentId && shipmentLot) {
+      await adminClient.from('order_shipments').update({
+        velocity_pending_shipment_id: sid,
+        updated_at: nowIso(),
+      }).eq('id', orderShipmentId).then(() => {}, () => {});
+    } else {
+      await adminClient.from('orders').update({
+        velocity_pending_shipment_id: sid,
+        velocity_fulfillment: fulfillmentMeta,
+        updated_at: nowIso(),
+        admin_updated_at: nowIso(),
+      }).eq('id', orderId).then(() => {}, () => {});
+    }
   }
 
   await logVelocityCall(adminClient, {
@@ -1669,6 +1945,65 @@ async function handleAssignCourier(
 ) {
   const internalOrderId = String(payload.order_id || '').trim();
   if (!internalOrderId) throw new Error('assign_courier requires order_id');
+
+  const shipmentLotId = typeof (payload as Record<string, unknown>).order_shipment_id === 'string'
+    ? String((payload as Record<string, unknown>).order_shipment_id).trim()
+    : '';
+
+  if (shipmentLotId) {
+    const { data: lot } = await adminClient
+      .from('order_shipments')
+      .select('id, order_id, velocity_pending_shipment_id, tracking_number')
+      .eq('id', shipmentLotId)
+      .eq('order_id', internalOrderId)
+      .maybeSingle();
+    if (!lot) throw new Error('order_shipment_id not found for this order.');
+    if (String(lot.tracking_number || '').trim()) {
+      throw new Error('AWB already exists for this shipment lot.');
+    }
+
+    let shipmentId = String(payload.shipment_id || '').trim();
+    if (!shipmentId) {
+      shipmentId = String(lot.velocity_pending_shipment_id || '').trim();
+    }
+    if (!shipmentId) {
+      throw new Error('assign_courier requires shipment_id or velocity_pending_shipment_id on the shipment lot.');
+    }
+
+    const carrierId = typeof payload.carrier_id === 'string' ? payload.carrier_id : '';
+    const requestPayload: Json = { shipment_id: shipmentId, carrier_id: carrierId, print_label: true };
+
+    const apiResult = await callVelocityApi('assign_courier', endpoint, token, requestPayload);
+    const dataObj = (apiResult.data || {}) as Record<string, unknown>;
+    const outPayload = (dataObj.payload || dataObj) as Record<string, unknown>;
+
+    if (apiResult.ok) {
+      await adminClient.from('order_shipments').update({
+        tracking_number: String(outPayload.awb_code || ''),
+        velocity_awb: String(outPayload.awb_code || ''),
+        velocity_shipment_id: String(outPayload.shipment_id || shipmentId),
+        velocity_pending_shipment_id: null,
+        velocity_carrier_name: String(outPayload.courier_name || ''),
+        velocity_label_url: extractVelocityLabelUrl(outPayload),
+        carrier_shipment_status: 'in_transit',
+        updated_at: nowIso(),
+      }).eq('id', shipmentLotId).then(() => {}, () => {});
+      await recomputeFulfillmentAggregate(adminClient, internalOrderId);
+    }
+
+    await logVelocityCall(adminClient, {
+      action: 'assign_courier',
+      requestPayload,
+      responsePayload: apiResult.data,
+      statusCode: apiResult.status,
+      success: apiResult.ok,
+      errorMessage: apiResult.ok ? undefined : 'Assign courier failed',
+      orderId: internalOrderId,
+      sellerId: null,
+    });
+
+    return apiResult;
+  }
 
   const { data: orderRow, error: orderErr } = await adminClient
     .from('orders')
@@ -1751,10 +2086,19 @@ async function handleTrackOrder(
   } else if (orderId) {
     const { data: row } = await adminClient
       .from('orders')
-      .select('tracking_number, velocity_awb, status, velocity_shipment_id, velocity_pending_shipment_id')
+      .select('tracking_number, velocity_awb, status, velocity_shipment_id, velocity_pending_shipment_id, fulfillment_mode')
       .eq('id', orderId)
       .maybeSingle();
-    const awb = String(row?.tracking_number || row?.velocity_awb || '').trim();
+    let awb = String(row?.tracking_number || row?.velocity_awb || '').trim();
+    if (!awb && String(row?.fulfillment_mode || '') === 'multi_shipment') {
+      const { data: lots } = await adminClient
+        .from('order_shipments')
+        .select('tracking_number, velocity_awb')
+        .eq('order_id', orderId);
+      awb = (lots || [])
+        .map((l) => String(l.tracking_number || l.velocity_awb || '').trim())
+        .find((t) => t.length > 0) || '';
+    }
     if (awb) {
       velocityRequest = { awbs: [awb] };
     } else {
@@ -2147,50 +2491,77 @@ async function handleWebhookUpdate(
     (typeof data.awb === 'string' ? data.awb.trim() : '');
 
   let applied = false;
+  let resolvedOrderId: string | null = null;
 
   if (externalId && (shipmentStatus || awb)) {
-    const { data: orderRow } = await adminClient
-      .from('orders')
-      .select('status')
-      .eq('id', externalId)
-      .maybeSingle();
+    const routing = await resolveVelocityWebhookRouting(adminClient, externalId);
 
-    const patch: Record<string, unknown> = {
-      updated_at: nowIso(),
-    };
-    if (shipmentStatus) patch.shipment_status = shipmentStatus;
-    if (awb) {
-      patch.velocity_awb = awb;
-      patch.tracking_number = awb;
+    if (routing?.kind === 'shipment') {
+      const lotPatch = buildShipmentLotPatchFromWebhook(data, shipmentStatus, '');
+      if (awb) {
+        lotPatch.velocity_awb = awb;
+        lotPatch.tracking_number = awb;
+      }
+      const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
+      if (tu) lotPatch.velocity_tracking_url = tu;
+      const labelUrl = extractVelocityLabelUrl(data);
+      if (labelUrl) lotPatch.velocity_label_url = labelUrl;
+
+      const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', routing.shipmentId);
+      await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, shipmentStatus);
+      await recomputeFulfillmentAggregate(adminClient, routing.orderId);
+      applied = !lotErr;
+      resolvedOrderId = routing.orderId;
+    } else if (routing?.kind === 'order') {
+      const { data: orderRow } = await adminClient
+        .from('orders')
+        .select('status, fulfillment_mode')
+        .eq('id', routing.orderId)
+        .maybeSingle();
+
+      if (orderRow?.fulfillment_mode === 'multi_shipment') {
+        applied = false;
+        resolvedOrderId = routing.orderId;
+      } else {
+        const patch: Record<string, unknown> = {
+          updated_at: nowIso(),
+        };
+        if (shipmentStatus) patch.shipment_status = shipmentStatus;
+        if (awb) {
+          patch.velocity_awb = awb;
+          patch.tracking_number = awb;
+        }
+        const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
+        if (tu) patch.velocity_tracking_url = tu;
+
+        const labelUrl = extractVelocityLabelUrl(data);
+        if (labelUrl) patch.velocity_label_url = labelUrl;
+
+        const ndrReason =
+          typeof data.ndr_reason === 'string'
+            ? data.ndr_reason.trim()
+            : '';
+        mergeOrderPatchFromShipmentStatus(
+          patch,
+          shipmentStatus || undefined,
+          orderRow?.status as string | undefined,
+          ndrReason ? { carrierReason: ndrReason } : undefined,
+        );
+
+        const { error } = await adminClient.from('orders').update(patch).eq('id', routing.orderId);
+        applied = !error;
+        resolvedOrderId = routing.orderId;
+      }
     }
-    const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
-    if (tu) patch.velocity_tracking_url = tu;
-
-    const labelUrl = extractVelocityLabelUrl(data);
-    if (labelUrl) patch.velocity_label_url = labelUrl;
-
-    const ndrReason =
-      typeof data.ndr_reason === 'string'
-        ? data.ndr_reason.trim()
-        : '';
-    mergeOrderPatchFromShipmentStatus(
-      patch,
-      shipmentStatus || undefined,
-      orderRow?.status as string | undefined,
-      ndrReason ? { carrierReason: ndrReason } : undefined,
-    );
-
-    const { error } = await adminClient.from('orders').update(patch).eq('id', externalId);
-    applied = !error;
   }
 
   await logVelocityCall(adminClient, {
     action: 'webhook_update',
     requestPayload: payload,
-    responsePayload: { applied, order_id: externalId || null },
+    responsePayload: { applied, order_id: resolvedOrderId || externalId || null },
     statusCode: 200,
     success: true,
-    orderId: externalId || null,
+    orderId: resolvedOrderId || externalId || null,
   });
 
   return new Response(JSON.stringify({ ok: true }), {

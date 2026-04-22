@@ -35,11 +35,14 @@ import AdminEmployees from './pages/AdminEmployees';
 import AdminSellers from './pages/AdminSellers';
 import AdminLogistics from './pages/AdminLogistics';
 import AdminSupport from './pages/AdminSupport';
+import AdminWarehouses from './pages/AdminWarehouses';
 import Support from './pages/Support';
 import Seller from './pages/Seller';
 import SellerOrderDetail from './pages/SellerOrderDetail';
 import PaymentProcessing from './pages/PaymentProcessing';
 import TrackShipment from './pages/TrackShipment';
+import NotFound from './pages/NotFound';
+import AccessDenied from './pages/AccessDenied';
 
 // Pages that use a minimal transactional header (no shared Navbar/Footer)
 const TRANSACTIONAL = ['/checkout', '/login', '/signup', '/forgot-password', '/reset-password', '/confirm-account'];
@@ -58,8 +61,8 @@ function Layout({ children, path }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
+    <AuthProvider>
+      <BrowserRouter>
         <Routes>
           <Route path="/" element={<Layout path="/"><Home /></Layout>} />
           <Route path="/about" element={<Layout path="/about"><About /></Layout>} />
@@ -84,6 +87,7 @@ export default function App() {
           <Route path="/admin/inventory" element={<Layout path="/admin/inventory"><AdminInventory /></Layout>} />
           <Route path="/admin/employees" element={<Layout path="/admin/employees"><AdminEmployees /></Layout>} />
           <Route path="/admin/sellers" element={<Layout path="/admin/sellers"><AdminSellers /></Layout>} />
+          <Route path="/admin/warehouses" element={<Layout path="/admin/warehouses"><AdminWarehouses /></Layout>} />
           <Route path="/admin/logistics" element={<Layout path="/admin/logistics"><AdminLogistics /></Layout>} />
           <Route path="/admin/support" element={<Layout path="/admin/support"><AdminSupport /></Layout>} />
           <Route path="/support" element={<Layout path="/support"><Support /></Layout>} />
@@ -101,8 +105,10 @@ export default function App() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/confirm-account" element={<ConfirmAccount />} />
+          <Route path="/access-denied" element={<Layout path="/access-denied"><AccessDenied /></Layout>} />
+          <Route path="*" element={<Layout path="*"><NotFound /></Layout>} />
         </Routes>
-      </AuthProvider>
-    </BrowserRouter>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }

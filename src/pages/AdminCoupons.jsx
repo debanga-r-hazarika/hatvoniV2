@@ -144,7 +144,7 @@ export default function AdminCoupons() {
   // Check admin or employee with coupons module
   useEffect(() => {
     if (profile && !isAdmin && !hasModule('coupons')) {
-      navigate('/');
+      navigate('/access-denied');
     }
   }, [profile, isAdmin, hasModule, navigate]);
 

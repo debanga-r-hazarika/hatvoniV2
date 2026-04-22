@@ -36,8 +36,8 @@ export const AuthProvider = ({ children }) => {
         setEmployeeModules([]);
         return;
       }
-      // get_my_employee_modules returns SETOF text → PostgREST gives ["mod1","mod2",...]
-      // Guard against both flat string arrays and legacy [{get_my_employee_modules:"mod"}] shapes
+      // get_my_employee_modules returns SETOF text.
+      // PostgREST returns [{get_my_employee_modules:"orders"}, ...] — array of row objects.
       let rawList = [];
       if (Array.isArray(data)) {
         rawList = data.map((item) =>
@@ -123,8 +123,6 @@ export const AuthProvider = ({ children }) => {
         setIsAdmin(data.is_admin === true);
         setIsSeller(data.is_seller === true);
         if (!data.is_admin) {
-          // Set isEmployee from the profile flag immediately (fast),
-          // then fetch actual modules for hasModule() checks
           setIsEmployee(data.is_employee === true);
           await fetchEmployeeModules(userId);
         } else {

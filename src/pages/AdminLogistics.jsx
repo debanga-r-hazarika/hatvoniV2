@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -110,7 +110,7 @@ export default function AdminLogistics() {
   const [filters, setFilters] = useState(initialFilters);
 
   useEffect(() => {
-    if (!loading && !isAdmin && !hasModule('logistics')) navigate('/');
+    if (!loading && !isAdmin && !hasModule('logistics')) navigate('/access-denied');
   }, [isAdmin, hasModule, loading, navigate]);
 
   const callOrchestrator = async (action, payload = {}) => {
@@ -255,7 +255,7 @@ export default function AdminLogistics() {
   }, [hasModule, isAdmin]);
 
   if (loading) return null;
-  if (!isAdmin && !hasModule('logistics')) return null;
+  if (!isAdmin && !hasModule('logistics')) return <Navigate to="/access-denied" replace />;
 
   return (
     <div className="min-h-screen bg-surface pt-28 pb-16">

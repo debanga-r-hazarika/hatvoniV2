@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
@@ -30,7 +30,7 @@ export default function AdminInventory() {
   const [expandedTag, setExpandedTag] = useState(null);
 
   useEffect(() => {
-    if (!authLoading && !isAdmin && !hasModule('inventory')) navigate('/');
+    if (!authLoading && !isAdmin && !hasModule('inventory')) navigate('/access-denied');
   }, [isAdmin, authLoading, hasModule, navigate]);
 
   const load = useCallback(async () => {
@@ -121,7 +121,7 @@ export default function AdminInventory() {
   }), [inventory, lots]);
 
   if (authLoading) return null;
-  if (!isAdmin && !hasModule('inventory')) return null;
+  if (!isAdmin && !hasModule('inventory')) return <Navigate to="/access-denied" replace />;
 
   return (
     <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">

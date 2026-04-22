@@ -27,7 +27,7 @@ const HatvoniLogo = ({ size = 40, color = 'currentColor' }) => (
 
 /* ── Heritage image ──────────────────────────────────── */
 const HERO_IMG =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuD5uGKTZNnw56K1iY447N2JPC0PplgNjnQDdWbLprc4FzvlD9bf4riVzY8jtGHFSi-vaIj0z5kjqaVxHcfIAgQe75yBUTomadDtIpDfLZUnlpsrZ31WuwGoyGtOMYSiobk83OD8BPpjM3sX-YOfqTplb99naQDCBhg_HObt4IKogLA5yDf634U75GPsKXKD83kIe5V9EEdhTOkuV1oQYddAQamr-90EUlXmU763iN5XiUWimRaHGEKLGMd8OJPAyFt0fAV4qMZflYXq';
+  'https://images.unsplash.com/photo-1605806616949-1e87b487cb2a?q=80&w=1470&auto=format&fit=crop';
 
 export default function ForgotPassword() {
   const theme = useTheme();

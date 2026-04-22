@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function ProductsTable({ data, sellerOptions, onToggleStatus, onEdit, onDelete }) {
+export default function ProductsTable({ data, sellerOptions, warehouseCountByProduct = {}, onToggleStatus, onEdit, onDelete, onManageWarehouses }) {
   const sellerById = (sellerOptions || []).reduce((acc, s) => { acc[s.id] = s; return acc; }, {});
 
   if (data.length === 0) return <div className="text-center py-16 bg-white rounded-xl border border-[#bec9bf]/20 text-sm text-[#3f4942]/60">No products found.</div>;
@@ -16,6 +16,7 @@ export default function ProductsTable({ data, sellerOptions, onToggleStatus, onE
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Price</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Stock</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Seller</th>
+              <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Warehouses</th>
               <th className="px-4 py-2.5 text-left text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Status</th>
               <th className="px-4 py-2.5 text-right text-[10px] font-semibold uppercase tracking-wider text-[#3f4942]/50">Actions</th>
             </tr>
@@ -67,6 +68,19 @@ export default function ProductsTable({ data, sellerOptions, onToggleStatus, onE
                       <span className="material-symbols-outlined text-[10px] text-[#3f4942]/30">{seller?.is_own_seller ? 'verified' : 'storefront'}</span>
                       <span className="text-[10px] font-medium text-[#3f4942]/60 truncate max-w-[100px]">{sellerName}</span>
                     </div>
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => onManageWarehouses?.(product)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[9px] font-semibold uppercase border bg-sky-50 text-sky-700 border-sky-100 hover:bg-sky-600 hover:text-white transition-all"
+                      title="Manage warehouse assignments"
+                    >
+                      <span className="material-symbols-outlined text-xs">warehouse</span>
+                      {warehouseCountByProduct[product.id] != null
+                        ? warehouseCountByProduct[product.id]
+                        : '—'}
+                    </button>
                   </td>
 
                   <td className="px-4 py-3">

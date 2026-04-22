@@ -49,7 +49,7 @@ export default function AdminEmployees() {
   };
 
   useEffect(() => {
-    if (!loading && !isAdmin) navigate('/');
+    if (!loading && !isAdmin) navigate('/access-denied');
   }, [isAdmin, loading, navigate]);
 
   // ── Fetch employees ──────────────────────────────────────────────────────

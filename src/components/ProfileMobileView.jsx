@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 function useOutsideClick(ref, handler) {
   useEffect(() => {
@@ -268,42 +269,77 @@ function AddressBookSection({ addresses, onAdd, onEdit, onDelete }) {
 }
 
 function ActionLinks({ onPasswordModal, onLogout }) {
+  const { isAdmin, isEmployee, isSeller, employeeModules } = useAuth();
+
+  const MODULE_ROUTES = {
+    orders: '/admin/orders', logistics: '/admin/logistics',
+    support: '/admin/support', inventory: '/admin/inventory',
+    coupons: '/admin/coupons', customers: '/admin',
+    sellers: '/admin/sellers', products: '/admin',
+    lots: '/admin', recipes: '/admin',
+  };
+  const staffRoute = employeeModules.reduce((found, mod) => {
+    if (found) return found;
+    return MODULE_ROUTES[String(mod || '').trim().toLowerCase()] || null;
+  }, null) || '/admin';
+
   const items = [
     {
       icon: 'notifications',
       label: 'Notification Preferences',
       onClick: null,
       danger: false,
+      href: null,
     },
     {
       icon: 'shield',
       label: 'Privacy & Security',
       onClick: onPasswordModal,
       danger: false,
+      href: null,
     },
+    ...(isAdmin
+      ? [{ icon: 'admin_panel_settings', label: 'Admin Dashboard', href: '/admin', danger: false, onClick: null, special: true }]
+      : []),
+    ...(!isAdmin && isEmployee
+      ? [{ icon: 'badge', label: 'Staff Dashboard', href: staffRoute, danger: false, onClick: null, special: true }]
+      : []),
+    ...(isSeller
+      ? [{ icon: 'storefront', label: 'Seller Panel', href: '/seller', danger: false, onClick: null, special: true }]
+      : []),
   ];
 
   return (
     <div className="px-5 mt-9 mb-2 animate-fade-up delay-400">
       <div className="bg-surface-container-lowest rounded-2xl overflow-hidden shadow-sm border border-outline-variant/10">
-        {items.map(({ icon, label, onClick }, i) => (
+      {items.map(({ icon, label, onClick, href, special }, i) => (
           <div key={label}>
-            <button
-              onClick={onClick}
-              className="w-full flex items-center gap-4 px-5 py-4 text-left press-effect hover:bg-surface-container/60 active:bg-surface-container transition-colors duration-150"
-            >
-              <div className="w-9 h-9 rounded-full bg-surface-container/60 flex items-center justify-center flex-shrink-0">
-                <span className="material-symbols-outlined text-primary/75"
-                  style={{ fontSize: '18px' }}>
-                  {icon}
-                </span>
-              </div>
-              <span className="flex-1 font-headline font-semibold text-[14px] leading-relaxed text-on-surface">{label}</span>
-              <span className="material-symbols-outlined text-on-surface-variant/50"
-                style={{ fontSize: '18px' }}>
-                chevron_right
-              </span>
-            </button>
+            {href ? (
+              <Link
+                to={href}
+                className={`w-full flex items-center gap-4 px-5 py-4 press-effect hover:bg-surface-container/60 active:bg-surface-container transition-colors duration-150 ${special ? 'text-secondary' : ''}`}
+              >
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${special ? 'bg-secondary/10' : 'bg-surface-container/60'}`}>
+                  <span className={`material-symbols-outlined ${special ? 'text-secondary' : 'text-primary/75'}`}
+                    style={{ fontSize: '18px' }}>
+                    {icon}
+                  </span>
+                </div>
+                <span className={`flex-1 font-headline font-semibold text-[14px] leading-relaxed ${special ? 'text-secondary' : 'text-on-surface'}`}>{label}</span>
+                <span className="material-symbols-outlined text-on-surface-variant/50" style={{ fontSize: '18px' }}>chevron_right</span>
+              </Link>
+            ) : (
+              <button
+                onClick={onClick}
+                className="w-full flex items-center gap-4 px-5 py-4 text-left press-effect hover:bg-surface-container/60 active:bg-surface-container transition-colors duration-150"
+              >
+                <div className="w-9 h-9 rounded-full bg-surface-container/60 flex items-center justify-center flex-shrink-0">
+                  <span className="material-symbols-outlined text-primary/75" style={{ fontSize: '18px' }}>{icon}</span>
+                </div>
+                <span className="flex-1 font-headline font-semibold text-[14px] leading-relaxed text-on-surface">{label}</span>
+                <span className="material-symbols-outlined text-on-surface-variant/50" style={{ fontSize: '18px' }}>chevron_right</span>
+              </button>
+            )}
             {i < items.length - 1 && <div className="h-px bg-outline-variant/15 mx-5" />}
           </div>
         ))}

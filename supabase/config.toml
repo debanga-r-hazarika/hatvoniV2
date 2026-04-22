@@ -368,6 +368,11 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Velocity orchestrator is invoked with the user session JWT; gateway verification rejects ES256 when
+# project JWT signing differs — disable gateway JWT verify and rely on orchestrator + RLS patterns.
+[functions.velocity-orchestrator]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

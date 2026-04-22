@@ -244,6 +244,12 @@ const hatvoniTheme = createTheme({
 
   /* ── Component overrides ───────────────────────────── */
   components: {
+    MuiIcon: {
+      defaultProps: {
+        baseClassName: 'material-symbols-outlined',
+      },
+    },
+
     MuiCssBaseline: {
       styleOverrides: {
         body: {

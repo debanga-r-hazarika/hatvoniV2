@@ -17,7 +17,7 @@ import { tokens, fonts } from '../theme/hatvoniTheme';
 
 /* ── Heritage panel background image ──────────────────── */
 const HERO_IMG =
-  'https://lh3.googleusercontent.com/aida-public/AB6AXuAAOc7vD-NBHW0ayNG0Be0gWUoAP3NoA22bip3HMtlocGhuB3uKA53VPtvjPMhsTotDRghUvB372i3K8BLwWX4oCP_lYfKg7AKNfhOQTHx8NqgPpalFZMf0OV926zeWCrczGoTyXODLZn-PcJYl_Nit8eWCuRy-H0Ibwgc8kaY9C6w1rJOFPy0cZGGFGmi_4blPfz86pB31W-DaaLH2dX1emM2TvWYUspBM8wReSNgxDl8oilKky6kpGmjiXhqd93tLak1laLO0OCs4';
+  'https://images.unsplash.com/photo-1605806616949-1e87b487cb2a?q=80&w=1470&auto=format&fit=crop';
 
 export default function Signup() {
   const theme = useTheme();
@@ -33,8 +33,19 @@ export default function Signup() {
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
   const [termsChecked, setTermsChecked] = useState(false);
-  const { signUp } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const { signUp, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
+
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setGoogleLoading(true);
+    const { error: googleError } = await signInWithGoogle();
+    if (googleError) {
+      setError(googleError.message);
+      setGoogleLoading(false);
+    }
+  };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -210,6 +221,27 @@ export default function Signup() {
               </Box>
             )}
 
+            {/* Back link */}
+            <Link to="/" style={{ textDecoration: 'none' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1,
+                  mb: { xs: 4, md: 5 },
+                  color: tokens.onSurfaceVariant,
+                  transition: 'color 0.2s',
+                  '&:hover': { color: tokens.primary },
+                  '&:hover .back-arrow': { transform: 'translateX(-4px)' },
+                }}
+              >
+                <Icon className="back-arrow" sx={{ fontSize: { xs: 18, md: 20 }, transition: 'transform 0.2s' }}>arrow_back</Icon>
+                <Typography sx={{ fontFamily: fonts.label, fontSize: { xs: '0.625rem', md: '0.75rem' }, fontWeight: 600, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                  Back to Main
+                </Typography>
+              </Box>
+            </Link>
+
             {/* Header */}
             <Box>
               <Typography sx={{ fontFamily: fonts.display, fontSize: { xs: '1.875rem', md: '2rem' }, color: tokens.primary, letterSpacing: '-0.01em' }}>
@@ -341,6 +373,45 @@ export default function Signup() {
               >
                 {loading ? <CircularProgress size={24} sx={{ color: 'white' }} /> : 'Create Account'}
               </Button>
+
+              {/* Divider */}
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, py: 1 }}>
+                <Box sx={{ flex: 1, height: '1px', bgcolor: alpha(tokens.outlineVariant, 0.3) }} />
+                <Typography sx={{ fontSize: { xs: '0.625rem', md: '0.6875rem' }, fontWeight: 500, color: tokens.outline, letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                  OR
+                </Typography>
+                <Box sx={{ flex: 1, height: '1px', bgcolor: alpha(tokens.outlineVariant, 0.3) }} />
+              </Box>
+
+              {/* Google */}
+              <Button
+                fullWidth
+                variant="outlined"
+                onClick={handleGoogleSignIn}
+                disabled={googleLoading || loading}
+                startIcon={
+                  googleLoading ? (
+                    <CircularProgress size={20} />
+                  ) : (
+                    <Box component="img" src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" sx={{ width: 20, height: 20 }} />
+                  )
+                }
+                sx={{
+                  py: { xs: 1.5, md: 1.75 },
+                  px: 4,
+                  borderColor: alpha(tokens.outlineVariant, 0.5),
+                  bgcolor: tokens.surfaceContainerLowest,
+                  color: tokens.onSurface,
+                  fontFamily: fonts.headline,
+                  fontWeight: 600,
+                  fontSize: { xs: '0.875rem', md: '1rem' },
+                  borderRadius: 3,
+                  '&:hover': { bgcolor: tokens.surfaceContainerLow, borderColor: tokens.outlineVariant },
+                }}
+              >
+                {googleLoading ? 'Connecting...' : 'Continue with Google'}
+              </Button>
+
             </Box>
 
             {/* Footer link */}

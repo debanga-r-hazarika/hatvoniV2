@@ -9,8 +9,13 @@ const RETRY_COOLDOWN_MS = 5000;
 const RAZORPAY_SCRIPT_URL = 'https://checkout.razorpay.com/v1/checkout.js';
 const RAZORPAY_CREATE_FUNCTION = 'create-razorpay-order-v2';
 const RAZORPAY_VERIFY_FUNCTION = 'verify-razorpay-payment-v2';
+const PHONEPE_CREATE_FUNCTION = 'create-phonepe-order';
+const PHONEPE_VERIFY_FUNCTION = 'verify-phonepe-payment';
 
 const isRazorpayMethod = (method) => String(method || '').toLowerCase().startsWith('razorpay');
+const isPhonePeMethod = (method) => String(method || '').toLowerCase() === 'phonepe';
+const isOnlineMethod = (method) => isRazorpayMethod(method) || isPhonePeMethod(method);
+const getGatewayLabel = (method) => (isPhonePeMethod(method) ? 'PhonePe' : 'Razorpay');
 
 export default function PaymentProcessing() {
   const { id } = useParams();
@@ -48,13 +53,37 @@ export default function PaymentProcessing() {
 
     const paymentStatus = String(data.payment_status || 'pending').toLowerCase();
     const paymentMethod = String(data.payment_method || '').toLowerCase();
+    let effectivePaymentStatus = paymentStatus;
 
-    if (!isRazorpayMethod(paymentMethod)) {
+    if (!isOnlineMethod(paymentMethod)) {
       navigate(`/order/${id}?placed=1`);
       return;
     }
 
-    if (paymentStatus === 'paid') {
+    if (isPhonePeMethod(paymentMethod) && ['pending', 'initiated'].includes(paymentStatus)) {
+      try {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (sessionError || !accessToken) {
+          throw new Error('Session expired while checking PhonePe status.');
+        }
+
+        supabase.functions.setAuth(accessToken);
+
+        const { data: verifyData, error: verifyError } = await supabase.functions.invoke(PHONEPE_VERIFY_FUNCTION, {
+          body: { order_id: id },
+        });
+
+        if (!verifyError && verifyData?.payment_status) {
+          effectivePaymentStatus = String(verifyData.payment_status).toLowerCase();
+          setOrder((prev) => prev ? { ...prev, payment_status: effectivePaymentStatus } : prev);
+        }
+      } catch (statusSyncError) {
+        console.warn('PhonePe status sync failed:', statusSyncError);
+      }
+    }
+
+    if (effectivePaymentStatus === 'paid') {
       setViewState('success');
       setStatusText('Payment cleared. Redirecting to your order details...');
       if (!redirectTimerRef.current) {
@@ -65,25 +94,21 @@ export default function PaymentProcessing() {
       return;
     }
 
-    if (paymentStatus === 'failed' || paymentStatus === 'refunded') {
+    if (effectivePaymentStatus === 'failed' || effectivePaymentStatus === 'refunded') {
       setViewState('failed');
       setStatusText('Payment was not completed.');
       return;
     }
 
     const waitedMs = Date.now() - startedAtRef.current;
-    // cancelled/failed are definitive — show failed immediately
-    // error means verify call failed but payment may have gone through — poll for up to 30s before giving up
-    const isDefinitiveFailure = attempt === 'cancelled' || attempt === 'failed';
-    const isErrorWithTimeout = attempt === 'error' && waitedMs >= 30000;
-    if (waitedMs >= MAX_WAIT_MS || isDefinitiveFailure || isErrorWithTimeout) {
+    if (waitedMs >= MAX_WAIT_MS || attempt === 'cancelled' || attempt === 'failed' || attempt === 'error') {
       setViewState('failed');
       setStatusText('We could not confirm your payment.');
       return;
     }
 
     setViewState('processing');
-    setStatusText(attempt === 'error' ? 'Verification had an issue — checking if payment went through...' : 'We are still checking Razorpay confirmation...');
+    setStatusText(`We are still checking ${getGatewayLabel(paymentMethod)} confirmation...`);
   }, [attempt, id, navigate]);
 
   useEffect(() => {
@@ -201,7 +226,28 @@ export default function PaymentProcessing() {
       setIsRetryingPayment(true);
       setError('');
       setViewState('processing');
-      setStatusText('Opening Razorpay checkout...');
+      setStatusText(`Opening ${getGatewayLabel(order.payment_method)} checkout...`);
+
+      if (isPhonePeMethod(order.payment_method)) {
+        const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+        const accessToken = sessionData?.session?.access_token;
+        if (sessionError || !accessToken) {
+          throw new Error('Your session has expired. Please log in again.');
+        }
+
+        supabase.functions.setAuth(accessToken);
+
+        const { data: phonePeOrder, error: phonePeOrderError } = await supabase.functions.invoke(PHONEPE_CREATE_FUNCTION, {
+          body: { order_id: order.id, payment_method: order.payment_method },
+        });
+
+        if (phonePeOrderError || !phonePeOrder?.redirect_url) {
+          throw new Error(phonePeOrderError?.message || phonePeOrder?.error || 'Unable to initialize PhonePe payment.');
+        }
+
+        window.location.assign(phonePeOrder.redirect_url);
+        return;
+      }
 
       await ensureRazorpayScript();
 
@@ -310,7 +356,7 @@ export default function PaymentProcessing() {
 
           {viewState === 'processing' && (
             <div className="mt-8 space-y-3">
-              <p className="text-xs md:text-sm text-on-surface-variant">Please keep this page open while we confirm with Razorpay.</p>
+              <p className="text-xs md:text-sm text-on-surface-variant">Please keep this page open while we confirm your payment with {getGatewayLabel(order?.payment_method)}.</p>
               <button
                 type="button"
                 onClick={handleRefresh}

@@ -103,7 +103,7 @@ export default function SellerOrderDetail() {
       if (sellerLineKeys.length > 0) {
         const { data: decisionsData, error: dErr } = await supabase
           .from('seller_order_item_decisions')
-          .select('order_item_id, product_key, decision, decision_reason, decided_at')
+          .select('order_item_id, product_key, decision, decision_reason, decided_at, override_by, override_reason, overridden_at')
           .eq('seller_id', user.id).in('order_item_id', sellerLineKeys);
         if (dErr) throw dErr;
         decisionMap = (decisionsData || []).reduce((acc, d) => {
@@ -114,7 +114,16 @@ export default function SellerOrderDetail() {
 
       const sellerItemsWithDecisions = sellerLines.map((item) => {
         const d = decisionMap[getDecisionKey(item)] || null;
-        return { ...item, order_id: orderData.id, seller_decision: d?.decision || 'pending', seller_decision_reason: d?.decision_reason || '', seller_decided_at: d?.decided_at || null };
+        return {
+          ...item,
+          order_id: orderData.id,
+          seller_decision: d?.decision || 'pending',
+          seller_decision_reason: d?.decision_reason || '',
+          seller_decided_at: d?.decided_at || null,
+          admin_override_by: d?.override_by || null,
+          admin_override_reason: d?.override_reason || null,
+          admin_overridden_at: d?.overridden_at || null,
+        };
       });
 
       let customerProfile = null;
@@ -148,6 +157,11 @@ export default function SellerOrderDetail() {
         schema: 'public',
         table: 'orders',
         filter: `id=eq.${id}`,
+      }, () => { fetchDetail(); })
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'seller_order_item_decisions',
       }, () => { fetchDetail(); })
       .subscribe();
 
@@ -353,7 +367,7 @@ export default function SellerOrderDetail() {
       <div className="space-y-3">
         {sellerItems.map((item) => {
           const itemKey = getDecisionKey(item);
-          const isPending = (item.seller_decision || 'pending') === 'pending';
+          const isPending = (item.seller_decision || 'pending') === 'pending' && !item.admin_override_by;
           const isRejecting = rejectingKey === itemKey;
 
           return (
@@ -394,11 +408,35 @@ export default function SellerOrderDetail() {
               </div>
 
               {/* Decided info */}
-              {item.seller_decided_at && (
+              {item.seller_decided_at && !item.admin_override_by && (
                 <p className="text-[10px] text-on-surface-variant mt-2">
                   {item.seller_decision === 'rejected' ? 'Rejected' : 'Approved'} on {new Date(item.seller_decided_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
                   {item.seller_decision === 'rejected' && item.seller_decision_reason && ` · ${item.seller_decision_reason}`}
                 </p>
+              )}
+
+              {/* Admin override / on-behalf indicator */}
+              {item.admin_override_by && item.seller_decision !== 'pending' && (
+                <div className={`mt-2 flex items-start gap-2 px-3 py-2 rounded-xl text-xs font-semibold border ${
+                  item.seller_decision === 'approved'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-red-50 border-red-200 text-red-800'
+                }`}>
+                  <span className="material-symbols-outlined text-[14px] mt-0.5 shrink-0">admin_panel_settings</span>
+                  <div>
+                    <p>
+                      {item.seller_decision === 'approved' ? 'Approved' : 'Rejected'} by admin
+                      {item.admin_overridden_at && (
+                        <span className="font-normal opacity-70 ml-1">
+                          · {new Date(item.admin_overridden_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </p>
+                    {item.admin_override_reason && (
+                      <p className="font-normal opacity-80 mt-0.5">Reason: {item.admin_override_reason}</p>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* Action area — only for pending, non-Insider items */}
@@ -477,7 +515,9 @@ export default function SellerOrderDetail() {
 
               {/* Locked state label */}
               {!isInsiderManagedSeller && !isPending && (
-                <p className="mt-2 text-[10px] text-on-surface-variant/60 uppercase tracking-wider font-semibold">Decision locked</p>
+                <p className="mt-2 text-[10px] text-on-surface-variant/60 uppercase tracking-wider font-semibold">
+                  {item.admin_override_by ? 'Decided by admin — locked' : 'Decision locked'}
+                </p>
               )}
             </div>
           );

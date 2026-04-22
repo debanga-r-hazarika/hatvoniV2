@@ -16,6 +16,7 @@ import OrdersTable from '../components/admin/OrdersTable';
 import AdminModal from '../components/admin/AdminModal';
 import ConfirmDialog from '../components/admin/ConfirmDialog';
 import AdminFilters from '../components/admin/AdminFilters';
+import ProductWarehouseModal from '../components/admin/ProductWarehouseModal';
 
 const TAB_META = {
   customers:    { icon: 'group',           label: 'Customers' },
@@ -42,6 +43,8 @@ export default function Admin() {
   const [catalogProducts, setCatalogProducts] = useState([]);
   const [sellerOptions, setSellerOptions] = useState([]);
   const [sellerProductCounts, setSellerProductCounts] = useState({});
+  const [warehouseCountByProduct, setWarehouseCountByProduct] = useState({});
+  const [warehouseModalProduct, setWarehouseModalProduct] = useState(null);
 
   // Advanced Filters State
   const [filters, setFilters] = useState({
@@ -52,7 +55,7 @@ export default function Admin() {
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
 
   useEffect(() => {
-    if (!loading && !isAdmin && !isEmployee) navigate('/');
+    if (!loading && !isAdmin && !isEmployee) navigate('/access-denied');
   }, [isAdmin, isEmployee, loading, navigate]);
 
   useEffect(() => {
@@ -154,14 +157,29 @@ export default function Admin() {
     } catch (error) { console.error('Error fetching seller options:', error); }
   }, []);
 
+  const fetchWarehouseCountsByProduct = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('product_warehouses')
+        .select('product_id');
+      if (error) throw error;
+      const counts = (data || []).reduce((acc, row) => {
+        acc[row.product_id] = (acc[row.product_id] || 0) + 1;
+        return acc;
+      }, {});
+      setWarehouseCountByProduct(counts);
+    } catch (error) { console.error('Error fetching warehouse counts:', error); }
+  }, []);
+
   useEffect(() => {
     if (isAdmin) {
       fetchData();
       fetchStats();
       if (activeTab === 'lots') fetchCatalogProducts();
       if (['products', 'sellers', 'customers', 'orders', 'layout'].includes(activeTab)) fetchSellerOptions();
+      if (activeTab === 'products') fetchWarehouseCountsByProduct();
     }
-  }, [activeTab, isAdmin, fetchCatalogProducts, fetchData, fetchSellerOptions, fetchStats]);
+  }, [activeTab, isAdmin, fetchCatalogProducts, fetchData, fetchSellerOptions, fetchStats, fetchWarehouseCountsByProduct]);
 
   useEffect(() => {
     if (!isAdmin || activeTab !== 'orders') return undefined;
@@ -344,7 +362,7 @@ export default function Admin() {
       inventory: { path: '/admin/inventory', icon: 'inventory_2',      label: 'Inventory' },
       coupons:   { path: '/admin/coupons',   icon: 'sell',             label: 'Coupons' },
       customers: { path: '/admin',           icon: 'group',            label: 'Customers' },
-      sellers:   { path: '/admin/sellers',   icon: 'storefront',       label: 'Sellers' },
+      sellers:   { path: '/admin/sellers',   icon: 'storefront',       label: 'Seller & Warehouse' },
       products:  { path: '/admin',           icon: 'category',         label: 'Products' },
       lots:      { path: '/admin',           icon: 'all_inclusive',    label: 'Lots' },
       recipes:   { path: '/admin',           icon: 'restaurant_menu',  label: 'Recipes' },
@@ -483,7 +501,7 @@ export default function Admin() {
               <div className="min-h-[300px]">
                 {activeTab === 'customers' && <CustomersTable data={filteredData} onToggleBan={handleToggleBan} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} onDelete={(item) => handleDelete(item, 'customer')} />}
                 {activeTab === 'sellers' && <SellersTable data={filteredData} sellerProductCounts={sellerProductCounts} onToggleBan={handleToggleBan} onToggleOwnSeller={handleToggleOwnSeller} />}
-                {activeTab === 'products' && <ProductsTable data={filteredData} sellerOptions={sellerOptions} onToggleStatus={handleToggleProductStatus} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} onDelete={(item) => handleDelete(item, 'product')} />}
+                {activeTab === 'products' && <ProductsTable data={filteredData} sellerOptions={sellerOptions} warehouseCountByProduct={warehouseCountByProduct} onToggleStatus={handleToggleProductStatus} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} onDelete={(item) => handleDelete(item, 'product')} onManageWarehouses={(product) => setWarehouseModalProduct(product)} />}
                 {activeTab === 'lots' && <LotsTable data={filteredData} catalogProducts={catalogProducts} onToggleStatus={handleToggleProductStatus} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} onDelete={(item) => handleDelete(item, 'lot')} />}
                 {activeTab === 'recipes' && <RecipesTable data={filteredData} onToggleStatus={handleToggleProductStatus} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} onDelete={(item) => handleDelete(item, 'recipe')} />}
                 {activeTab === 'recipe-page' && <RecipePageTable data={filteredData} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} />}
@@ -508,6 +526,16 @@ export default function Admin() {
 
       {confirmDialog && (
         <ConfirmDialog {...confirmDialog} onCancel={() => setConfirmDialog(null)} />
+      )}
+
+      {warehouseModalProduct && (
+        <ProductWarehouseModal
+          product={warehouseModalProduct}
+          onClose={() => {
+            setWarehouseModalProduct(null);
+            if (activeTab === 'products') fetchWarehouseCountsByProduct();
+          }}
+        />
       )}
     </div>
   );
