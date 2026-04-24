@@ -1416,6 +1416,8 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   const [lotTab, setLotTab] = useState('manual');
   const [lotTracking, setLotTracking] = useState(() => String(lot?.tracking_number || ''));
   const [savingLot, setSavingLot] = useState(false);
+  const [lotProductWarehouses, setLotProductWarehouses] = useState([]);
+  const [lotHasScopedProducts, setLotHasScopedProducts] = useState(false);
 
   // ── Lot items info popover ──
   const [showLotItems, setShowLotItems] = useState(false);
@@ -1484,10 +1486,119 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
     setLotTracking(String(lot?.tracking_number || ''));
   }, [lot?.id, lot?.tracking_number]);
 
+  const lotVelocityLocked = useMemo(
+    () => Boolean(
+      String(lot?.velocity_pending_shipment_id || '').trim() ||
+      String(lot?.velocity_shipment_id || '').trim() ||
+      String(lot?.tracking_number || '').trim() ||
+      String(lot?.velocity_awb || '').trim(),
+    ),
+    [lot?.velocity_pending_shipment_id, lot?.velocity_shipment_id, lot?.tracking_number, lot?.velocity_awb],
+  );
+
+  useEffect(() => {
+    if (lotVelocityLocked && lotTab !== 'velocity') {
+      setLotTab('velocity');
+    }
+  }, [lotVelocityLocked, lotTab]);
+
+  useEffect(() => {
+    let active = true;
+    const loadLotWarehouses = async () => {
+      try {
+        const { data: lotOrderItems, error: lotItemsErr } = await supabase
+          .from('order_items')
+          .select('id, product_id, lot_id, lot_snapshot')
+          .eq('order_shipment_id', lot?.id);
+        if (lotItemsErr) throw lotItemsErr;
+        if (!active) return;
+
+        const productIds = new Set();
+        const bundleKeys = new Set();
+        const lotIds = new Set();
+        for (const item of lotOrderItems || []) {
+          if (item?.product_id) productIds.add(item.product_id);
+          if (item?.lot_id) lotIds.add(item.lot_id);
+          if (Array.isArray(item?.lot_snapshot)) {
+            for (const s of item.lot_snapshot) {
+              if (isUuidLike(s?.product_id)) productIds.add(String(s.product_id).trim());
+              if (isUuidLike(s?.source_product_id)) productIds.add(String(s.source_product_id).trim());
+              if (s?.product_key) bundleKeys.add(s.product_key);
+            }
+          }
+        }
+
+        if (lotIds.size > 0) {
+          const { data: lotRows, error: lotRowsErr } = await supabase
+            .from('lots')
+            .select('id, source_product_id')
+            .in('id', [...lotIds]);
+          if (lotRowsErr) throw lotRowsErr;
+          for (const l of lotRows || []) {
+            if (l?.source_product_id) productIds.add(l.source_product_id);
+          }
+        }
+
+        if (bundleKeys.size > 0) {
+          const keyVariants = new Set();
+          for (const rawKey of bundleKeys) {
+            const k = String(rawKey || '').trim();
+            if (!k) continue;
+            keyVariants.add(k);
+            keyVariants.add(k.toLowerCase());
+            keyVariants.add(k.toUpperCase());
+          }
+          const { data: bundleProds, error: bundleErr } = await supabase
+            .from('products')
+            .select('id, key')
+            .in('key', [...keyVariants]);
+          if (bundleErr) throw bundleErr;
+          for (const p of bundleProds || []) productIds.add(p.id);
+        }
+
+        const hasScopedProducts = productIds.size > 0;
+        setLotHasScopedProducts(hasScopedProducts);
+        if (!hasScopedProducts) {
+          setLotProductWarehouses([]);
+          return;
+        }
+
+        const { data: pwData, error: pwErr } = await supabase
+          .from('product_warehouses')
+          .select('warehouse_id, warehouses(id, warehouse_name, velocity_warehouse_id, pincode)')
+          .in('product_id', [...productIds]);
+        if (pwErr) throw pwErr;
+        if (!active) return;
+
+        const seen = new Set();
+        const whs = [];
+        for (const row of pwData || []) {
+          const wh = row?.warehouses;
+          if (wh?.id && !seen.has(wh.id)) {
+            seen.add(wh.id);
+            whs.push(wh);
+          }
+        }
+        setLotProductWarehouses(whs);
+      } catch {
+        if (!active) return;
+        setLotHasScopedProducts(false);
+        setLotProductWarehouses([]);
+      }
+    };
+
+    if (lot?.id) loadLotWarehouses();
+    return () => { active = false; };
+  }, [lot?.id]);
+
   const filteredPickups = useMemo(() => {
     const rows = allPickupLocations || [];
+    if (lotHasScopedProducts) {
+      if (lotProductWarehouses.length === 0) return [];
+      return rows.filter((r) => lotProductWarehouses.some((wh) => pickupMatchesWarehouseRow(r, wh)));
+    }
     const wh = lot?.warehouse;
-    if (!wh?.id) return rows.filter((r) => r.velocity_warehouse_id);
+    if (!wh?.id) return [];
     const matched = rows.filter((r) => pickupMatchesWarehouseRow(r, wh));
     if (matched.length) return matched;
     const wv = String(wh.velocity_warehouse_id || '').trim();
@@ -1509,9 +1620,8 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
       if (byPickupName.length) return byPickupName;
     }
     return [];
-  }, [allPickupLocations, lot?.warehouse]);
+  }, [allPickupLocations, lot?.warehouse, lotHasScopedProducts, lotProductWarehouses]);
 
-  const hasAwb = !!(lot?.tracking_number || '').trim();
   const whLabel = lot?.warehouse?.warehouse_name || lot?.warehouse?.name || 'Warehouse';
   const whPin = lot?.warehouse?.pincode;
   const whVelocity = lot?.warehouse?.velocity_warehouse_id;
@@ -1618,10 +1728,12 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
           </div>
         </div>
         <div className="flex rounded-xl bg-surface-container-low p-1 gap-1 shrink-0">
-          {[
-            { key: 'manual', label: 'Manual', icon: 'edit' },
-            { key: 'velocity', label: 'Velocity', icon: 'electric_bolt' },
-          ].map((t) => (
+          {(lotVelocityLocked
+            ? [{ key: 'velocity', label: 'Velocity', icon: 'electric_bolt' }]
+            : [
+              { key: 'manual', label: 'Manual', icon: 'edit' },
+              { key: 'velocity', label: 'Velocity', icon: 'electric_bolt' },
+            ]).map((t) => (
             <button
               key={t.key}
               type="button"
@@ -1658,27 +1770,19 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
 
         {lotTab === 'velocity' && (
           <div className="space-y-2">
-            {hasAwb ? (
-              <p className="text-sm text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-xl px-3 py-2">
-                This lot already has an AWB: <span className="font-mono font-bold">{lot.tracking_number}</span>. Use customer order view or Velocity portal for label reprint if needed.
+            {!whVelocity && (
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">
+                Link this warehouse to a Velocity warehouse id so pickup locations can be filtered for this lot.
               </p>
-            ) : (
-              <>
-                {!whVelocity && (
-                  <p className="text-xs text-amber-900 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 mb-2">
-                    Link this warehouse to a Velocity warehouse id so pickup locations can be filtered for this lot.
-                  </p>
-                )}
-                <VelocityLotWorkflow
-                  orderId={orderId}
-                  lot={lot}
-                  pickupLocations={filteredPickups}
-                  onRefresh={onRefresh}
-                  onNotice={onNotice}
-                  onError={onError}
-                />
-              </>
             )}
+            <VelocityLotWorkflow
+              orderId={orderId}
+              lot={lot}
+              pickupLocations={filteredPickups}
+              onRefresh={onRefresh}
+              onNotice={onNotice}
+              onError={onError}
+            />
           </div>
         )}
       </div>
@@ -1725,6 +1829,10 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
   const [shipmentLots, setShipmentLots] = useState([]);
   const [activeLotId, setActiveLotId] = useState('');
+  const [shipmentLotsLoading, setShipmentLotsLoading] = useState(false);
+  const [singleShipmentLot, setSingleShipmentLot] = useState(null);
+  const [singleTimelineLoading, setSingleTimelineLoading] = useState(false);
+  const [singleTimelineRows, setSingleTimelineRows] = useState([]);
 
   // ── Lot builder state (multi-shipment manual assignment) ──
   const [lotBuilderOpen, setLotBuilderOpen] = useState(false);
@@ -1738,6 +1846,9 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   const [revertingLots, setRevertingLots] = useState(false);
 
   const [retryingRefund, setRetryingRefund] = useState(false);
+  // Warehouses assigned to the order's products (for filtering pickup locations in single-shipment mode)
+  const [productWarehouses, setProductWarehouses] = useState([]); // array of warehouse rows
+  const [hasScopedProducts, setHasScopedProducts] = useState(false);
   const isPartialOrder = order?.partial_fulfillment === true;
   const isRazorpay = ['razorpay', 'razorpay_upi', 'razorpay_cards'].includes(order?.payment_method);
   const isPaid = order?.payment_status === 'paid';
@@ -1777,8 +1888,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
   const hideGlobalVelocityForLots =
     order?.fulfillment_mode === 'multi_shipment' &&
-    shipmentLots.length > 0 &&
-    order?.status === 'processing';
+    (shipmentLotsLoading || shipmentLots.length > 0);
 
   // True when the order has multiple products or contains a lot (bundle) item —
   // only in those cases do we need to ask Single vs Multiple shipment routing.
@@ -1843,11 +1953,6 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     'rto_delivered',
     'lost',
   ]);
-  const showCancelPickup =
-    alreadyShippedViaVelocity &&
-    !!(order?.tracking_number || order?.velocity_awb) &&
-    order?.status !== 'cancelled' &&
-    !pickupCancelBlocked.has(shipmentLc);
   // Show retry button when refund is pending (was set by admin_finalize_order but edge fn wasn't deployed)
   const needsRefundRetry = isPartialOrder && isRazorpay && isPaid && order?.refund_status === 'pending';
 
@@ -1855,19 +1960,96 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     let active = true;
     const loadPickupLocations = async () => {
       try {
+        // 1. Fetch all warehouses (no seller pickup dependency)
         const { data, error } = await supabase
-          .from('seller_pickup_locations')
-          .select('id, warehouse_name, pincode, is_default, velocity_warehouse_id')
-          .order('is_default', { ascending: false })
+          .from('warehouses')
+          .select('id, warehouse_name, pincode, velocity_warehouse_id')
           .order('created_at', { ascending: true });
         if (error) throw error;
         if (!active) return;
         const rows = data || [];
         setPickupLocations(rows);
-        const firstSynced = rows.find((r) => r.velocity_warehouse_id)?.id || '';
+
+        // 2. Resolve product IDs from DB order items (including bundle snapshots)
+        const { data: itemRows, error: itemRowsErr } = await supabase
+          .from('order_items')
+          .select('id, product_id, lot_id, lot_snapshot')
+          .eq('order_id', orderId);
+        if (itemRowsErr) throw itemRowsErr;
+        const productIds = new Set();
+        const bundleKeys = new Set();
+        const lotIds = new Set();
+        for (const item of itemRows) {
+          if (item?.product_id) productIds.add(item.product_id);
+          if (item?.lot_id) lotIds.add(item.lot_id);
+          if (Array.isArray(item.lot_snapshot)) {
+            for (const s of item.lot_snapshot) {
+              if (isUuidLike(s?.product_id)) productIds.add(String(s.product_id).trim());
+              if (isUuidLike(s?.source_product_id)) productIds.add(String(s.source_product_id).trim());
+              if (s.product_key) bundleKeys.add(s.product_key);
+            }
+          }
+        }
+
+        if (lotIds.size > 0) {
+          const { data: lotRows, error: lotRowsErr } = await supabase
+            .from('lots')
+            .select('id, source_product_id')
+            .in('id', [...lotIds]);
+          if (lotRowsErr) throw lotRowsErr;
+          for (const l of lotRows || []) {
+            if (l?.source_product_id) productIds.add(l.source_product_id);
+          }
+        }
+
+        // Resolve bundle keys → product IDs
+        if (bundleKeys.size > 0) {
+          const keyVariants = new Set();
+          for (const rawKey of bundleKeys) {
+            const k = String(rawKey || '').trim();
+            if (!k) continue;
+            keyVariants.add(k);
+            keyVariants.add(k.toLowerCase());
+            keyVariants.add(k.toUpperCase());
+          }
+          const { data: bundleProds } = await supabase
+            .from('products').select('id, key').in('key', [...keyVariants]);
+          for (const p of bundleProds || []) productIds.add(p.id);
+        }
+
+        if (productIds.size === 0) {
+          if (active) setHasScopedProducts(false);
+          if (active) setProductWarehouses([]);
+          const firstSynced = rows.find((r) => r.velocity_warehouse_id)?.id || '';
+          if (active) setPickupLocationId(firstSynced);
+          return;
+        }
+        if (active) setHasScopedProducts(true);
+
+        // 3. Fetch warehouses assigned to those products
+        const { data: pwData } = await supabase
+          .from('product_warehouses')
+          .select('warehouse_id, warehouses(id, warehouse_name, velocity_warehouse_id, pincode)')
+          .in('product_id', [...productIds]);
+        if (!active) return;
+
+        const seen = new Set();
+        const whs = [];
+        for (const row of pwData || []) {
+          const wh = row.warehouses;
+          if (wh && !seen.has(wh.id)) { seen.add(wh.id); whs.push(wh); }
+        }
+        setProductWarehouses(whs);
+
+        // 4. Auto-select first matching pickup location
+        const matchedPickups = whs.length > 0
+          ? rows.filter((r) => whs.some((wh) => pickupMatchesWarehouseRow(r, wh)))
+          : rows.filter((r) => r.velocity_warehouse_id);
+        const firstSynced = matchedPickups.find((r) => r.velocity_warehouse_id)?.id || matchedPickups[0]?.id || '';
         setPickupLocationId(firstSynced);
       } catch {
         if (!active) return;
+        setHasScopedProducts(false);
         setPickupLocations([]);
         setPickupLocationId('');
       }
@@ -1875,46 +2057,125 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
     if (
       shippingMode === 'velocity' ||
-      (order?.fulfillment_mode === 'multi_shipment' && order?.status === 'processing')
+      order?.fulfillment_mode === 'multi_shipment'
     ) {
       loadPickupLocations();
     }
     return () => { active = false; };
-  }, [shippingMode, order?.fulfillment_mode, order?.status]);
+  }, [shippingMode, order?.fulfillment_mode, order?.status, orderId]);
 
   useEffect(() => {
     let cancelled = false;
     if (order?.fulfillment_mode !== 'multi_shipment') {
       setShipmentLots([]);
       setActiveLotId('');
+      setShipmentLotsLoading(false);
       return undefined;
     }
+    setShipmentLotsLoading(true);
     (async () => {
-      const { data } = await supabase
-        .from('order_shipments')
-        .select(`
-          id,
-          lot_index,
-          label,
-          warehouse_id,
-          velocity_external_code,
-          velocity_pending_shipment_id,
-          tracking_number,
-          warehouse:warehouses(id, warehouse_name, velocity_warehouse_id, pincode)
-        `)
-        .eq('order_id', orderId)
-        .order('lot_index', { ascending: true });
-      if (cancelled) return;
-      const rows = data || [];
-      setShipmentLots(rows);
-      setActiveLotId((prev) =>
-        prev && rows.some((r) => r.id === prev)
-          ? prev
-          : (rows[0]?.id || ''),
-      );
+      try {
+        const { data } = await supabase
+          .from('order_shipments')
+          .select(`
+            id,
+            lot_index,
+            label,
+            warehouse_id,
+            velocity_external_code,
+            velocity_pending_shipment_id,
+            velocity_shipment_id,
+            velocity_fulfillment,
+            tracking_number,
+            velocity_awb,
+            velocity_tracking_url,
+            carrier_shipment_status,
+            velocity_carrier_name,
+            velocity_label_url,
+            velocity_tracking_snapshot,
+            warehouse:warehouses(id, warehouse_name, velocity_warehouse_id, pincode)
+          `)
+          .eq('order_id', orderId)
+          .order('lot_index', { ascending: true });
+        if (cancelled) return;
+        const rows = data || [];
+        setShipmentLots(rows);
+        setActiveLotId((prev) =>
+          prev && rows.some((r) => r.id === prev)
+            ? prev
+            : (rows[0]?.id || ''),
+        );
+      } finally {
+        if (!cancelled) setShipmentLotsLoading(false);
+      }
     })();
     return () => { cancelled = true; };
   }, [order?.fulfillment_mode, orderId]);
+
+  useEffect(() => {
+    let active = true;
+    const loadSingleShipmentTracking = async () => {
+      if (order?.fulfillment_mode === 'multi_shipment') {
+        if (!active) return;
+        setSingleShipmentLot(null);
+        setSingleTimelineRows([]);
+        setSingleTimelineLoading(false);
+        return;
+      }
+      setSingleTimelineLoading(true);
+      try {
+        const { data: lotRows } = await supabase
+          .from('order_shipments')
+          .select(`
+            id,
+            lot_index,
+            label,
+            tracking_number,
+            velocity_awb,
+            velocity_tracking_url,
+            velocity_carrier_name,
+            carrier_shipment_status,
+            velocity_label_url
+          `)
+          .eq('order_id', orderId)
+          .order('lot_index', { ascending: true })
+          .limit(1);
+        if (!active) return;
+        const lot = Array.isArray(lotRows) && lotRows.length > 0 ? lotRows[0] : null;
+        setSingleShipmentLot(lot);
+        if (!lot?.id) {
+          setSingleTimelineRows([]);
+          return;
+        }
+        const { data: events } = await supabase
+          .from('order_shipment_tracking_events')
+          .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
+          .eq('order_shipment_id', lot.id)
+          .order('event_time', { ascending: false, nullsFirst: false })
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (!active) return;
+        setSingleTimelineRows(Array.isArray(events) ? events : []);
+      } catch {
+        if (!active) return;
+        setSingleShipmentLot(null);
+        setSingleTimelineRows([]);
+      } finally {
+        if (active) setSingleTimelineLoading(false);
+      }
+    };
+    if (
+      order?.fulfillment_mode !== 'multi_shipment' &&
+      (shippingMode === 'velocity' || alreadyShippedViaVelocity)
+    ) {
+      loadSingleShipmentTracking();
+    } else {
+      setSingleShipmentLot(null);
+      setSingleTimelineRows([]);
+      setSingleTimelineLoading(false);
+    }
+    return () => { active = false; };
+  }, [order?.fulfillment_mode, shippingMode, alreadyShippedViaVelocity, orderId]);
 
   const velocityResumeKeyRef = useRef('');
   const velocityAutoResumeKeyRef = useRef('');
@@ -2034,10 +2295,42 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     return list;
   }, [velServiceability?.carriers]);
 
-  /** All pickup locations — for legacy_single mode just show all synced rows. */
+  const serviceabilitySummary = useMemo(() => {
+    const svc = velServiceability && typeof velServiceability === 'object' ? velServiceability : null;
+    if (!svc) return null;
+    const details = svc.rates_shipment_details && typeof svc.rates_shipment_details === 'object'
+      ? svc.rates_shipment_details
+      : null;
+    const chargeValues = (svc.carriers || [])
+      .map((c) => Number(c?.rate_quote?.charges?.total_forward_charges))
+      .filter((v) => Number.isFinite(v));
+    const minCharge = chargeValues.length ? Math.min(...chargeValues) : null;
+    const maxCharge = chargeValues.length ? Math.max(...chargeValues) : null;
+    return {
+      zone: String(svc.zone || details?.zone || '—'),
+      paymentMode: String(svc.payment_mode || details?.payment_method || '—').toUpperCase(),
+      customerPincode: String(svc.customer_pincode || details?.destination_pincode || '—'),
+      pickupLocation: String(svc.pickup_location || '—'),
+      pickupPincode: String(svc.pickup_pincode || details?.origin_pincode || '—'),
+      pickupSource: String(svc.pickup_source || '—').replace(/_/g, ' '),
+      deadWeight: details?.dead_weight ?? null,
+      volumetricWeight: details?.volumetric_weight ?? null,
+      applicableWeight: details?.applicable_weight ?? null,
+      minCharge,
+      maxCharge,
+      ratesNote: typeof svc.rates_note === 'string' ? svc.rates_note : '',
+    };
+  }, [velServiceability]);
+
+  /** Pickup locations filtered to warehouses assigned to this order's products (single-shipment mode). */
   const velocityPickupOptions = useMemo(() => {
-    return (pickupLocations || []);
-  }, [pickupLocations]);
+    const all = pickupLocations || [];
+    if (hasScopedProducts && productWarehouses.length === 0) return [];
+    if (productWarehouses.length === 0) return all.filter((r) => r.velocity_warehouse_id);
+    return all.filter((r) =>
+      productWarehouses.some((wh) => pickupMatchesWarehouseRow(r, wh)),
+    );
+  }, [pickupLocations, productWarehouses, hasScopedProducts]);
 
   useEffect(() => {
     if (!pickupLocationId) return;
@@ -2393,7 +2686,11 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     setSyncingVelTrack(true);
     onError('');
     try {
-      await callVelocityFn({ action: 'track_order', payload: {} });
+      const trackPayload =
+        order?.fulfillment_mode === 'multi_shipment'
+          ? (activeLotId ? { order_shipment_id: activeLotId } : {})
+          : (singleShipmentLot?.id ? { order_shipment_id: singleShipmentLot.id } : {});
+      await callVelocityFn({ action: 'track_order', payload: trackPayload });
       onNotice('Tracking data pulled from Velocity and saved on the order.');
       await onRefresh();
     } catch (e) {
@@ -2405,7 +2702,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
   /** Opens printable label (PDF/URL) in a new tab — fetches from Velocity if not stored yet. */
   const printShippingLabel = async () => {
-    const existing = order.velocity_label_url;
+    const existing = singleShipmentLot?.velocity_label_url || order.velocity_label_url;
     if (existing && /^https?:\/\//i.test(String(existing))) {
       window.open(String(existing).trim(), '_blank', 'noopener,noreferrer');
       return;
@@ -2413,7 +2710,11 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     setPrintingLabel(true);
     onError('');
     try {
-      const raw = await callVelocityFn({ action: 'track_order', payload: {} });
+      const trackPayload =
+        order?.fulfillment_mode === 'multi_shipment'
+          ? (activeLotId ? { order_shipment_id: activeLotId } : {})
+          : (singleShipmentLot?.id ? { order_shipment_id: singleShipmentLot.id } : {});
+      const raw = await callVelocityFn({ action: 'track_order', payload: trackPayload });
       let url = findLabelUrlInApiResponse(raw);
       await onRefresh();
       if (!url) {
@@ -2440,20 +2741,37 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     }
   };
 
-  /** Cancels the forward shipment on Velocity (POST /cancel-order with `awbs[]` per API docs) and resets order for re-booking. */
+  /** Cancels only the targeted shipment on Velocity (lot/single), never the full customer order. */
   const cancelVelocityPickup = async () => {
+    const isMultiShipment = order?.fulfillment_mode === 'multi_shipment';
+    const targetShipmentId = isMultiShipment ? activeLotId : singleShipmentLot?.id;
+    if (!targetShipmentId) {
+      onError(
+        isMultiShipment
+          ? 'Select a shipping lot first. Cancel courier works per lot and will not cancel the full order.'
+          : 'Shipment record not found for this order. Refresh once and try again.',
+      );
+      return;
+    }
+    const cancelPayload = { order_shipment_id: targetShipmentId };
     const ok = window.confirm(
-      'Cancel this shipment and pickup on Velocity? The AWB will be voided on the carrier, and this order will return to Processing so you can create a new shipment.',
+      isMultiShipment
+        ? 'Cancel courier only for the selected shipping lot? This will void the AWB for that lot only.'
+        : 'Cancel courier for this shipment only? This will void AWB/pickup for this shipment and will not cancel the customer order.',
     );
     if (!ok) return;
     setCancellingPickup(true);
     onError('');
     try {
-      await callVelocityFn({ action: 'cancel_order', payload: {} });
-      onNotice('Pickup / shipment cancelled on Velocity. Order set back to processing.');
+      await callVelocityFn({ action: 'cancel_order', payload: cancelPayload });
+      onNotice(
+        isMultiShipment
+          ? 'Courier cancelled for the selected shipping lot.'
+          : 'Courier cancelled for this shipment only. Customer order stays active.',
+      );
       setEditTracking('');
       setEditProvider('');
-      setEditStatus('processing');
+      if (!isMultiShipment) setEditStatus('processing');
       await onRefresh();
     } catch (e) {
       onError(toUserError(e, 'Velocity could not cancel this shipment. It may already be in transit — check the portal.'));
@@ -2756,7 +3074,10 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           const velInvolved = !!(order.velocity_shipment_id || order.velocity_pending_shipment_id ||
             order.tracking_number || order.velocity_awb);
           if (velInvolved) {
-            await callVelocityFn({ action: 'cancel_order', payload: {} });
+            const cancelPayload = order?.fulfillment_mode === 'multi_shipment' && activeLotId
+              ? { order_shipment_id: activeLotId }
+              : {};
+            await callVelocityFn({ action: 'cancel_order', payload: cancelPayload });
             patch.tracking_number = null;
             patch.shipment_provider = null;
           }
@@ -2785,6 +3106,47 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
   const velocityDonePayload = velStep === 'done' && velResult ? velocityInnerPayload(velResult) : null;
   const velocityDoneCharges = velocityDonePayload?.charges?.frwd_charges;
+  const formatShipmentStatusLabel = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '—';
+    return raw
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+  const singleVelocityAwb = String(
+    singleShipmentLot?.tracking_number ||
+    singleShipmentLot?.velocity_awb ||
+    order?.tracking_number ||
+    order?.velocity_awb ||
+    velocityDonePayload?.awb_code ||
+    '',
+  ).trim();
+  const singleVelocityCarrier = String(
+    singleShipmentLot?.velocity_carrier_name ||
+    order?.velocity_carrier_name ||
+    velocityDonePayload?.courier_name ||
+    '',
+  ).trim();
+  const singleVelocityStatusRaw = String(
+    singleShipmentLot?.carrier_shipment_status ||
+    order?.shipment_status ||
+    '',
+  ).trim();
+  const singleVelocityTrackingUrl = String(
+    singleShipmentLot?.velocity_tracking_url ||
+    order?.velocity_tracking_url ||
+    '',
+  ).trim();
+  const showSingleVelocityControlCenter =
+    order?.fulfillment_mode !== 'multi_shipment' &&
+    !!singleVelocityAwb;
+  const singleCancelBlocked = pickupCancelBlocked.has(singleVelocityStatusRaw.toLowerCase());
+  const canCancelSingleCourier =
+    showSingleVelocityControlCenter &&
+    order?.status !== 'cancelled' &&
+    !singleCancelBlocked;
 
   return (
     <section className="bg-surface-container-lowest rounded-3xl p-4 lg:p-5 border border-outline-variant/30 shadow-[0_10px_40px_rgba(0,123,71,0.03)] relative overflow-hidden">
@@ -2857,66 +3219,99 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
         </div>
       )}
 
-      {/* Existing Velocity shipment banner */}
-      {alreadyShippedViaVelocity && (
-        <div className="mb-5 rounded-2xl border border-blue-200 bg-blue-50 p-4 flex flex-col sm:flex-row sm:items-start gap-3">
-          <span className="material-symbols-outlined text-blue-600 text-2xl shrink-0">verified</span>
-          <div className="flex-1 min-w-0 space-y-2">
-            <p className="text-sm font-bold text-blue-800">Velocity shipment active</p>
-            <p className="text-xs text-blue-700">
-              AWB: <span className="font-mono font-bold">{order.tracking_number || order.velocity_awb}</span>
-              {order.velocity_carrier_name && <span className="ml-2">· {order.velocity_carrier_name}</span>}
-            </p>
-            {order.shipment_status && (
-              <p className="text-xs text-blue-800/90">
-                Carrier status: <span className="font-bold capitalize">{String(order.shipment_status).replace(/_/g, ' ')}</span>
-                {order.shipment_status === 'delivered' && <span className="ml-1 text-emerald-700">(order auto-marks delivered when applicable)</span>}
-              </p>
-            )}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                size="small"
-                variant="contained"
-                color="primary"
-                onClick={printShippingLabel}
-                disabled={
-                  printingLabel ||
-                  syncingVelTrack ||
-                  cancellingPickup ||
-                  !(order.tracking_number || order.velocity_awb)
-                }
-              >
-                {printingLabel ? 'Fetching label...' : 'Print shipping label'}
-              </Button>
-              {order.velocity_tracking_url && (
-                <a href={order.velocity_tracking_url} target="_blank" rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-bold text-blue-800 hover:bg-blue-100">
-                  <span className="material-symbols-outlined text-sm">map</span>
-                  Public tracking
-                </a>
-              )}
-              <Button
-                size="small"
-                variant="outlined"
-                color="primary"
-                onClick={syncVelocityTrackingFromApi}
-                disabled={syncingVelTrack || printingLabel || cancellingPickup}
-              >
-                {syncingVelTrack ? 'Syncing...' : 'Sync from Velocity'}
-              </Button>
-              {showCancelPickup && (
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="error"
-                  onClick={cancelVelocityPickup}
-                  disabled={cancellingPickup || printingLabel || syncingVelTrack}
-                >
-                  {cancellingPickup ? 'Cancelling...' : 'Cancel pickup & shipment'}
-                </Button>
-              )}
+      {showSingleVelocityControlCenter && (
+        <div className="mb-5 rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm space-y-4">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">Shipment Control Center</p>
+              <p className="text-lg font-bold text-slate-900">Shipment tracking and actions</p>
             </div>
-            {!order.velocity_label_url && (order.tracking_number || order.velocity_awb) && null}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Shipment Status</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">{formatShipmentStatusLabel(singleVelocityStatusRaw)}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Courier Details</p>
+              <p className="text-sm font-semibold text-slate-900 mt-1">{singleVelocityCarrier || '—'}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking ID (AWB)</p>
+              <p className="text-sm font-mono text-slate-900 mt-1 break-all">{singleVelocityAwb}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking Events Count</p>
+              <p className="text-sm font-bold text-slate-900 mt-1">{singleTimelineRows.length}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              onClick={syncVelocityTrackingFromApi}
+              disabled={syncingVelTrack || printingLabel || cancellingPickup}
+              variant="contained"
+              color="primary"
+              size="small"
+            >
+              {syncingVelTrack ? 'Refreshing...' : 'Refresh shipment status'}
+            </Button>
+            <Button
+              type="button"
+              onClick={cancelVelocityPickup}
+              disabled={cancellingPickup || printingLabel || syncingVelTrack || !canCancelSingleCourier}
+              variant="outlined"
+              color="error"
+              size="small"
+            >
+              {cancellingPickup ? 'Cancelling...' : 'Cancel courier'}
+            </Button>
+            <Button
+              type="button"
+              variant="outlined"
+              color="inherit"
+              size="small"
+              onClick={printShippingLabel}
+              disabled={printingLabel || syncingVelTrack || cancellingPickup || !singleVelocityAwb}
+            >
+              {printingLabel ? 'Fetching label...' : 'Print label'}
+            </Button>
+            {singleVelocityTrackingUrl && (
+              <a href={singleVelocityTrackingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-800">
+                Tracking page link
+              </a>
+            )}
+          </div>
+          {!canCancelSingleCourier && (
+            <p className="text-[11px] text-slate-500">
+              Cancel courier is disabled because pickup has already started for this shipment.
+            </p>
+          )}
+          <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
+            <p className="text-xs font-bold text-slate-900 mb-2">Tracking timeline/history for this specific shipment</p>
+            {singleTimelineLoading ? (
+              <p className="text-xs text-slate-500">Loading timeline...</p>
+            ) : singleTimelineRows.length === 0 ? (
+              <p className="text-xs text-slate-500">No tracking history yet for this shipment.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                {singleTimelineRows.map((ev) => {
+                  const ts = ev?.event_time || ev?.created_at;
+                  return (
+                    <div key={ev.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+                      <p className="text-xs font-semibold text-slate-900">{formatShipmentStatusLabel(ev.activity || 'Status updated')}</p>
+                      <p className="text-[11px] text-slate-600">
+                        {ev.location || 'Unknown location'}
+                        {ev.carrier_remark ? ` · ${ev.carrier_remark}` : ''}
+                      </p>
+                      <p className="text-[10px] text-slate-500 mt-0.5">
+                        {ts ? new Date(ts).toLocaleString('en-IN') : '—'} · {formatShipmentStatusLabel(ev.source || 'system')}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -3173,7 +3568,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
         </div>
       )}
 
-      {hideGlobalVelocityForLots && !alreadyShippedViaVelocity && !lotBuilderOpen && (
+      {hideGlobalVelocityForLots && !lotBuilderOpen && (
         <div className="space-y-4 mb-6">
           <div className="flex items-center justify-between">
             <div>
@@ -3190,6 +3585,19 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
               {revertingLots ? 'Switching…' : 'Change mode'}
             </button>
           </div>
+          {shipmentLotsLoading && shipmentLots.length === 0 && (
+            <div className="rounded-2xl border border-outline-variant/25 bg-white p-4 flex items-center gap-2.5">
+              <span className="material-symbols-outlined animate-spin text-secondary text-[18px]">progress_activity</span>
+              <p className="text-xs text-gray-900-variant">Loading shipment lots...</p>
+            </div>
+          )}
+          {!shipmentLotsLoading && shipmentLots.length === 0 && (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              <p className="text-xs text-amber-900">
+                No shipment lots found yet. Use "Change mode" to rebuild routing if needed.
+              </p>
+            </div>
+          )}
           {shipmentLots.map((lot) => (
             <ShipmentLotFulfillmentCard
               key={lot.id}
@@ -3410,7 +3818,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
                     className={`w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary ${pendingVelocitySid ? 'opacity-75 cursor-not-allowed' : ''}`}
                   >
                     {velocityPickupOptions.length === 0 && (
-                      <option value="">No pickup locations — add one under seller settings</option>
+                      <option value="">No warehouses mapped for these products</option>
                     )}
                     {velocityPickupOptions.map((loc) => (
                       <option key={loc.id} value={loc.id} disabled={!loc.velocity_warehouse_id}>
@@ -3481,54 +3889,52 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           {(velStep === 'ready' || velStep === 'creating_order') && velServiceability && !pendingVelocitySid && (
             <>
               {null}
-              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 flex items-start gap-3 shadow-sm">
-                <span className="material-symbols-outlined text-emerald-600 text-xl shrink-0 mt-0.5">check_circle</span>
-                <div className="flex-1 min-w-0 space-y-2">
+              <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
                   <div>
-                    <p className="text-sm font-bold text-emerald-800">Route is serviceable</p>
-                    <p className="text-xs text-emerald-700 mt-0.5">
-                      From PIN <span className="font-mono font-bold">{velServiceability.pickup_pincode || '—'}</span>
-                      {' '}→ customer <span className="font-mono font-bold">{velServiceability.customer_pincode}</span>
-                      {' '}· Zone <span className="font-bold uppercase">{velServiceability.zone || '—'}</span>
-                      {' '}· Payment <span className="font-bold uppercase">{velServiceability.payment_mode || '—'}</span>
-                      {' '}· {velServiceability.carriers?.length || 0} couriers listed
+                    <p className="text-sm font-bold text-emerald-900">Route is serviceable</p>
+                    <p className="text-xs text-emerald-800 mt-1">
+                      {serviceabilitySummary?.pickupPincode || '—'} → {serviceabilitySummary?.customerPincode || '—'} · Zone {serviceabilitySummary?.zone || '—'} · {velServiceability.carriers?.length || 0} couriers
                     </p>
                   </div>
-                  {velServiceability.rates_shipment_details && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {(() => {
-                        const r = velServiceability.rates_shipment_details;
-                        const pills = [
-                          r.zone != null && r.zone !== '' && { k: 'Zone', v: String(r.zone) },
-                          r.applicable_weight != null && {
-                            k: 'Billable',
-                            v: `${Number(r.applicable_weight)} g`,
-                          },
-                          r.dead_weight != null && {
-                            k: 'Dead wt',
-                            v: `${Number(r.dead_weight)} g`,
-                          },
-                          r.volumetric_weight != null && {
-                            k: 'Vol. wt',
-                            v: `${Number(r.volumetric_weight)} g`,
-                          },
-                          r.payment_method && { k: 'Pay', v: String(r.payment_method).toUpperCase() },
-                          r.journey_type && { k: 'Journey', v: String(r.journey_type) },
-                        ].filter(Boolean);
-                        return pills.map((p, i) => (
-                          <span
-                            key={`${p.k}-${i}`}
-                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-200/80 bg-white/70 px-2 py-1 text-[10px] text-emerald-900"
-                          >
-                            <span className="font-semibold text-emerald-800/90">{p.k}</span>
-                            <span className="font-mono font-bold">{p.v}</span>
-                          </span>
-                        ));
-                      })()}
+                  {serviceabilitySummary?.minCharge != null && serviceabilitySummary?.maxCharge != null && (
+                    <div className="shrink-0 rounded-xl border border-emerald-200 bg-white px-3 py-2 text-right">
+                      <p className="text-[10px] uppercase tracking-wider text-emerald-700 font-bold">Shipping fee range</p>
+                      <p className="text-sm font-bold text-emerald-900">
+                        {fmtInr(serviceabilitySummary.minCharge)} - {fmtInr(serviceabilitySummary.maxCharge)}
+                      </p>
                     </div>
                   )}
-                  {null}
                 </div>
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Pickup</p>
+                    <p className="text-xs font-semibold text-gray-900 truncate">{serviceabilitySummary?.pickupLocation || '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Pickup source</p>
+                    <p className="text-xs font-semibold text-gray-900 capitalize">{serviceabilitySummary?.pickupSource || '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Payment mode</p>
+                    <p className="text-xs font-semibold text-gray-900">{serviceabilitySummary?.paymentMode || '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Dead wt (g)</p>
+                    <p className="text-xs font-semibold text-gray-900">{serviceabilitySummary?.deadWeight ?? '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Volumetric (g)</p>
+                    <p className="text-xs font-semibold text-gray-900">{serviceabilitySummary?.volumetricWeight ?? '—'}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-100 bg-white px-3 py-2">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-500 font-bold">Applicable wt (g)</p>
+                    <p className="text-xs font-semibold text-gray-900">{serviceabilitySummary?.applicableWeight ?? '—'}</p>
+                  </div>
+                </div>
+                {serviceabilitySummary?.ratesNote && (
+                  <p className="text-[11px] text-emerald-800 mt-3">{serviceabilitySummary.ratesNote}</p>
+                )}
               </div>
 
               {sortedVelocityCarriers.length > 0 && (

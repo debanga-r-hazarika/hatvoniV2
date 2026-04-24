@@ -606,6 +606,14 @@ interface TrackingPick {
   snapshot?: Record<string, unknown>;
 }
 
+interface TrackingActivityEvent {
+  activity: string | null;
+  location: string | null;
+  carrierRemark: string | null;
+  eventTime: string | null;
+  rawPayload: Record<string, unknown>;
+}
+
 function pickOrderTrackingFromResponse(data: unknown): TrackingPick {
   const out: TrackingPick = {};
   if (!data || typeof data !== 'object') return out;
@@ -667,6 +675,77 @@ function pickOrderTrackingFromResponse(data: unknown): TrackingPick {
 
   const labelUrl = extractVelocityLabelUrl(payload);
   return { shipmentStatus, awb, labelUrl: labelUrl || undefined };
+}
+
+function pickTrackingActivitiesFromResponse(data: unknown): TrackingActivityEvent[] {
+  if (!data || typeof data !== 'object') return [];
+  const root = data as Record<string, unknown>;
+  const payload = root.payload && typeof root.payload === 'object'
+    ? root.payload as Record<string, unknown>
+    : root;
+  const result = payload.result && typeof payload.result === 'object'
+    ? payload.result as Record<string, unknown>
+    : null;
+  if (!result || Object.keys(result).length === 0) return [];
+
+  const firstAwb = Object.keys(result)[0];
+  const node = result[firstAwb];
+  if (!node || typeof node !== 'object') return [];
+  const nodeRec = node as Record<string, unknown>;
+  const td = nodeRec.tracking_data && typeof nodeRec.tracking_data === 'object'
+    ? nodeRec.tracking_data as Record<string, unknown>
+    : null;
+  if (!td) return [];
+
+  const acts = Array.isArray(td.shipment_track_activities) ? td.shipment_track_activities : [];
+  if (acts.length > 0) {
+    return acts
+      .filter((ev) => ev && typeof ev === 'object')
+      .slice(0, 80)
+      .map((ev) => {
+        const r = ev as Record<string, unknown>;
+        return {
+          activity: typeof r.activity === 'string'
+            ? r.activity
+            : (typeof r.description === 'string' ? r.description : null),
+          location: typeof r.location === 'string' ? r.location : null,
+          carrierRemark: typeof r.remark === 'string'
+            ? r.remark
+            : (typeof r.remarks === 'string' ? r.remarks : null),
+          eventTime: typeof r.date === 'string'
+            ? r.date
+            : (typeof r.event_date_time === 'string' ? r.event_date_time : null),
+          rawPayload: r,
+        };
+      });
+  }
+
+  const tracks = Array.isArray(td.shipment_track) ? td.shipment_track : [];
+  if (tracks.length > 0) {
+    return tracks
+      .filter((ev) => ev && typeof ev === 'object')
+      .slice(0, 80)
+      .map((ev) => {
+        const r = ev as Record<string, unknown>;
+        return {
+          activity: typeof r.current_status === 'string'
+            ? r.current_status
+            : (typeof r.status === 'string' ? r.status : null),
+          location: typeof r.destination === 'string'
+            ? r.destination
+            : (typeof r.location === 'string' ? r.location : null),
+          carrierRemark: typeof r.courier_agent_details === 'string'
+            ? r.courier_agent_details
+            : (typeof r.remarks === 'string' ? r.remarks : null),
+          eventTime: typeof r.delivered_date === 'string'
+            ? r.delivered_date
+            : (typeof r.pickup_date === 'string' ? r.pickup_date : null),
+          rawPayload: r,
+        };
+      });
+  }
+
+  return [];
 }
 
 /**
@@ -798,6 +877,75 @@ async function recomputeFulfillmentAggregate(
   await adminClient.rpc('recompute_order_fulfillment_aggregate', { p_order_id: orderId });
 }
 
+async function reserveVelocityWebhookEventId(
+  adminClient: ReturnType<typeof createAdminClient>,
+  eventId: string,
+  eventType: string,
+  externalId: string,
+  payload: Record<string, unknown>,
+): Promise<boolean> {
+  const t = eventId.trim();
+  if (!t) return true;
+  const { data, error } = await adminClient.rpc('reserve_velocity_webhook_event', {
+    p_event_id: t,
+    p_event_type: eventType || null,
+    p_external_id: externalId || null,
+    p_payload: payload as Json,
+  });
+  if (error) {
+    console.error('reserve_velocity_webhook_event rpc error', error);
+    return false;
+  }
+  return data === true;
+}
+
+async function ensureSingleShipmentLot(
+  adminClient: ReturnType<typeof createAdminClient>,
+  orderId: string,
+  externalId: string,
+): Promise<string | null> {
+  const { data: existing } = await adminClient
+    .from('order_shipments')
+    .select('id, velocity_external_code')
+    .eq('order_id', orderId)
+    .eq('lot_index', 1)
+    .maybeSingle();
+
+  if (existing?.id) {
+    if (!existing.velocity_external_code || String(existing.velocity_external_code).trim() !== externalId) {
+      await adminClient
+        .from('order_shipments')
+        .update({ velocity_external_code: externalId, updated_at: nowIso() })
+        .eq('id', existing.id);
+    }
+    return existing.id;
+  }
+
+  const { data: inserted, error: insertErr } = await adminClient
+    .from('order_shipments')
+    .insert({
+      order_id: orderId,
+      lot_index: 1,
+      label: 'Shipment 1',
+      velocity_external_code: externalId,
+    })
+    .select('id')
+    .maybeSingle();
+
+  if (insertErr) {
+    console.error('ensureSingleShipmentLot insert failed', insertErr);
+    const { data: fallback } = await adminClient
+      .from('order_shipments')
+      .select('id')
+      .eq('order_id', orderId)
+      .eq('lot_index', 1)
+      .maybeSingle();
+    return fallback?.id ?? null;
+  }
+
+  return inserted?.id ?? null;
+}
+
 function buildShipmentLotPatchFromWebhook(
   data: Record<string, unknown>,
   velocityStatus: string,
@@ -839,7 +987,12 @@ async function appendInboundWebhookShipmentEvent(
   shipmentId: string,
   data: Record<string, unknown>,
   velocityStatus: string,
+  event: string,
 ): Promise<void> {
+  if (event !== 'tracking_addition') {
+    return;
+  }
+
   const nt = data.new_tracking && typeof data.new_tracking === 'object'
     ? data.new_tracking as Record<string, unknown>
     : null;
@@ -865,6 +1018,21 @@ async function appendInboundWebhookShipmentEvent(
       };
     });
     await adminClient.from('order_shipment_tracking_events').insert(rows);
+    return;
+  }
+
+  if (nt) {
+    await adminClient.from('order_shipment_tracking_events').insert({
+      order_shipment_id: shipmentId,
+      source: 'webhook',
+      raw_payload: nt as Json,
+      activity: typeof nt.remarks === 'string' && nt.remarks.trim()
+        ? nt.remarks.trim()
+        : velocityStatus || null,
+      location: typeof nt.location === 'string' ? nt.location : null,
+      carrier_remark: typeof nt.remarks === 'string' ? nt.remarks : null,
+      event_time: typeof nt.event_date_time === 'string' ? nt.event_date_time : nowIso(),
+    });
     return;
   }
 
@@ -903,6 +1071,7 @@ async function handleShipfastInboundWebhook(
   }
 
   const event = typeof body.event === 'string' ? body.event : '';
+  const eventId = typeof body.event_id === 'string' ? body.event_id.trim() : '';
   const data = body.data && typeof body.data === 'object' ? body.data as Record<string, unknown> : null;
   if (!data) {
     return new Response(JSON.stringify({ error: 'Missing data object' }), {
@@ -914,6 +1083,7 @@ async function handleShipfastInboundWebhook(
   const externalId = typeof data.order_external_id === 'string' ? data.order_external_id.trim() : '';
   const velocityStatus = typeof data.status === 'string' ? data.status.trim() : '';
   const shipmentType = typeof data.shipment_type === 'string' ? data.shipment_type.toLowerCase() : 'forward';
+  const allowedEvents = new Set(['status_change', 'tracking_addition']);
 
   if (!externalId) {
     await logVelocityCall(adminClient, {
@@ -945,6 +1115,31 @@ async function handleShipfastInboundWebhook(
     });
   }
 
+  if (!allowedEvents.has(event)) {
+    await logVelocityCall(adminClient, {
+      action: 'webhook_update',
+      requestPayload: body,
+      responsePayload: { applied: false, reason: 'event_not_supported', event },
+      statusCode: 200,
+      success: true,
+      orderId: null,
+    });
+    return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'unsupported_event' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (eventId) {
+    const reserved = await reserveVelocityWebhookEventId(adminClient, eventId, event, externalId, body);
+    if (!reserved) {
+      return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'duplicate_event_id' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   const routing = await resolveVelocityWebhookRouting(adminClient, externalId);
   if (!routing) {
     await logVelocityCall(adminClient, {
@@ -967,7 +1162,7 @@ async function handleShipfastInboundWebhook(
     const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', routing.shipmentId);
     if (lotErr) console.error('webhook shipment lot update', lotErr);
 
-    await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, velocityStatus);
+    await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, velocityStatus, event);
     await recomputeFulfillmentAggregate(adminClient, routing.orderId);
 
     await logVelocityCall(adminClient, {
@@ -1015,6 +1210,14 @@ async function handleShipfastInboundWebhook(
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
+  }
+
+  const singleLotId = await ensureSingleShipmentLot(adminClient, routing.orderId, externalId);
+  if (singleLotId) {
+    const lotPatch = buildShipmentLotPatchFromWebhook(data, velocityStatus, event);
+    const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', singleLotId);
+    if (lotErr) console.error('webhook single-lot update', lotErr);
+    await appendInboundWebhookShipmentEvent(adminClient, singleLotId, data, velocityStatus, event);
   }
 
   const patch: Record<string, unknown> = {
@@ -1330,6 +1533,29 @@ async function fetchPickupLocationById(
   return data as Record<string, unknown> | null;
 }
 
+async function fetchWarehouseById(
+  adminClient: ReturnType<typeof createAdminClient>,
+  warehouseId: string,
+): Promise<Record<string, unknown> | null> {
+  const { data } = await adminClient
+    .from('warehouses')
+    .select('id, warehouse_name, pincode, street_address, city, state, contact_person, contact_number, email, velocity_warehouse_id')
+    .eq('id', warehouseId)
+    .maybeSingle();
+  return data as Record<string, unknown> | null;
+}
+
+async function fetchVelocityPickupSourceById(
+  adminClient: ReturnType<typeof createAdminClient>,
+  id: string,
+): Promise<Record<string, unknown> | null> {
+  const pickup = await fetchPickupLocationById(adminClient, id);
+  if (pickup) return { ...pickup, _source: 'seller_pickup' };
+  const wh = await fetchWarehouseById(adminClient, id);
+  if (wh) return { ...wh, _source: 'warehouse' };
+  return null;
+}
+
 function readPositiveDimension(v: unknown): number | null {
   const n = Number(v);
   if (!Number.isFinite(n) || n <= 0) return null;
@@ -1393,6 +1619,21 @@ function vendorDetailsFromPickupRow(row: Record<string, unknown>, pickupLocation
   };
 }
 
+function vendorDetailsFromWarehouseRow(row: Record<string, unknown>, pickupLocationName: string): Json {
+  return {
+    email: String(row.email || ''),
+    phone: String(row.contact_number || ''),
+    name: String(row.contact_person || ''),
+    address: String(row.street_address || ''),
+    address_2: '',
+    city: String(row.city || ''),
+    state: String(row.state || ''),
+    country: 'India',
+    pin_code: String(row.pincode || '').replace(/\s/g, ''),
+    pickup_location: pickupLocationName,
+  };
+}
+
 function baseVelocityOrderCode(orderId: string): string {
   return `HAT-${orderId.replace(/-/g, '').slice(0, 10).toUpperCase()}`;
 }
@@ -1437,7 +1678,7 @@ async function handleCheckServiceability(
     let pickupLocationLabel: string;
 
     if (pickupLocationId) {
-      const row = await fetchPickupLocationById(adminClient, pickupLocationId);
+      const row = await fetchVelocityPickupSourceById(adminClient, pickupLocationId);
       if (!row) throw new Error('Pickup location was not found.');
       pickupPincode = String(row.pincode || '').replace(/\s/g, '');
       pickupLocationLabel = String(row.warehouse_name || 'Warehouse');
@@ -1616,7 +1857,7 @@ async function handleCreateOrder(
   let resolvedSellerId: string | null = pickup.sellerId;
 
   if (requestedPickupLocationId) {
-    const selectedPickup = await fetchPickupLocationById(adminClient, requestedPickupLocationId);
+    const selectedPickup = await fetchVelocityPickupSourceById(adminClient, requestedPickupLocationId);
     if (!selectedPickup) {
       throw new Error('Selected pickup location was not found.');
     }
@@ -1800,7 +2041,7 @@ async function handleCreateForwardOrder(
     }
   }
 
-  const pickupRow = await fetchPickupLocationById(adminClient, pickupLocationId);
+  const pickupRow = await fetchVelocityPickupSourceById(adminClient, pickupLocationId);
   if (!pickupRow) throw new Error('Pickup location was not found.');
   const warehouseId = typeof pickupRow.velocity_warehouse_id === 'string' ? pickupRow.velocity_warehouse_id.trim() : '';
   if (!warehouseId) {
@@ -1865,7 +2106,9 @@ async function handleCreateForwardOrder(
     weight,
     pickup_location: pickupLocationName,
     warehouse_id: warehouseId,
-    vendor_details: vendorDetailsFromPickupRow(pickupRow, pickupLocationName),
+    vendor_details: String(pickupRow._source || '') === 'warehouse'
+      ? vendorDetailsFromWarehouseRow(pickupRow, pickupLocationName)
+      : vendorDetailsFromPickupRow(pickupRow, pickupLocationName),
   };
 
   if (channelId) requestPayload.channel_id = channelId;
@@ -1911,6 +2154,7 @@ async function handleCreateForwardOrder(
     if (orderShipmentId && shipmentLot) {
       await adminClient.from('order_shipments').update({
         velocity_pending_shipment_id: sid,
+        velocity_fulfillment: fulfillmentMeta,
         updated_at: nowIso(),
       }).eq('id', orderShipmentId).then(() => {}, () => {});
     } else {
@@ -1976,6 +2220,8 @@ async function handleAssignCourier(
     const apiResult = await callVelocityApi('assign_courier', endpoint, token, requestPayload);
     const dataObj = (apiResult.data || {}) as Record<string, unknown>;
     const outPayload = (dataObj.payload || dataObj) as Record<string, unknown>;
+    const assignedStatusRaw = String(outPayload.shipment_status || outPayload.current_status || '').trim().toLowerCase();
+    const assignedStatus = assignedStatusRaw || 'ready_for_pickup';
 
     if (apiResult.ok) {
       await adminClient.from('order_shipments').update({
@@ -1985,7 +2231,8 @@ async function handleAssignCourier(
         velocity_pending_shipment_id: null,
         velocity_carrier_name: String(outPayload.courier_name || ''),
         velocity_label_url: extractVelocityLabelUrl(outPayload),
-        carrier_shipment_status: 'in_transit',
+        // Keep lot cancellable until pickup actually starts.
+        carrier_shipment_status: assignedStatus,
         updated_at: nowIso(),
       }).eq('id', shipmentLotId).then(() => {}, () => {});
       await recomputeFulfillmentAggregate(adminClient, internalOrderId);
@@ -2072,6 +2319,9 @@ async function handleTrackOrder(
   payload: Json,
 ) {
   const orderId = typeof payload.order_id === 'string' ? payload.order_id.trim() : null;
+  const orderShipmentId = typeof (payload as Record<string, unknown>).order_shipment_id === 'string'
+    ? String((payload as Record<string, unknown>).order_shipment_id).trim()
+    : '';
   const p = payload as Record<string, unknown>;
   const awbDirect = typeof p.awb === 'string' ? p.awb.trim() : '';
   const trackNum = typeof p.tracking_number === 'string' ? p.tracking_number.trim() : '';
@@ -2083,6 +2333,22 @@ async function handleTrackOrder(
     velocityRequest = { awbs: p.awbs as unknown[] };
   } else if (awbDirect || trackNum) {
     velocityRequest = { awbs: [awbDirect || trackNum] };
+  } else if (orderShipmentId) {
+    const { data: lotRow } = await adminClient
+      .from('order_shipments')
+      .select('order_id, tracking_number, velocity_awb, carrier_shipment_status')
+      .eq('id', orderShipmentId)
+      .maybeSingle();
+    const awb = String(lotRow?.tracking_number || lotRow?.velocity_awb || '').trim();
+    if (!awb) {
+      return {
+        ok: false,
+        status: 400,
+        data: { error: 'No AWB on this shipment lot yet. Generate AWB first, then refresh tracking.' },
+        endpoint,
+      };
+    }
+    velocityRequest = { awbs: [awb] };
   } else if (orderId) {
     const { data: row } = await adminClient
       .from('orders')
@@ -2147,6 +2413,44 @@ async function handleTrackOrder(
 
   if (apiResult.ok) {
     const picked = pickOrderTrackingFromResponse(apiResult.data);
+    const activityEvents = pickTrackingActivitiesFromResponse(apiResult.data);
+
+    if (orderShipmentId) {
+      const { data: lotMeta } = await adminClient
+        .from('order_shipments')
+        .select('id, order_id')
+        .eq('id', orderShipmentId)
+        .maybeSingle();
+      if (lotMeta?.id) {
+        const lotPatch: Record<string, unknown> = { updated_at: nowIso() };
+        if (picked.shipmentStatus) lotPatch.carrier_shipment_status = picked.shipmentStatus;
+        if (picked.awb) {
+          lotPatch.velocity_awb = picked.awb;
+          lotPatch.tracking_number = picked.awb;
+        }
+        if (picked.trackUrl) lotPatch.velocity_tracking_url = picked.trackUrl;
+        if (picked.snapshot) lotPatch.velocity_tracking_snapshot = picked.snapshot;
+        if (picked.labelUrl) lotPatch.velocity_label_url = picked.labelUrl;
+        await adminClient.from('order_shipments').update(lotPatch).eq('id', orderShipmentId).then(() => {}, () => {});
+
+        if (activityEvents.length > 0) {
+          const rows = activityEvents.map((ev) => ({
+            order_shipment_id: orderShipmentId,
+            source: 'track_api',
+            raw_payload: ev.rawPayload as Json,
+            activity: ev.activity,
+            location: ev.location,
+            carrier_remark: ev.carrierRemark,
+            event_time: ev.eventTime || nowIso(),
+          }));
+          await adminClient.from('order_shipment_tracking_events').insert(rows).then(() => {}, () => {});
+        }
+
+        if (lotMeta.order_id) {
+          await recomputeFulfillmentAggregate(adminClient, lotMeta.order_id);
+        }
+      }
+    }
 
     let targetOrderId = orderId;
     if (!targetOrderId && picked.awb) {
@@ -2280,14 +2584,103 @@ async function handleCancelOrder(
 ) {
   const internalOrderId = String(payload.order_id || '').trim();
   if (!internalOrderId) throw new Error('cancel_order requires payload.order_id');
+  const orderShipmentId = typeof (payload as Record<string, unknown>).order_shipment_id === 'string'
+    ? String((payload as Record<string, unknown>).order_shipment_id).trim()
+    : '';
+
+  if (orderShipmentId) {
+    const { data: lotRow, error: lotErr } = await adminClient
+      .from('order_shipments')
+      .select('id, order_id, tracking_number, velocity_awb, velocity_pending_shipment_id, carrier_shipment_status')
+      .eq('id', orderShipmentId)
+      .eq('order_id', internalOrderId)
+      .maybeSingle();
+    if (lotErr || !lotRow) throw new Error('Shipment lot not found for this order.');
+
+    const lotStatus = String(lotRow.carrier_shipment_status || '').toLowerCase();
+    const pickedUpOrBeyond = new Set([
+      'picked_up',
+      'picked',
+      'picked up',
+      'manifested',
+      'in_transit',
+      'out_for_delivery',
+      'delivered',
+      'ndr_raised',
+      'need_attention',
+      'reattempt_delivery',
+      'rto_initiated',
+      'rto_in_transit',
+      'rto_delivered',
+      'lost',
+      'cancelled',
+    ]);
+    if (pickedUpOrBeyond.has(lotStatus)) {
+      throw new Error('Courier cancellation is allowed only before pickup for this shipment lot.');
+    }
+
+    const awb = String(lotRow.tracking_number || lotRow.velocity_awb || '').trim();
+    const pending = String(payload.shipment_id || lotRow.velocity_pending_shipment_id || '').trim();
+    let requestPayload: Json;
+    if (awb) {
+      requestPayload = { awbs: [awb] };
+    } else if (pending) {
+      requestPayload = buildCancelOrderPayloadForPendingShipment(pending, null);
+    } else {
+      throw new Error('No AWB or pending Velocity shipment id on this lot.');
+    }
+
+    const apiResult = await callVelocityApi('cancel_order', endpoint, token, requestPayload);
+    if (apiResult.ok) {
+      await adminClient.from('order_shipments').update({
+        tracking_number: null,
+        velocity_awb: null,
+        velocity_shipment_id: null,
+        velocity_pending_shipment_id: null,
+        velocity_carrier_name: null,
+        velocity_label_url: null,
+        velocity_tracking_url: null,
+        velocity_tracking_snapshot: null,
+        // Cancel only this lot pickup and keep the lot/order open for re-booking.
+        carrier_shipment_status: 'pending',
+        updated_at: nowIso(),
+      }).eq('id', orderShipmentId).then(() => {}, () => {});
+
+      await adminClient.from('order_shipment_tracking_events').insert({
+        order_shipment_id: orderShipmentId,
+        source: 'cancel_api',
+        activity: 'CANCELLED',
+        carrier_remark: 'Cancelled from admin panel before pickup',
+        raw_payload: apiResult.data as Json,
+        event_time: nowIso(),
+      }).then(() => {}, () => {});
+
+      await recomputeFulfillmentAggregate(adminClient, internalOrderId);
+    }
+
+    await logVelocityCall(adminClient, {
+      action: 'cancel_order',
+      requestPayload: { ...payload, resolved: requestPayload },
+      responsePayload: apiResult.data,
+      statusCode: apiResult.status,
+      success: apiResult.ok,
+      errorMessage: apiResult.ok ? undefined : 'Cancel order failed',
+      orderId: internalOrderId,
+    });
+
+    return apiResult;
+  }
 
   const { data: row, error: rowErr } = await adminClient
     .from('orders')
-    .select('id, status, tracking_number, velocity_awb, velocity_pending_shipment_id, velocity_shipment_id, velocity_fulfillment')
+    .select('id, status, fulfillment_mode, tracking_number, velocity_awb, velocity_pending_shipment_id, velocity_shipment_id, velocity_fulfillment')
     .eq('id', internalOrderId)
     .maybeSingle();
 
   if (rowErr || !row) throw new Error('Order not found');
+  if (String(row.fulfillment_mode || '').toLowerCase() === 'multi_shipment') {
+    throw new Error('For multi-shipment orders, cancel courier using payload.order_shipment_id for a specific lot.');
+  }
 
   const orderStatus = String(row.status || '').toLowerCase();
   if (orderStatus === 'delivered') {
@@ -2475,6 +2868,8 @@ async function handleWebhookUpdate(
   }
 
   const top = payload as Record<string, unknown>;
+  const eventType = typeof top.event === 'string' ? top.event.trim() : '';
+  const eventId = typeof top.event_id === 'string' ? top.event_id.trim() : '';
   const data = (top.data && typeof top.data === 'object') ? top.data as Record<string, unknown> : top;
 
   const externalId =
@@ -2490,6 +2885,24 @@ async function handleWebhookUpdate(
     (typeof data.awb_code === 'string' ? data.awb_code.trim() : '') ||
     (typeof data.awb === 'string' ? data.awb.trim() : '');
 
+  const allowedEvents = new Set(['', 'status_change', 'tracking_addition']);
+  if (!allowedEvents.has(eventType)) {
+    return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'unsupported_event' }), {
+      status: 200,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (eventId) {
+    const reserved = await reserveVelocityWebhookEventId(adminClient, eventId, eventType, externalId, top);
+    if (!reserved) {
+      return new Response(JSON.stringify({ ok: true, ignored: true, reason: 'duplicate_event_id' }), {
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+  }
+
   let applied = false;
   let resolvedOrderId: string | null = null;
 
@@ -2497,7 +2910,7 @@ async function handleWebhookUpdate(
     const routing = await resolveVelocityWebhookRouting(adminClient, externalId);
 
     if (routing?.kind === 'shipment') {
-      const lotPatch = buildShipmentLotPatchFromWebhook(data, shipmentStatus, '');
+      const lotPatch = buildShipmentLotPatchFromWebhook(data, shipmentStatus, eventType);
       if (awb) {
         lotPatch.velocity_awb = awb;
         lotPatch.tracking_number = awb;
@@ -2508,7 +2921,7 @@ async function handleWebhookUpdate(
       if (labelUrl) lotPatch.velocity_label_url = labelUrl;
 
       const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', routing.shipmentId);
-      await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, shipmentStatus);
+      await appendInboundWebhookShipmentEvent(adminClient, routing.shipmentId, data, shipmentStatus, eventType);
       await recomputeFulfillmentAggregate(adminClient, routing.orderId);
       applied = !lotErr;
       resolvedOrderId = routing.orderId;
@@ -2523,6 +2936,19 @@ async function handleWebhookUpdate(
         applied = false;
         resolvedOrderId = routing.orderId;
       } else {
+        const singleLotId = await ensureSingleShipmentLot(adminClient, routing.orderId, externalId);
+        if (singleLotId) {
+          const lotPatch = buildShipmentLotPatchFromWebhook(data, shipmentStatus, eventType);
+          if (awb) {
+            lotPatch.velocity_awb = awb;
+            lotPatch.tracking_number = awb;
+          }
+          const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', singleLotId);
+          if (!lotErr) {
+            await appendInboundWebhookShipmentEvent(adminClient, singleLotId, data, shipmentStatus, eventType);
+          }
+        }
+
         const patch: Record<string, unknown> = {
           updated_at: nowIso(),
         };
@@ -2832,6 +3258,74 @@ Deno.serve(async (req: Request) => {
       };
     }
 
+    const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const isWebhookLog = (actionName: unknown) =>
+      typeof actionName === 'string' && actionName.trim().toLowerCase() === 'webhook_update';
+    const logReason = (row: Record<string, unknown>) => {
+      const rp = row.response_payload && typeof row.response_payload === 'object'
+        ? row.response_payload as Record<string, unknown>
+        : {};
+      return typeof rp.reason === 'string' ? rp.reason : '';
+    };
+    const logApplied = (row: Record<string, unknown>) => {
+      const rp = row.response_payload && typeof row.response_payload === 'object'
+        ? row.response_payload as Record<string, unknown>
+        : {};
+      return rp.applied === true;
+    };
+
+    const { data: webhookLogsRaw } = await adminClient
+      .from('velocity_api_logs')
+      .select('id, action, response_payload, request_payload, created_at')
+      .eq('action', 'webhook_update')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    const webhookLogs = Array.isArray(webhookLogsRaw) ? webhookLogsRaw as Record<string, unknown>[] : [];
+    const webhookOnly = webhookLogs.filter(isWebhookLog);
+    const duplicateCount = webhookOnly.filter((r) => logReason(r) === 'duplicate_event_id').length;
+    const unknownExternalCount = webhookOnly.filter((r) => logReason(r) === 'unknown_external_reference').length;
+    const skippedReasons = new Set([
+      'no_order_external_id',
+      'return_shipment_skipped',
+      'event_not_supported',
+      'multi_shipment_order_level',
+      'duplicate_event_id',
+    ]);
+    const skippedCount = webhookOnly.filter((r) => !logApplied(r) || skippedReasons.has(logReason(r))).length;
+
+    const recentSkipped = webhookOnly
+      .filter((r) => !logApplied(r) || skippedReasons.has(logReason(r)))
+      .slice(0, 15)
+      .map((r) => {
+        const rp = r.response_payload && typeof r.response_payload === 'object'
+          ? r.response_payload as Record<string, unknown>
+          : {};
+        const req = r.request_payload && typeof r.request_payload === 'object'
+          ? r.request_payload as Record<string, unknown>
+          : {};
+        const data = req.data && typeof req.data === 'object'
+          ? req.data as Record<string, unknown>
+          : {};
+        return {
+          created_at: r.created_at,
+          reason: typeof rp.reason === 'string' ? rp.reason : '',
+          event: typeof req.event === 'string' ? req.event : '',
+          event_id: typeof req.event_id === 'string' ? req.event_id : '',
+          order_external_id: typeof data.order_external_id === 'string' ? data.order_external_id : '',
+        };
+      });
+
+    const { data: recentDedupeRaw } = await adminClient
+      .from('velocity_webhook_event_dedupe')
+      .select('event_id, event_type, external_id, created_at')
+      .gte('created_at', sinceIso)
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const recentDedupe = Array.isArray(recentDedupeRaw) ? recentDedupeRaw : [];
+
     return new Response(JSON.stringify({
       ok: true,
       action: 'webhook_health',
@@ -2841,6 +3335,15 @@ Deno.serve(async (req: Request) => {
         velocity_webhook_secret_configured: Boolean(getEnvOptional('VELOCITY_WEBHOOK_SECRET')),
         velocity_api_credentials_configured,
         velocity_probe,
+        webhook_monitoring: {
+          window: '24h',
+          total_webhook_logs: webhookOnly.length,
+          duplicate_event_id_count: duplicateCount,
+          unknown_external_reference_count: unknownExternalCount,
+          skipped_webhook_count: skippedCount,
+          recent_skipped: recentSkipped,
+          recent_dedupe_events: recentDedupe,
+        },
       },
       actor_id: auth.userId,
     }), {

@@ -107,6 +107,10 @@ export default function AdminLogistics() {
   const [reportsData, setReportsData] = useState(null);
   const [shipmentsData, setShipmentsData] = useState(null);
   const [returnsData, setReturnsData] = useState(null);
+  const [webhookHealthData, setWebhookHealthData] = useState(null);
+  const [webhookHealthLoading, setWebhookHealthLoading] = useState(false);
+  const [velocityHealthOpen, setVelocityHealthOpen] = useState(false);
+  const [velocityHealthCheckedAt, setVelocityHealthCheckedAt] = useState(null);
   const [filters, setFilters] = useState(initialFilters);
 
   useEffect(() => {
@@ -246,11 +250,31 @@ export default function AdminLogistics() {
     }
   };
 
+  const loadWebhookHealth = async () => {
+    setWebhookHealthLoading(true);
+    setError('');
+    try {
+      const data = await callOrchestrator('webhook_health', {});
+      setWebhookHealthData(data);
+    } catch (err) {
+      setError(err.message || 'Failed to load webhook health.');
+    } finally {
+      setWebhookHealthLoading(false);
+    }
+  };
+
+  const openVelocityHealthModal = async () => {
+    await loadWebhookHealth();
+    setVelocityHealthCheckedAt(new Date().toISOString());
+    setVelocityHealthOpen(true);
+  };
+
   useEffect(() => {
     if (!isAdmin && !hasModule('logistics')) return;
     loadReports();
     loadShipments();
     loadReturns();
+    loadWebhookHealth();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasModule, isAdmin]);
 
@@ -309,8 +333,212 @@ export default function AdminLogistics() {
             >
               Export Returns CSV
             </button>
+            <button
+              onClick={loadWebhookHealth}
+              disabled={webhookHealthLoading}
+              className="px-4 py-2 rounded-xl border border-red-300 bg-red-50 text-red-800 text-sm font-semibold disabled:opacity-50"
+            >
+              {webhookHealthLoading ? 'Refreshing Webhook Monitor...' : 'Refresh Webhook Monitor'}
+            </button>
+            <button
+              onClick={openVelocityHealthModal}
+              disabled={webhookHealthLoading}
+              className="px-4 py-2 rounded-xl border border-sky-300 bg-sky-50 text-sky-800 text-sm font-semibold disabled:opacity-50"
+            >
+              {webhookHealthLoading ? 'Checking Velocity API...' : 'Check Velocity API Status'}
+            </button>
           </div>
         </section>
+
+        <section className="rounded-xl border border-red-200 bg-white p-4 lg:p-6 shadow-sm">
+          <h2 className="font-brand text-xl text-gray-900 mb-2">Webhook Monitoring (Admin Only)</h2>
+          <p className="text-xs text-gray-500 mb-4">Tracks duplicate webhook event IDs, unknown external lot IDs, and skipped events from `velocity_webhook_event_dedupe` + `velocity_api_logs`.</p>
+          {(() => {
+            const monitor = webhookHealthData?.webhook_monitoring || null;
+            if (!monitor) return <p className="text-xs text-gray-500">No webhook monitoring data available yet.</p>;
+            const skippedRows = Array.isArray(monitor.recent_skipped) ? monitor.recent_skipped : [];
+            const dedupeRows = Array.isArray(monitor.recent_dedupe_events) ? monitor.recent_dedupe_events : [];
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Window</p>
+                    <p className="text-sm font-bold text-gray-900 mt-1">{String(monitor.window || '24h')}</p>
+                  </div>
+                  <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Webhook Logs</p>
+                    <p className="text-xl font-bold text-gray-900 mt-1">{Number(monitor.total_webhook_logs || 0)}</p>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-amber-700">Duplicate Event ID</p>
+                    <p className="text-xl font-bold text-amber-900 mt-1">{Number(monitor.duplicate_event_id_count || 0)}</p>
+                  </div>
+                  <div className="rounded-lg border border-red-200 bg-red-50 p-3">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-red-700">Unknown / Skipped</p>
+                    <p className="text-xl font-bold text-red-900 mt-1">
+                      {Number(monitor.unknown_external_reference_count || 0)} / {Number(monitor.skipped_webhook_count || 0)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-lg border border-gray-100 p-3">
+                    <p className="text-sm font-semibold text-gray-900 mb-2">Recent Skipped / Unknown</p>
+                    {skippedRows.length === 0 ? (
+                      <p className="text-xs text-gray-500">No skipped webhook entries in current window.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="text-left py-2 pr-3">Time</th>
+                              <th className="text-left py-2 pr-3">Reason</th>
+                              <th className="text-left py-2 pr-3">Event</th>
+                              <th className="text-left py-2 pr-3">External Lot</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {skippedRows.map((row, idx) => (
+                              <tr key={idx} className="border-b border-gray-100">
+                                <td className="py-2 pr-3">{row?.created_at ? new Date(row.created_at).toLocaleString('en-IN') : '—'}</td>
+                                <td className="py-2 pr-3">{String(row?.reason || '—')}</td>
+                                <td className="py-2 pr-3">{String(row?.event || '—')}</td>
+                                <td className="py-2 pr-3 font-mono">{String(row?.order_external_id || '—')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-lg border border-gray-100 p-3">
+                    <p className="text-sm font-semibold text-gray-900 mb-2">Recent Dedupe Ledger</p>
+                    {dedupeRows.length === 0 ? (
+                      <p className="text-xs text-gray-500">No webhook dedupe events in current window.</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-xs">
+                          <thead>
+                            <tr className="border-b border-gray-200">
+                              <th className="text-left py-2 pr-3">Time</th>
+                              <th className="text-left py-2 pr-3">Event ID</th>
+                              <th className="text-left py-2 pr-3">Type</th>
+                              <th className="text-left py-2 pr-3">External Lot</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dedupeRows.map((row, idx) => (
+                              <tr key={idx} className="border-b border-gray-100">
+                                <td className="py-2 pr-3">{row?.created_at ? new Date(row.created_at).toLocaleString('en-IN') : '—'}</td>
+                                <td className="py-2 pr-3 font-mono">{String(row?.event_id || '—')}</td>
+                                <td className="py-2 pr-3">{String(row?.event_type || '—')}</td>
+                                <td className="py-2 pr-3 font-mono">{String(row?.external_id || '—')}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </section>
+
+        {velocityHealthOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setVelocityHealthOpen(false)} />
+            <div className="relative w-full max-w-3xl rounded-2xl border border-gray-200 bg-white shadow-2xl max-h-[85vh] overflow-auto">
+              <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-gray-500">Velocity API Monitor</p>
+                  <h3 className="font-brand text-lg text-gray-900">Upstream Health Details</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVelocityHealthOpen(false)}
+                  className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                {(() => {
+                  const credentialsConfigured = Boolean(webhookHealthData?.velocity_api_credentials_configured);
+                  const probe = webhookHealthData?.velocity_probe || null;
+                  const baseHttp = probe?.base_http || null;
+                  const authToken = probe?.auth_token || null;
+                  const smoke = probe?.serviceability_smoke || null;
+                  const probeSummary = typeof probe?.summary === 'string' ? probe.summary : '';
+                  const checkedAt = probe?.checked_at || velocityHealthCheckedAt;
+
+                  return (
+                    <>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Credentials</p>
+                          <p className={`text-sm font-bold mt-1 ${credentialsConfigured ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {credentialsConfigured ? 'Configured' : 'Missing'}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Base URL Reachability</p>
+                          <p className={`text-sm font-bold mt-1 ${baseHttp?.ok ? 'text-emerald-700' : 'text-red-700'}`}>
+                            {baseHttp ? (baseHttp.ok ? 'Reachable' : 'Unreachable') : 'Not checked'}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            {typeof baseHttp?.status === 'number' ? `HTTP ${baseHttp.status}` : String(baseHttp?.error || '—')}
+                          </p>
+                        </div>
+                        <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                          <p className="text-[10px] font-black uppercase tracking-wider text-gray-500">Auth + Smoke</p>
+                          <p className={`text-sm font-bold mt-1 ${(authToken?.token_received && smoke?.ok) ? 'text-emerald-700' : 'text-amber-700'}`}>
+                            {(authToken?.token_received && smoke?.ok) ? 'Healthy' : 'Needs Attention'}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-1">
+                            Token: {authToken?.token_received ? 'Yes' : 'No'} | Smoke: {smoke?.ok ? 'Pass' : 'Fail'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-lg border border-gray-100 p-4 space-y-2">
+                        <p className="text-sm font-semibold text-gray-900">Health Summary</p>
+                        <p className="text-xs text-gray-700 leading-relaxed">
+                          {probeSummary || 'No summary available yet. Click "Check Velocity API Status" again to run a fresh probe.'}
+                        </p>
+                        <p className="text-[11px] text-gray-500">
+                          Last checked: {checkedAt ? new Date(checkedAt).toLocaleString('en-IN') : '—'}
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className="text-sm font-semibold text-gray-900 mb-2">Auth Endpoint</p>
+                          <div className="space-y-1 text-xs text-gray-700">
+                            <p><span className="font-semibold">HTTP:</span> {typeof authToken?.http_status === 'number' ? authToken.http_status : '—'}</p>
+                            <p><span className="font-semibold">Latency:</span> {typeof authToken?.ms === 'number' ? `${authToken.ms} ms` : '—'}</p>
+                            <p><span className="font-semibold">Token received:</span> {authToken?.token_received ? 'Yes' : 'No'}</p>
+                            <p className="break-all"><span className="font-semibold">Endpoint:</span> {String(authToken?.endpoint || '—')}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-lg border border-gray-100 p-3">
+                          <p className="text-sm font-semibold text-gray-900 mb-2">Serviceability Smoke Test</p>
+                          <div className="space-y-1 text-xs text-gray-700">
+                            <p><span className="font-semibold">HTTP:</span> {typeof smoke?.http_status === 'number' ? smoke.http_status : '—'}</p>
+                            <p><span className="font-semibold">Latency:</span> {typeof smoke?.ms === 'number' ? `${smoke.ms} ms` : '—'}</p>
+                            <p><span className="font-semibold">Result:</span> {smoke?.ok ? 'Pass' : 'Fail'}</p>
+                            <p><span className="font-semibold">Invalid credentials:</span> {smoke?.invalid_credentials ? 'Yes' : 'No'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
+        )}
 
         <section className="rounded-xl border border-neutral-200 bg-white p-4 lg:p-6 shadow-sm">
           <h2 className="font-brand text-xl text-gray-900 mb-4">Summary Reports</h2>

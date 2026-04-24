@@ -1,6 +1,0 @@
-You are a top-class frontend engineer tasked with updating a React application's user interface. Your objective is to modernize the frontend using Material UI while maintaining a traditional Northeast Indian ethnic theme.
-
-**CONSTRAINTS:**
-- DO NOT modify any API endpoints, backend logic, or Supabase configurations
-- Only update frontend components, styling, and UI elements
-- Preserve all existing functionality and data flow
