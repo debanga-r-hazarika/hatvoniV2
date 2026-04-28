@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getOrderDisplayId, getOrderItemDisplayId } from '../../lib/orderDisplay';
 
 export default function OrdersTable({ data, sellerOptions }) {
   const [expandedOrders, setExpandedOrders] = useState({});
@@ -80,7 +81,7 @@ export default function OrdersTable({ data, sellerOptions }) {
                   {/* Order ID */}
                   <div className="min-w-[80px]">
                     <p className="text-[9px] font-medium text-[#3f4942]/40 uppercase">Order</p>
-                    <p className="text-xs font-bold text-[#004a2b] font-mono">#{order.id.slice(0, 8)}</p>
+                    <p className="text-xs font-bold text-[#004a2b] font-mono">{getOrderDisplayId(order)}</p>
                   </div>
 
                   {/* Status Badge */}
@@ -233,6 +234,7 @@ export default function OrdersTable({ data, sellerOptions }) {
                             <div className="flex-1 min-w-0">
                               <p className="text-xs font-semibold text-[#004a2b] truncate">{item.products?.name || 'Unknown Item'}</p>
                               <p className="text-[9px] font-mono text-[#3f4942]/40">{item.product_key || item.products?.key || ''}</p>
+                              <p className="text-[9px] font-mono text-[#3f4942]/40 mt-0.5">{getOrderItemDisplayId(order, item, idx)}</p>
                             </div>
                             <div className="text-right flex items-center gap-4">
                               <p className="text-xs font-medium text-[#3f4942]">{formatCurrency(item.unit_price || item.products?.price)}</p>

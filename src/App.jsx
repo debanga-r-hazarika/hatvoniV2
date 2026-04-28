@@ -36,6 +36,7 @@ import AdminSellers from './pages/AdminSellers';
 import AdminLogistics from './pages/AdminLogistics';
 import AdminSupport from './pages/AdminSupport';
 import AdminWarehouses from './pages/AdminWarehouses';
+import AdminNotificationPreferences from './pages/AdminNotificationPreferences';
 import Support from './pages/Support';
 import Seller from './pages/Seller';
 import SellerOrderDetail from './pages/SellerOrderDetail';
@@ -90,6 +91,7 @@ export default function App() {
           <Route path="/admin/warehouses" element={<Layout path="/admin/warehouses"><AdminWarehouses /></Layout>} />
           <Route path="/admin/logistics" element={<Layout path="/admin/logistics"><AdminLogistics /></Layout>} />
           <Route path="/admin/support" element={<Layout path="/admin/support"><AdminSupport /></Layout>} />
+          <Route path="/admin/notifications" element={<Layout path="/admin/notifications"><AdminNotificationPreferences /></Layout>} />
           <Route path="/support" element={<Layout path="/support"><Support /></Layout>} />
           <Route path="/seller" element={<Layout path="/seller"><Seller /></Layout>} />
           <Route path="/seller/orders/:id" element={<Layout path="/seller/orders/:id"><SellerOrderDetail /></Layout>} />

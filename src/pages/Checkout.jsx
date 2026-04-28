@@ -380,7 +380,7 @@ export default function Checkout() {
           amount: razorpayOrder.amount,
           currency: razorpayOrder.currency || 'INR',
           name: 'Hatvoni',
-          description: `Order #${order.id.slice(0, 8)}`,
+          description: `Order ${order.display_order_id || `#${order.id.slice(0, 8)}`}`,
           order_id: razorpayOrder.razorpay_order_id,
           prefill: {
             name: razorpayOrder.customer?.name || `${form.firstName} ${form.lastName}`.trim(),

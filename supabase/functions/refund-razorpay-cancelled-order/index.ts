@@ -219,6 +219,27 @@ Deno.serve(async (req: Request) => {
     })
     .eq('id', order.id);
 
+  if (!updateError) {
+    const { data: orderItems } = await adminClient
+      .from('order_items')
+      .select('id, quantity, price')
+      .eq('order_id', order.id);
+    if (Array.isArray(orderItems) && orderItems.length > 0) {
+      for (const oi of orderItems) {
+        await adminClient
+          .from('order_items')
+          .update({
+            refund_status: nextRefundStatus,
+            refund_amount: Number(oi.price || 0) * Number(oi.quantity || 0),
+            refund_reason: cancellationReason,
+            refund_reference: refundPayload.id,
+            refunded_at: nextRefundStatus === 'completed' ? new Date().toISOString() : null,
+          })
+          .eq('id', oi.id);
+      }
+    }
+  }
+
   if (updateError) {
     return new Response(JSON.stringify({ error: 'Refund created but failed to save local state', details: updateError.message }), {
       status: 500,

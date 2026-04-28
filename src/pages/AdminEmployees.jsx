@@ -2,19 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
+import { ADMIN_MODULES } from '../lib/adminModules';
 
 // All modules that can be assigned to an employee
 export const ALL_MODULES = [
-  { id: 'orders',    label: 'Orders',    icon: 'package_2' },
-  { id: 'logistics', label: 'Logistics', icon: 'local_shipping' },
-  { id: 'support',   label: 'Support',   icon: 'support_agent' },
-  { id: 'inventory', label: 'Inventory', icon: 'inventory_2' },
-  { id: 'coupons',   label: 'Coupons',   icon: 'sell' },
-  { id: 'customers', label: 'Customers', icon: 'group' },
-  { id: 'sellers',   label: 'Sellers',   icon: 'storefront' },
-  { id: 'products',  label: 'Products',  icon: 'category' },
-  { id: 'lots',      label: 'Lots',      icon: 'all_inclusive' },
-  { id: 'recipes',   label: 'Recipes',   icon: 'restaurant_menu' },
+  ...ADMIN_MODULES,
 ];
 
 export default function AdminEmployees() {
@@ -240,7 +232,7 @@ export default function AdminEmployees() {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 pt-24 md:pt-28 pb-10">
 
       {/* ── Page header ── */}
       <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center gap-3">
@@ -542,7 +534,7 @@ export default function AdminEmployees() {
 
       {/* ── MODULE ASSIGNMENT MODAL ── */}
       {moduleModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1400] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <div>
@@ -603,7 +595,7 @@ export default function AdminEmployees() {
 
       {/* ── NOTES MODAL ── */}
       {notesModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1400] p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm">
             <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">Internal Notes</h3>

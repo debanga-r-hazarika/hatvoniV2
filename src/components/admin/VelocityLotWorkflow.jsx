@@ -99,11 +99,68 @@ function pickEtaText(carrier) {
 function formatStatusLabel(value) {
   const raw = String(value || '').trim();
   if (!raw) return '—';
+  const compact = raw.replace(/\s+/g, '').toLowerCase();
+  if (compact === 'readyforreceive' || compact === 'readyforpickup') {
+    return 'Ready for Receive/Pickup';
+  }
   return raw
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .toLowerCase()
     .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function resolveEventLocation(ev) {
+  if (typeof ev?.location === 'string' && ev.location.trim()) return ev.location.trim();
+  const payload = ev?.raw_payload && typeof ev.raw_payload === 'object' ? ev.raw_payload : null;
+  if (!payload) return '';
+  const candidates = [
+    payload.location,
+    payload.current_location,
+    payload.location_name,
+    payload.city,
+    payload.current_city,
+    payload.pickup_city,
+    payload.hub,
+    payload.hub_name,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'string' && c.trim()) return c.trim();
+  }
+  return '';
+}
+
+function statusStageKey(label) {
+  const s = String(label || '').toLowerCase();
+  if (s.includes('deliver')) return 'delivered';
+  if (s.includes('transit') || s.includes('out for delivery')) return 'transit';
+  if (s.includes('pickup') || s.includes('receive') || s.includes('manifest')) return 'ready_pickup';
+  if (s.includes('cancel')) return 'cancelled';
+  return 'confirmed';
+}
+
+function parseWebhookStatusChange(rawPayload, fallbackTs, ev = null) {
+  const root = rawPayload && typeof rawPayload === 'object' ? rawPayload : null;
+  const data = root && root.data && typeof root.data === 'object' ? root.data : (root || {});
+  const statusRaw =
+    String(data.status || data.shipment_status || ev?.activity || '').trim();
+  if (!statusRaw) return null;
+  const eventTs = String((root && root.event_timestamp) || fallbackTs || '').trim();
+  const eventMs = eventTs ? Date.parse(eventTs) : Number.NaN;
+  return {
+    eventId: String((root && root.event_id) || ev?.id || `${eventTs}:${statusRaw}:${ev?.source || ''}`).trim(),
+    source: String(ev?.source || '').toLowerCase(),
+    eventTimestamp: eventTs,
+    eventMs,
+    latestStatus: statusRaw,
+    ndrReason: String(data.ndr_reason || data.reason || '').trim(),
+    originalEdd: String(data.original_edd || data.promised_delivery_date || '').trim(),
+    updatedEdd: String(data.estimated_delivery_date || data.updated_estimated_delivery_date || '').trim(),
+    carrierName: String(data.carrier_name || '').trim(),
+    trackingNumber: String(data.tracking_number || data.awb || '').trim(),
+    rawPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : null,
+  };
 }
 
 /**
@@ -131,6 +188,15 @@ export default function VelocityLotWorkflow({
   const [cancelBusy, setCancelBusy] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineRows, setTimelineRows] = useState([]);
+  const [showWebhookInfoModal, setShowWebhookInfoModal] = useState(false);
+  const [webhookSearch, setWebhookSearch] = useState('');
+  const [webhookStatusFilter, setWebhookStatusFilter] = useState('all');
+  const [webhookFromDate, setWebhookFromDate] = useState('');
+  const [webhookToDate, setWebhookToDate] = useState('');
+  const [webhookSortDir, setWebhookSortDir] = useState('desc');
+  const [selectedWebhookRowId, setSelectedWebhookRowId] = useState('');
+  const [webhookPage, setWebhookPage] = useState(1);
+  const [webhookLive, setWebhookLive] = useState(false);
   const [showLotMeta, setShowLotMeta] = useState(false);
   const [lotMetaLoading, setLotMetaLoading] = useState(false);
   const [lotMetaProducts, setLotMetaProducts] = useState([]);
@@ -182,6 +248,7 @@ export default function VelocityLotWorkflow({
           .from('order_shipment_tracking_events')
           .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
           .eq('order_shipment_id', lotId)
+          .in('source', ['webhook', 'cancel_api'])
           .order('event_time', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(50);
@@ -253,6 +320,9 @@ export default function VelocityLotWorkflow({
   }, [velServiceability]);
 
   const callVelocityFn = async (body) => {
+    if (body?.action === 'track_order' && !lotId) {
+      throw new Error('Shipment refresh requires a shipment lot id.');
+    }
     const { data: sessionData } = await supabase.auth.getSession();
     const token = sessionData?.session?.access_token;
     if (!token) throw new Error('No auth token — please sign in again');
@@ -411,6 +481,158 @@ export default function VelocityLotWorkflow({
     weight: lot?.velocity_fulfillment?.weight ?? velWeight,
   };
   const showPreAwbSetup = !effectiveAwb;
+  const webhookStatusRows = useMemo(() => (
+    timelineRows
+      .map((ev) => parseWebhookStatusChange(ev?.raw_payload, ev?.event_time || ev?.created_at, ev))
+      .filter(Boolean)
+  ), [timelineRows]);
+  const availableWebhookStatuses = useMemo(() => {
+    const uniq = new Set(webhookStatusRows.map((r) => formatStatusLabel(r.latestStatus || '')).filter(Boolean));
+    return [...uniq].sort((a, b) => a.localeCompare(b));
+  }, [webhookStatusRows]);
+  const filteredWebhookRows = useMemo(() => {
+    const q = webhookSearch.trim().toLowerCase();
+    const fromMs = webhookFromDate ? Date.parse(`${webhookFromDate}T00:00:00`) : Number.NaN;
+    const toMs = webhookToDate ? Date.parse(`${webhookToDate}T23:59:59`) : Number.NaN;
+    const rows = webhookStatusRows.filter((row) => {
+      if (webhookStatusFilter !== 'all' && formatStatusLabel(row.latestStatus || '') !== webhookStatusFilter) return false;
+      if (Number.isFinite(fromMs) && (!Number.isFinite(row.eventMs) || row.eventMs < fromMs)) return false;
+      if (Number.isFinite(toMs) && (!Number.isFinite(row.eventMs) || row.eventMs > toMs)) return false;
+      if (!q) return true;
+      const hay = [
+        row.latestStatus,
+        row.ndrReason,
+        row.carrierName,
+        row.trackingNumber,
+        row.originalEdd,
+        row.updatedEdd,
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    rows.sort((a, b) => {
+      const av = Number.isFinite(a.eventMs) ? a.eventMs : 0;
+      const bv = Number.isFinite(b.eventMs) ? b.eventMs : 0;
+      return webhookSortDir === 'asc' ? av - bv : bv - av;
+    });
+    return rows;
+  }, [webhookStatusFilter, webhookFromDate, webhookSearch, webhookSortDir, webhookStatusRows, webhookToDate]);
+  const selectedWebhookRow = useMemo(
+    () => filteredWebhookRows.find((r) => r.eventId === selectedWebhookRowId) || null,
+    [filteredWebhookRows, selectedWebhookRowId],
+  );
+  const webhookRowsPerPage = 12;
+  const webhookTotalPages = Math.max(1, Math.ceil(filteredWebhookRows.length / webhookRowsPerPage));
+  const pagedWebhookRows = useMemo(() => {
+    const start = (webhookPage - 1) * webhookRowsPerPage;
+    return filteredWebhookRows.slice(start, start + webhookRowsPerPage);
+  }, [filteredWebhookRows, webhookPage]);
+  const selectedWebhookRowIdx = useMemo(
+    () => filteredWebhookRows.findIndex((r) => r.eventId === selectedWebhookRowId),
+    [filteredWebhookRows, selectedWebhookRowId],
+  );
+  const previousWebhookRow = useMemo(
+    () => (selectedWebhookRowIdx >= 0 ? filteredWebhookRows[selectedWebhookRowIdx + 1] || null : null),
+    [filteredWebhookRows, selectedWebhookRowIdx],
+  );
+  const rowSlaRisk = (row) => {
+    const original = row?.originalEdd ? Date.parse(row.originalEdd) : Number.NaN;
+    const updated = row?.updatedEdd ? Date.parse(row.updatedEdd) : Number.NaN;
+    if (!Number.isFinite(original) || !Number.isFinite(updated)) return { label: '—', tone: 'slate' };
+    const diffDays = Math.round((updated - original) / 86400000);
+    if (diffDays <= 0) return { label: 'On track', tone: 'emerald' };
+    if (diffDays <= 1) return { label: `+${diffDays}d minor slip`, tone: 'amber' };
+    return { label: `+${diffDays}d delay`, tone: 'red' };
+  };
+  const exportWebhookCsv = () => {
+    if (!filteredWebhookRows.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['event_timestamp', 'latest_status', 'ndr_reason', 'original_edd', 'updated_edd', 'carrier_name', 'tracking_number', 'source', 'sla_risk'];
+    const lines = filteredWebhookRows.map((r) => {
+      const risk = rowSlaRisk(r).label;
+      return [
+        r.eventTimestamp,
+        formatStatusLabel(r.latestStatus || ''),
+        r.ndrReason || '',
+        r.originalEdd || '',
+        r.updatedEdd || '',
+        r.carrierName || '',
+        r.trackingNumber || '',
+        r.source || '',
+        risk,
+      ].map(esc).join(',');
+    });
+    const csv = [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `shipment-lot-webhook-updates-${lotId || 'lot'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  useEffect(() => {
+    if (webhookFromDate && webhookToDate && webhookFromDate > webhookToDate) {
+      setWebhookToDate(webhookFromDate);
+    }
+  }, [webhookFromDate, webhookToDate]);
+  useEffect(() => {
+    setWebhookPage(1);
+  }, [webhookSearch, webhookStatusFilter, webhookFromDate, webhookToDate, webhookSortDir]);
+  useEffect(() => {
+    if (!showWebhookInfoModal) {
+      setWebhookLive(false);
+    }
+  }, [showWebhookInfoModal]);
+  const webhookSourceSummary = useMemo(() => {
+    const summary = { webhook: 0, cancelApi: 0 };
+    for (const ev of timelineRows) {
+      const src = String(ev?.source || '').toLowerCase();
+      if (src === 'webhook') summary.webhook += 1;
+      if (src === 'cancel_api') summary.cancelApi += 1;
+    }
+    return summary;
+  }, [timelineRows]);
+  const timelineDisplayRows = useMemo(() => {
+    const rows = [...timelineRows];
+    const collapsed = [];
+    for (const ev of rows) {
+      const status = formatStatusLabel(ev?.activity || 'Status updated');
+      const src = String(ev?.source || '').toLowerCase();
+      const location = resolveEventLocation(ev);
+      const prev = collapsed[collapsed.length - 1];
+      if (prev && prev.status === status && prev.source === src && prev.location === location) {
+        continue;
+      }
+      const ts = String(ev?.event_time || ev?.created_at || '').trim();
+      const dayKey = ts ? new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Unknown date';
+      collapsed.push({
+        id: ev?.id,
+        ts,
+        dayKey,
+        source: src,
+        status,
+        location,
+        remark: String(ev?.carrier_remark || '').trim(),
+      });
+    }
+    return collapsed;
+  }, [timelineRows]);
+  const timelineStageProgress = useMemo(() => {
+    const stages = ['confirmed', 'ready_pickup', 'transit', 'delivered'];
+    let highest = 0;
+    for (const row of timelineDisplayRows) {
+      const k = statusStageKey(row.status);
+      const i = stages.indexOf(k);
+      if (i > highest) highest = i;
+    }
+    return stages.map((k, i) => ({
+      key: k,
+      label: k === 'ready_pickup' ? 'Ready for Pickup' : k === 'transit' ? 'Transit' : k === 'delivered' ? 'Delivered' : 'Confirmed',
+      done: i <= highest,
+    }));
+  }, [timelineDisplayRows]);
 
   const openLotMeta = async () => {
     setShowLotMeta((v) => !v);
@@ -435,6 +657,24 @@ export default function VelocityLotWorkflow({
       setLotMetaLoading(false);
     }
   };
+  useEffect(() => {
+    if (!showWebhookInfoModal || !webhookLive) return undefined;
+    const timer = setInterval(() => {
+      void refreshLotTracking();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [showWebhookInfoModal, webhookLive]);
+  useEffect(() => {
+    if (!showWebhookInfoModal) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setShowWebhookInfoModal(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showWebhookInfoModal]);
+  useEffect(() => {
+    if (webhookPage > webhookTotalPages) setWebhookPage(webhookTotalPages);
+  }, [webhookPage, webhookTotalPages]);
 
   const refreshLotTracking = async () => {
     if (!effectiveAwb) {
@@ -453,6 +693,7 @@ export default function VelocityLotWorkflow({
         .from('order_shipment_tracking_events')
         .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
         .eq('order_shipment_id', lotId)
+        .in('source', ['webhook', 'cancel_api'])
         .order('event_time', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(50);
@@ -479,6 +720,7 @@ export default function VelocityLotWorkflow({
         .from('order_shipment_tracking_events')
         .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
         .eq('order_shipment_id', lotId)
+        .in('source', ['webhook', 'cancel_api'])
         .order('event_time', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(50);
@@ -807,14 +1049,18 @@ export default function VelocityLotWorkflow({
               <p className="text-sm font-mono text-slate-900 mt-1 break-all">{effectiveAwb}</p>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking Events Count</p>
-              <p className="text-sm font-bold text-slate-900 mt-1">{timelineRows.length}</p>
+              <button
+                type="button"
+                onClick={() => setShowWebhookInfoModal(true)}
+                className="w-full text-left"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">More Info</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">See more updates &amp; info</p>
+                <p className="text-[10px] text-slate-500 mt-1">{webhookStatusRows.length} status change event{webhookStatusRows.length !== 1 ? 's' : ''}</p>
+              </button>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={refreshLotTracking} disabled={trackingBusy} variant="contained" color="primary" size="small">
-              {trackingBusy ? 'Refreshing…' : 'Refresh shipment status'}
-            </Button>
             <Button type="button" onClick={cancelLotCourier} disabled={cancelBusy || !canCancelCourier} variant="outlined" color="error" size="small">
               {cancelBusy ? 'Cancelling…' : 'Cancel courier'}
             </Button>
@@ -841,30 +1087,225 @@ export default function VelocityLotWorkflow({
             </p>
           )}
           <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
-            <p className="text-xs font-bold text-slate-900 mb-2">Tracking timeline/history for this specific lot</p>
+            <p className="text-xs font-bold text-slate-900 mb-1">Tracking timeline/history for this specific lot</p>
+            <p className="text-[11px] text-slate-500 mb-3">Showing webhook and cancellation updates only.</p>
             {timelineLoading ? (
               <p className="text-xs text-slate-500">Loading timeline…</p>
             ) : timelineRows.length === 0 ? (
               <p className="text-xs text-slate-500">No tracking history yet for this shipment lot.</p>
             ) : (
-              <div className="space-y-2 max-h-64 overflow-auto pr-1">
+              <div className="max-h-80 overflow-auto pr-1">
                 {timelineRows.map((ev) => {
                   const ts = ev?.event_time || ev?.created_at;
+                  const src = String(ev?.source || '').toLowerCase();
+                  const isWebhook = src === 'webhook';
+                  const locationText = resolveEventLocation(ev);
                   return (
-                    <div key={ev.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                      <p className="text-xs font-semibold text-slate-900">{formatStatusLabel(ev.activity || 'Status updated')}</p>
-                      <p className="text-[11px] text-slate-600">
-                        {ev.location || 'Unknown location'}
-                        {ev.carrier_remark ? ` · ${ev.carrier_remark}` : ''}
-                      </p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        {ts ? new Date(ts).toLocaleString('en-IN') : '—'} · {formatStatusLabel(ev.source || 'system')}
-                      </p>
+                    <div key={ev.id} className="relative pl-9 pb-4 last:pb-0">
+                      <div className="absolute left-3 top-6 bottom-0 w-px bg-slate-200 last:hidden" />
+                      <div className={`absolute left-0.5 top-1 h-5 w-5 rounded-full border flex items-center justify-center ${isWebhook ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                        <span className="material-symbols-outlined text-[12px]">{isWebhook ? 'radio_button_checked' : 'block'}</span>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_0_rgba(2,6,23,0.04)]">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-slate-900">{formatStatusLabel(ev.activity || 'Status updated')}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${isWebhook ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                          {isWebhook ? 'Webhook' : 'Cancelled'}
+                        </span>
+                      </div>
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {locationText && (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Location</p>
+                            <p className="text-[11px] text-slate-700 mt-1">{locationText}</p>
+                          </div>
+                        )}
+                        <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Event timestamp</p>
+                          <p className="text-[11px] text-slate-700 mt-1">{ts ? new Date(ts).toLocaleString('en-IN') : '—'}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Courier remarks</p>
+                          <p className="text-[11px] text-slate-700 mt-1">{ev.carrier_remark || 'No remarks'}</p>
+                        </div>
+                      </div>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
+          </div>
+        </div>
+      )}
+      {showWebhookInfoModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="More info webhook updates">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowWebhookInfoModal(false)} />
+          <div className="relative w-full max-w-6xl rounded-3xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-200">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">More Info</p>
+                <h3 className="text-lg font-bold text-slate-900">Shipment Webhook Updates</h3>
+              </div>
+              <button type="button" onClick={() => setShowWebhookInfoModal(false)} className="w-8 h-8 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100">
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+            <div className="p-5">
+              {webhookStatusRows.length === 0 ? (
+                <p className="text-sm text-slate-500">No webhook status_change payload rows found yet for this shipment lot.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500 font-semibold">Total rows</p>
+                      <p className="text-sm font-bold text-slate-900 mt-1">{webhookStatusRows.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-blue-600 font-semibold">Webhook events</p>
+                      <p className="text-sm font-bold text-blue-900 mt-1">{webhookSourceSummary.webhook}</p>
+                    </div>
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-red-600 font-semibold">Cancel API events</p>
+                      <p className="text-sm font-bold text-red-900 mt-1">{webhookSourceSummary.cancelApi}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setWebhookLive((v) => !v)}
+                        className={`px-2.5 py-1.5 text-[11px] rounded-lg border font-semibold ${webhookLive ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600'}`}
+                      >
+                        {webhookLive ? 'Live refresh: ON' : 'Live refresh: OFF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportWebhookCsv}
+                        className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-50"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500">Page {webhookPage} of {webhookTotalPages}</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={webhookSearch}
+                      onChange={(e) => setWebhookSearch(e.target.value)}
+                      placeholder="Search status/carrier/tracking"
+                      className="md:col-span-2 px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    />
+                    <select
+                      value={webhookStatusFilter}
+                      onChange={(e) => setWebhookStatusFilter(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    >
+                      <option value="all">All statuses</option>
+                      {availableWebhookStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <input
+                      type="date"
+                      value={webhookFromDate}
+                      onChange={(e) => setWebhookFromDate(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={webhookToDate}
+                        onChange={(e) => setWebhookToDate(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setWebhookSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+                        className="px-2.5 py-2 text-[11px] font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+                        title="Toggle date sort"
+                      >
+                        {webhookSortDir === 'desc' ? 'Newest' : 'Oldest'}
+                      </button>
+                    </div>
+                  </div>
+                <div className="overflow-auto rounded-2xl border border-slate-200">
+                  <table className="w-full min-w-[980px] text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-[10px] uppercase tracking-[0.1em] text-slate-500">
+                        <th className="px-3 py-2 font-semibold">Event Timestamp</th>
+                        <th className="px-3 py-2 font-semibold">Latest Shipment Status</th>
+                        <th className="px-3 py-2 font-semibold">NDR Reason</th>
+                        <th className="px-3 py-2 font-semibold">Original / Promised Delivery Date</th>
+                        <th className="px-3 py-2 font-semibold">Updated EDD</th>
+                        <th className="px-3 py-2 font-semibold">Carrier Name</th>
+                        <th className="px-3 py-2 font-semibold">Tracking Number</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedWebhookRows.map((row, idx) => (
+                        <tr
+                          key={`webhook-row-${idx}`}
+                          onClick={() => setSelectedWebhookRowId(row.eventId || `idx-${idx}`)}
+                          className="border-b border-slate-100 last:border-0 text-xs text-slate-700 cursor-pointer hover:bg-slate-50"
+                        >
+                          <td className="px-3 py-2.5">{row.eventTimestamp || '—'}</td>
+                          <td className="px-3 py-2.5 font-semibold text-slate-900">{formatStatusLabel(row.latestStatus || '—')}</td>
+                          <td className="px-3 py-2.5">{row.ndrReason || '—'}</td>
+                          <td className="px-3 py-2.5">{row.originalEdd || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            <div>{row.updatedEdd || '—'}</div>
+                            {(() => {
+                              const risk = rowSlaRisk(row);
+                              return risk.label !== '—' ? (
+                                <span className={`inline-flex mt-1 px-1.5 py-0.5 rounded text-[10px] border ${
+                                  risk.tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                    : risk.tone === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-700'
+                                      : 'bg-red-50 border-red-200 text-red-700'
+                                }`}>{risk.label}</span>
+                              ) : null;
+                            })()}
+                          </td>
+                          <td className="px-3 py-2.5">{row.carrierName || '—'}</td>
+                          <td className="px-3 py-2.5 font-mono">{row.trackingNumber || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={webhookPage <= 1}
+                    onClick={() => setWebhookPage((p) => Math.max(1, p - 1))}
+                    className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={webhookPage >= webhookTotalPages}
+                    onClick={() => setWebhookPage((p) => Math.min(webhookTotalPages, p + 1))}
+                    className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+                {selectedWebhookRow && (
+                  <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500 font-semibold mb-1">Selected row payload</p>
+                    {previousWebhookRow && (
+                      <p className="text-[11px] text-slate-600 mb-2">
+                        Diff from previous: status <span className="font-semibold">{formatStatusLabel(previousWebhookRow.latestStatus || '—')}</span> {'->'} <span className="font-semibold">{formatStatusLabel(selectedWebhookRow.latestStatus || '—')}</span>
+                      </p>
+                    )}
+                    <pre className="text-[11px] text-slate-700 overflow-auto max-h-48 whitespace-pre-wrap">
+{JSON.stringify(selectedWebhookRow.rawPayload || {}, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
 
   const { data: order, error: orderError } = await adminClient
     .from('orders')
-    .select('id, user_id, total_amount, payment_method, payment_status, razorpay_order_id, status, payment_metadata')
+    .select('id, display_order_id, user_id, total_amount, payment_method, payment_status, razorpay_order_id, status, payment_metadata')
     .eq('id', body.order_id)
     .maybeSingle();
 
@@ -114,7 +114,7 @@ Deno.serve(async (req) => {
   }
 
   const amountPaise = Math.max(1, Math.round(Number(order.total_amount || 0) * 100));
-  const receipt = `hatvoni_${String(order.id).slice(0, 18)}`;
+  const receipt = `hatvoni_${String(order.display_order_id || order.id).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24)}`;
 
   const razorpayResponse = await fetch('https://api.razorpay.com/v1/orders', {
     method: 'POST',
@@ -129,6 +129,7 @@ Deno.serve(async (req) => {
       payment_capture: 1,
       notes: {
         local_order_id: order.id,
+        display_order_id: order.display_order_id || undefined,
         user_id: order.user_id,
       },
     }),
@@ -186,6 +187,7 @@ Deno.serve(async (req) => {
   return new Response(JSON.stringify({
     ok: true,
     order_id: order.id,
+    display_order_id: order.display_order_id,
     payment_method: String(order.payment_method || '').toLowerCase(),
     key_id: razorpayKeyId,
     razorpay_order_id: razorpayOrder.id,

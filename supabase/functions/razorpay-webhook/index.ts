@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
 
   const { data: order, error: orderError } = await adminClient
     .from('orders')
-    .select('id, payment_status, payment_metadata, refund_status, refund_amount')
+    .select('id, total_amount, payment_status, payment_metadata, refund_status, refund_amount')
     .eq('razorpay_order_id', razorpayOrderId)
     .maybeSingle();
 
@@ -206,14 +206,30 @@ Deno.serve(async (req) => {
   const { error: updateError } = await adminClient
     .from('orders')
     .update(updatePayload)
-    .eq('id', order.id)
-    .neq('payment_status', nextStatus);
+    .eq('id', order.id);
 
   if (updateError) {
     return new Response(JSON.stringify({ error: 'Failed to apply webhook state', details: updateError.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  if (eventType === 'refund.processed' || eventType === 'refund.created') {
+    const refundEntity = body?.payload?.refund?.entity || paymentEntity;
+    const itemRefundStatus = eventType === 'refund.processed' ? 'completed' : 'initiated';
+    const itemPatch: Record<string, unknown> = {
+      refund_status: itemRefundStatus,
+      refund_reference: refundEntity?.id ? String(refundEntity.id) : null,
+    };
+    if (eventType === 'refund.processed') {
+      itemPatch.refunded_at = new Date().toISOString();
+    }
+    await adminClient
+      .from('order_items')
+      .update(itemPatch)
+      .eq('order_id', order.id)
+      .in('refund_status', ['initiated', 'pending']);
   }
 
   return new Response(JSON.stringify({ ok: true, order_id: order.id, status: nextStatus }), {

@@ -366,6 +366,7 @@ export default function Admin() {
       products:  { path: '/admin',           icon: 'category',         label: 'Products' },
       lots:      { path: '/admin',           icon: 'all_inclusive',    label: 'Lots' },
       recipes:   { path: '/admin',           icon: 'restaurant_menu',  label: 'Recipes' },
+      notifications: { path: '/admin/notifications', icon: 'notifications', label: 'Notifications' },
     };
 
     return (
@@ -385,6 +386,15 @@ export default function Admin() {
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+              <Link
+                to="/admin/notifications"
+                className="flex flex-col items-center gap-2.5 p-5 bg-white rounded-2xl border border-[#bec9bf]/20 hover:border-[#004a2b]/20 hover:shadow-md transition-all group"
+              >
+                <div className="w-10 h-10 rounded-xl bg-[#004a2b]/[0.07] flex items-center justify-center group-hover:bg-[#004a2b]/[0.12] transition-colors">
+                  <span className="material-symbols-outlined text-xl text-[#004a2b]">notifications</span>
+                </div>
+                <span className="text-xs font-semibold text-[#004a2b] text-center">Notifications</span>
+              </Link>
               {employeeModules.map((mod) => {
                 const info = MODULE_ROUTES[mod];
                 if (!info) return null;
@@ -431,7 +441,18 @@ export default function Admin() {
         </header>
 
         {activeTab === 'dashboard' ? (
-          <AdminStats stats={stats} setActiveTab={setActiveTab} />
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Link
+                to="/admin/notifications"
+                className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-[#004a2b] text-white text-xs font-semibold hover:bg-[#004a2b]/90 transition-all active:scale-[0.98]"
+              >
+                <span className="material-symbols-outlined text-base">notifications</span>
+                Notification Preferences
+              </Link>
+            </div>
+            <AdminStats stats={stats} setActiveTab={setActiveTab} />
+          </div>
         ) : (
           <div className="space-y-4">
             {/* Context Bar */}

@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 import Button from '@mui/material/Button';
 import VelocityLotWorkflow from '../components/admin/VelocityLotWorkflow';
+import { getOrderDisplayId } from '../lib/orderDisplay';
 
 /** Velocity Get Rates: format currency */
 const fmtInr = (v) => {
@@ -109,11 +110,143 @@ const PAYMENT_COLORS = {
 };
 
 const ITEM_DECISION_COLORS = {
-  pending:         'bg-slate-100 text-slate-700',
-  pending_review:  'bg-slate-100 text-slate-700',
-  approved:        'bg-emerald-100 text-emerald-800',
-  rejected:        'bg-red-100 text-red-800',
+  pending:         'bg-slate-100 text-slate-700 border border-slate-200',
+  pending_review:  'bg-slate-100 text-slate-700 border border-slate-200',
+  approved:        'bg-emerald-50 text-emerald-700 border border-emerald-200',
+  rejected:        'bg-rose-50 text-rose-700 border border-rose-200',
 };
+
+const ADMIN_ORDER_SAVED_VIEWS_KEY = 'admin-orders-saved-views-v1';
+const ORDER_QUEUE_IDS = ['sla_breach', 'payment_risk', 'awaiting_tracking', 'refund_pending', 'cancel_attention'];
+
+function orderAgeHours(order) {
+  const created = Date.parse(order?.created_at || '');
+  if (!Number.isFinite(created)) return 0;
+  return (Date.now() - created) / 3600000;
+}
+
+const LOT_PROCESSING_STATUSES = new Set([
+  'pending',
+  'processing',
+  'ready_for_pickup',
+  'pickup_scheduled',
+  'not_picked',
+  'picked',
+  'picked_up',
+  'manifested',
+]);
+
+const LOT_SHIPPING_STATUSES = new Set([
+  'in_transit',
+  'out_for_delivery',
+  'reattempt_delivery',
+  'need_attention',
+  'ndr_raised',
+  'rto_initiated',
+  'rto_in_transit',
+]);
+
+function getLotSlaState(lot) {
+  const now = Date.now();
+  const createdAtMs = Date.parse(String(lot?.created_at || ''));
+  const updatedAtMs = Date.parse(String(lot?.updated_at || ''));
+  const lastEventMs = Date.parse(String(lot?.last_event_at || ''));
+  const status = String(lot?.carrier_shipment_status || '').trim().toLowerCase();
+  const hasTracking = String(lot?.tracking_number || '').trim() !== '';
+  const hasPendingShipment = String(lot?.velocity_pending_shipment_id || '').trim() !== '';
+  const isDelivered = status.includes('delivered') && !status.includes('rto');
+  const baselineMs = Number.isFinite(createdAtMs) ? createdAtMs : now;
+  const stageUpdatedMs = Number.isFinite(updatedAtMs) ? updatedAtMs : baselineMs;
+  const latestUpdateMs = Math.max(
+    baselineMs,
+    Number.isFinite(stageUpdatedMs) ? stageUpdatedMs : baselineMs,
+    Number.isFinite(lastEventMs) ? lastEventMs : baselineMs,
+  );
+
+  if (!hasPendingShipment && !hasTracking && !status) {
+    const ageHours = (now - baselineMs) / 3600000;
+    return { stage: 'placed_to_processing', breached: ageHours >= 24, ageHours, thresholdHours: 24 };
+  }
+
+  if (!hasTracking && (hasPendingShipment || LOT_PROCESSING_STATUSES.has(status))) {
+    const ageHours = (now - stageUpdatedMs) / 3600000;
+    return { stage: 'processing_to_shipping', breached: ageHours >= 36, ageHours, thresholdHours: 36 };
+  }
+
+  if (!isDelivered && (hasTracking || LOT_SHIPPING_STATUSES.has(status))) {
+    const ageHours = (now - latestUpdateMs) / 3600000;
+    return { stage: 'shipping_to_delivery_or_update', breached: ageHours >= (7 * 24), ageHours, thresholdHours: (7 * 24) };
+  }
+
+  return { stage: 'healthy', breached: false, ageHours: 0, thresholdHours: 0 };
+}
+
+function isSlaBreach(order) {
+  const lots = Array.isArray(order?.shipmentLots) ? order.shipmentLots : [];
+  if (lots.length === 0) return false;
+  return lots.some((lot) => getLotSlaState(lot).breached);
+}
+
+function getSlaStageLabel(stage) {
+  if (stage === 'placed_to_processing') return 'Placed -> Processing';
+  if (stage === 'processing_to_shipping') return 'Processing -> Shipping';
+  if (stage === 'shipping_to_delivery_or_update') return 'Shipping -> Delivery/Update';
+  return 'Healthy';
+}
+
+function getOrderSlaSummary(order) {
+  const lots = Array.isArray(order?.shipmentLots) ? order.shipmentLots : [];
+  if (!lots.length) return null;
+  const states = lots.map((lot) => ({ lot, sla: getLotSlaState(lot) }));
+  const sorted = states
+    .slice()
+    .sort((a, b) => (b.sla.ageHours - b.sla.thresholdHours) - (a.sla.ageHours - a.sla.thresholdHours));
+  const top = sorted[0];
+  if (!top || !top.thresholdHours) return null;
+  const progressPct = Math.max(0, Math.min(100, Math.round((top.sla.ageHours / top.sla.thresholdHours) * 100)));
+  const lotLabel = String(top.lot?.label || '').trim() || `Lot ${String(top.lot?.id || '').slice(0, 8)}`;
+  return {
+    stage: top.sla.stage,
+    stageLabel: getSlaStageLabel(top.sla.stage),
+    breached: !!top.sla.breached,
+    ageHours: top.sla.ageHours,
+    thresholdHours: top.sla.thresholdHours,
+    progressPct,
+    lotId: top.lot?.id || '',
+    lotLabel,
+  };
+}
+
+function isPaymentRisk(order) {
+  const paymentStatus = String(order?.payment_status || '').toLowerCase();
+  const paymentMethod = String(order?.payment_method || '').toLowerCase();
+  return ['failed', 'initiated'].includes(paymentStatus) || (paymentMethod.includes('razorpay') && paymentStatus !== 'paid');
+}
+
+function isAwaitingTracking(order) {
+  const status = String(order?.status || '').toLowerCase();
+  return ['processing', 'shipped'].includes(status) && !String(order?.tracking_number || '').trim();
+}
+
+function isRefundPending(order) {
+  const refundStatus = String(order?.refund_status || '').toLowerCase();
+  return refundStatus === 'pending' || refundStatus === 'initiated';
+}
+
+function isCancelAttention(order) {
+  const status = String(order?.status || '').toLowerCase();
+  return status === 'cancelled' && !String(order?.cancellation_reason || '').trim();
+}
+
+function inQueue(order, queueId) {
+  if (!queueId || queueId === 'all') return true;
+  if (queueId === 'sla_breach') return isSlaBreach(order);
+  if (queueId === 'payment_risk') return isPaymentRisk(order);
+  if (queueId === 'awaiting_tracking') return isAwaitingTracking(order);
+  if (queueId === 'refund_pending') return isRefundPending(order);
+  if (queueId === 'cancel_attention') return isCancelAttention(order);
+  return true;
+}
 
 /** Avoids PostgREST passing non-uuid strings (e.g. literal "null") into uuid filters — fixes 22P02. */
 function isUuidLike(v) {
@@ -141,7 +274,7 @@ function pickupMatchesWarehouseRow(pickup, warehouseRow) {
 
 function Badge({ label, colorClass }) {
   return (
-    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-semibold ${colorClass}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold ${colorClass}`}>
       {label}
     </span>
   );
@@ -169,13 +302,48 @@ function OrdersList({ onSelect }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [paymentFilter, setPaymentFilter] = useState('all');
+  const [queueFilter, setQueueFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [minAmount, setMinAmount] = useState('');
+  const [maxAmount, setMaxAmount] = useState('');
+  const [riskFilter, setRiskFilter] = useState('all');
+  const [savedViews, setSavedViews] = useState([]);
+  const [savedViewName, setSavedViewName] = useState('');
+  const [activeSavedView, setActiveSavedView] = useState('');
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
+  const clearMessages = () => {
+    setNotice('');
+    setError('');
+  };
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(ADMIN_ORDER_SAVED_VIEWS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      setSavedViews(Array.isArray(parsed) ? parsed : []);
+    } catch {
+      setSavedViews([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(ADMIN_ORDER_SAVED_VIEWS_KEY, JSON.stringify(savedViews));
+    } catch {
+      // non-blocking: browser storage can fail in private contexts
+    }
+  }, [savedViews]);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('id, status, order_status, payment_status, payment_method, total_amount, created_at, shipping_address, user_id, tracking_number, shipment_status, cancellation_reason, refund_status, refund_amount')
+        .select('id, display_order_id, status, order_status, payment_status, payment_method, total_amount, created_at, shipping_address, user_id, tracking_number, shipment_status, cancellation_reason, refund_status, refund_amount')
         .order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -189,7 +357,52 @@ function OrdersList({ onSelect }) {
         profilesById = (profiles || []).reduce((acc, p) => { acc[p.id] = p; return acc; }, {});
       }
 
-      setOrders((data || []).map((o) => ({ ...o, profile: profilesById[o.user_id] || null })));
+      let lotsByOrder = {};
+      try {
+        const orderIds = (data || []).map((o) => o.id);
+        if (orderIds.length > 0) {
+          const { data: lots } = await supabase
+            .from('order_shipments')
+            .select('id, order_id, label, carrier_shipment_status, tracking_number, velocity_pending_shipment_id, created_at, updated_at')
+            .in('order_id', orderIds);
+          const lotRows = Array.isArray(lots) ? lots : [];
+          const lotIds = lotRows.map((l) => l.id);
+          let latestEventByLot = {};
+          if (lotIds.length > 0) {
+            const { data: events } = await supabase
+              .from('order_shipment_tracking_events')
+              .select('order_shipment_id, event_time, created_at')
+              .in('order_shipment_id', lotIds)
+              .order('created_at', { ascending: false })
+              .limit(5000);
+            latestEventByLot = (events || []).reduce((acc, ev) => {
+              const lotId = ev.order_shipment_id;
+              const eventMs = Date.parse(String(ev.event_time || ev.created_at || ''));
+              const prevMs = Date.parse(String(acc[lotId] || ''));
+              if (!acc[lotId] || (Number.isFinite(eventMs) && (!Number.isFinite(prevMs) || eventMs > prevMs))) {
+                acc[lotId] = ev.event_time || ev.created_at || null;
+              }
+              return acc;
+            }, {});
+          }
+          lotsByOrder = lotRows.reduce((acc, lot) => {
+            if (!acc[lot.order_id]) acc[lot.order_id] = [];
+            acc[lot.order_id].push({ ...lot, last_event_at: latestEventByLot[lot.id] || null });
+            return acc;
+          }, {});
+        }
+      } catch {
+        lotsByOrder = {};
+      }
+
+      const mergedOrders = (data || []).map((o) => {
+        return {
+          ...o,
+          profile: profilesById[o.user_id] || null,
+          shipmentLots: lotsByOrder[o.id] || [],
+        };
+      });
+      setOrders(mergedOrders);
     } catch (err) {
       console.error(err);
     } finally {
@@ -209,8 +422,17 @@ function OrdersList({ onSelect }) {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
+    const fromMs = dateFrom ? Date.parse(`${dateFrom}T00:00:00`) : Number.NaN;
+    const toMs = dateTo ? Date.parse(`${dateTo}T23:59:59`) : Number.NaN;
+    const min = minAmount === '' ? Number.NaN : Number(minAmount);
+    const max = maxAmount === '' ? Number.NaN : Number(maxAmount);
+    const now = Date.now();
     return orders.filter((o) => {
       const name = `${o.profile?.first_name || ''} ${o.profile?.last_name || ''}`.trim();
+      const created = Date.parse(o.created_at || '');
+      const amount = Number(o.total_amount || 0);
+      const ageHours = Number.isFinite(created) ? (now - created) / 3600000 : 0;
+      const isSlaRisk = ['pending', 'processing'].includes(String(o.status || '').toLowerCase()) && ageHours >= 24;
       const matchSearch = !q
         || o.id.toLowerCase().includes(q)
         || name.toLowerCase().includes(q)
@@ -218,9 +440,15 @@ function OrdersList({ onSelect }) {
         || (o.tracking_number || '').toLowerCase().includes(q);
       const matchStatus = statusFilter === 'all' || o.status === statusFilter;
       const matchPayment = paymentFilter === 'all' || o.payment_status === paymentFilter;
-      return matchSearch && matchStatus && matchPayment;
+      const matchQueue = inQueue(o, queueFilter);
+      const matchFrom = !Number.isFinite(fromMs) || (Number.isFinite(created) && created >= fromMs);
+      const matchTo = !Number.isFinite(toMs) || (Number.isFinite(created) && created <= toMs);
+      const matchMin = !Number.isFinite(min) || amount >= min;
+      const matchMax = !Number.isFinite(max) || amount <= max;
+      const matchRisk = riskFilter === 'all' || (riskFilter === 'sla_risk' ? isSlaRisk : !isSlaRisk);
+      return matchSearch && matchStatus && matchPayment && matchQueue && matchFrom && matchTo && matchMin && matchMax && matchRisk;
     });
-  }, [orders, search, statusFilter, paymentFilter]);
+  }, [orders, search, statusFilter, paymentFilter, queueFilter, dateFrom, dateTo, minAmount, maxAmount, riskFilter]);
 
   const stats = useMemo(() => ({
     total: orders.length,
@@ -230,27 +458,115 @@ function OrdersList({ onSelect }) {
     revenue: orders.filter((o) => o.payment_status === 'paid').reduce((s, o) => s + Number(o.total_amount || 0), 0),
   }), [orders]);
 
+  const queueStats = useMemo(() => ([
+    { id: 'sla_breach', label: 'SLA Breach', count: orders.filter((o) => isSlaBreach(o)).length, color: 'border-red-200 bg-red-50 text-red-700' },
+    { id: 'payment_risk', label: 'Payment Risk', count: orders.filter((o) => isPaymentRisk(o)).length, color: 'border-amber-200 bg-amber-50 text-amber-700' },
+    { id: 'awaiting_tracking', label: 'Awaiting Tracking', count: orders.filter((o) => isAwaitingTracking(o)).length, color: 'border-blue-200 bg-blue-50 text-blue-700' },
+    { id: 'refund_pending', label: 'Refund Pending', count: orders.filter((o) => isRefundPending(o)).length, color: 'border-purple-200 bg-purple-50 text-purple-700' },
+    { id: 'cancel_attention', label: 'Cancel Attention', count: orders.filter((o) => isCancelAttention(o)).length, color: 'border-orange-200 bg-orange-50 text-orange-700' },
+  ]), [orders]);
+
+  const slaRiskCount = useMemo(
+    () => filtered.filter((o) => isSlaBreach(o)).length,
+    [filtered],
+  );
+
+  const activeAdvancedFilterCount = useMemo(() => {
+    let count = 0;
+    if (dateFrom) count += 1;
+    if (dateTo) count += 1;
+    if (minAmount !== '') count += 1;
+    if (maxAmount !== '') count += 1;
+    if (riskFilter !== 'all') count += 1;
+    return count;
+  }, [dateFrom, dateTo, minAmount, maxAmount, riskFilter]);
+
+  const applySavedView = (viewId) => {
+    const view = savedViews.find((v) => v.id === viewId);
+    if (!view) return;
+    clearMessages();
+    setActiveSavedView(view.id);
+    setSearch(view.filters.search || '');
+    setStatusFilter(view.filters.statusFilter || 'all');
+    setPaymentFilter(view.filters.paymentFilter || 'all');
+    setQueueFilter(ORDER_QUEUE_IDS.includes(view.filters.queueFilter) ? view.filters.queueFilter : '');
+    setDateFrom(view.filters.dateFrom || '');
+    setDateTo(view.filters.dateTo || '');
+    setMinAmount(view.filters.minAmount || '');
+    setMaxAmount(view.filters.maxAmount || '');
+    setRiskFilter(view.filters.riskFilter || 'all');
+  };
+
+  const saveCurrentView = () => {
+    clearMessages();
+    const name = savedViewName.trim();
+    if (!name) {
+      setError('Enter a name before saving the view.');
+      return;
+    }
+    const next = {
+      id: `${Date.now()}`,
+      name,
+      filters: {
+        search,
+        statusFilter,
+        paymentFilter,
+        queueFilter,
+        dateFrom,
+        dateTo,
+        minAmount,
+        maxAmount,
+        riskFilter,
+      },
+    };
+    setSavedViews((prev) => [next, ...prev].slice(0, 12));
+    setSavedViewName('');
+    setNotice(`Saved view "${name}".`);
+  };
+
+  const deleteSavedView = () => {
+    clearMessages();
+    if (!activeSavedView) return;
+    setSavedViews((prev) => prev.filter((v) => v.id !== activeSavedView));
+    setActiveSavedView('');
+    setNotice('Saved view removed.');
+  };
+
+  const resetFilters = () => {
+    clearMessages();
+    setSearch('');
+    setStatusFilter('all');
+    setPaymentFilter('all');
+    setQueueFilter('');
+    setDateFrom('');
+    setDateTo('');
+    setMinAmount('');
+    setMaxAmount('');
+    setRiskFilter('all');
+    setActiveSavedView('');
+  };
+
   return (
     <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
-        <header className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <header className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
           <div>
-            <div className="flex items-center gap-3 mb-1">
+            <div className="flex items-center gap-2 mb-1">
               <Link to="/admin" className="text-gray-900-variant hover:text-gray-900 transition-colors">
-                <span className="material-symbols-outlined text-xl">arrow_back</span>
+                <span className="material-symbols-outlined text-lg">arrow_back</span>
               </Link>
-              <h1 className="font-brand text-4xl md:text-5xl text-gray-900 tracking-tight">Orders</h1>
+              <h1 className="font-brand text-2xl md:text-3xl text-gray-900 tracking-tight">Orders</h1>
             </div>
-            <p className="text-gray-900-variant font-body ml-9">Event-driven order workflow — all status changes are system-controlled</p>
+            <p className="text-xs text-gray-900-variant ml-7">Minimal order operations console</p>
           </div>
-          <button onClick={load} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-outline-variant text-sm font-semibold text-gray-900 hover:bg-primary/5 transition-colors">
-            <span className="material-symbols-outlined text-base">refresh</span>
+          <button onClick={load} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-outline-variant text-xs font-semibold text-gray-900 hover:bg-primary/5 transition-colors">
+            <span className="material-symbols-outlined text-sm">refresh</span>
             Refresh
           </button>
         </header>
 
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2 mb-3">
           {[
             { label: 'Total', value: stats.total, color: 'bg-primary' },
             { label: 'Pending', value: stats.pending, color: 'bg-slate-500' },
@@ -258,42 +574,246 @@ function OrdersList({ onSelect }) {
             { label: 'Shipped', value: stats.shipped, color: 'bg-blue-500' },
             { label: 'Revenue', value: fmt(stats.revenue), color: 'bg-emerald-600' },
           ].map((s) => (
-            <div key={s.label} className="bg-surface-container-low rounded-2xl p-4 flex items-center gap-3">
-              <div className={`${s.color} w-10 h-10 rounded-xl flex items-center justify-center shrink-0`}>
-                <span className="material-symbols-outlined text-white text-sm">package_2</span>
+            <div key={s.label} className="bg-white rounded-lg border border-outline-variant/30 px-3 py-2.5 flex items-center gap-2.5">
+              <div className={`${s.color} w-7 h-7 rounded-lg flex items-center justify-center shrink-0`}>
+                <span className="material-symbols-outlined text-white text-[12px]">package_2</span>
               </div>
               <div>
-                <p className="text-lg font-brand text-gray-900 leading-none">{s.value}</p>
-                <p className="text-xs text-gray-900-variant font-body mt-0.5">{s.label}</p>
+                <p className="text-sm font-bold text-gray-900 leading-none">{s.value}</p>
+                <p className="text-[10px] text-gray-900-variant mt-0.5">{s.label}</p>
               </div>
             </div>
           ))}
         </div>
 
-        <div className="bg-surface-container-low rounded-2xl p-4 mb-4 flex flex-col sm:flex-row gap-3">
-          <div className="relative flex-1">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-900-variant text-lg">search</span>
-            <input
-              type="text"
-              placeholder="Search by order ID, customer, email, tracking..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10 pr-4 py-2.5 border border-outline-variant rounded-xl bg-surface focus:ring-2 focus:ring-secondary focus:border-transparent w-full font-body text-sm"
-            />
-          </div>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-4 py-2.5 border border-outline-variant rounded-xl bg-surface text-sm font-body focus:ring-2 focus:ring-secondary">
-            <option value="all">All Status</option>
-            {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
-          </select>
-          <select value={paymentFilter} onChange={(e) => setPaymentFilter(e.target.value)}
-            className="px-4 py-2.5 border border-outline-variant rounded-xl bg-surface text-sm font-body focus:ring-2 focus:ring-secondary">
-            <option value="all">All Payments</option>
-            {['pending','initiated','paid','failed','refunded','partially_refunded'].map((s) => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
-            ))}
-          </select>
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 mb-3">
+          {queueStats.map((q) => (
+            <button
+              key={q.id}
+              type="button"
+              onClick={() => setQueueFilter(q.id)}
+              className={`rounded-lg border px-2.5 py-1.5 text-left transition-colors ${q.color} ${queueFilter === q.id ? 'ring-1 ring-secondary/40' : ''}`}
+            >
+              <p className="text-[10px] uppercase tracking-wider font-semibold">{q.label}</p>
+              <p className="text-sm font-bold mt-0.5">{q.count}</p>
+            </button>
+          ))}
         </div>
+
+        <div className="rounded-lg border border-outline-variant/25 bg-white p-3 mb-3">
+          <div className="flex flex-col lg:flex-row gap-2">
+            <div className="relative flex-1">
+              <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-gray-900-variant text-base">search</span>
+              <input
+                type="text"
+                placeholder="Search by order ID, customer, email, tracking..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 pr-3 py-2.5 border border-outline-variant/40 rounded-md bg-surface w-full text-sm focus:ring-2 focus:ring-secondary/20 focus:border-transparent"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-2 lg:w-[280px]">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedFilters(true)}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 rounded-md border border-outline-variant/40 bg-white text-sm font-semibold hover:bg-slate-50 transition-colors"
+              >
+                <span className="material-symbols-outlined text-[18px]">tune</span>
+                Filters
+                {activeAdvancedFilterCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-5 h-5 px-1 rounded-full bg-primary text-on-primary text-[10px] font-bold">
+                    {activeAdvancedFilterCount}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={resetFilters}
+                className="px-3 py-2.5 rounded-md border border-outline-variant/40 bg-white text-sm font-semibold hover:bg-slate-50 transition-colors"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          {notice && <p className="text-xs text-emerald-700 font-medium mt-2">{notice}</p>}
+          {error && <p className="text-xs text-red-700 font-medium mt-2">{error}</p>}
+        </div>
+
+        {showAdvancedFilters && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Advanced Filters">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowAdvancedFilters(false)} />
+            <div className="relative w-full max-w-3xl rounded-lg border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-200">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">Advanced Filter Panel</p>
+                  <h3 className="text-lg font-bold text-slate-900">Refine admin order list</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedFilters(false)}
+                  className="w-8 h-8 rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100"
+                >
+                  <span className="material-symbols-outlined text-[16px]">close</span>
+                </button>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Status</label>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    >
+                      <option value="all">All Status</option>
+                      {ORDER_STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Payment</label>
+                    <select
+                      value={paymentFilter}
+                      onChange={(e) => setPaymentFilter(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    >
+                      <option value="all">All Payments</option>
+                      {['pending', 'initiated', 'paid', 'failed', 'refunded', 'partially_refunded'].map((s) => (
+                        <option key={s} value={s}>{s.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Queue</label>
+                    <select
+                      value={queueFilter}
+                      onChange={(e) => setQueueFilter(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    >
+                      {queueStats.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Date from</label>
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Date to</label>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Minimum amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Min amount"
+                      value={minAmount}
+                      onChange={(e) => setMinAmount(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Maximum amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="Max amount"
+                      value={maxAmount}
+                      onChange={(e) => setMaxAmount(e.target.value)}
+                      className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">SLA risk filter</label>
+                  <select
+                    value={riskFilter}
+                    onChange={(e) => setRiskFilter(e.target.value)}
+                    className="w-full px-3 py-2.5 border border-outline-variant rounded-md bg-surface text-sm"
+                  >
+                    <option value="all">All SLA</option>
+                    <option value="sla_risk">SLA risk only</option>
+                    <option value="healthy">Healthy only</option>
+                  </select>
+                </div>
+
+                <div className="border-t border-outline-variant/20 pt-4">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Saved Views</p>
+                  <div className="flex flex-col md:flex-row gap-2">
+                    <div className="flex-1 flex gap-2">
+                      <input
+                        type="text"
+                        value={savedViewName}
+                        onChange={(e) => setSavedViewName(e.target.value)}
+                        placeholder="Save current filters as view"
+                        className="flex-1 px-3 py-2 border border-outline-variant rounded-md bg-surface text-xs"
+                      />
+                      <button
+                        type="button"
+                        onClick={saveCurrentView}
+                        className="px-3 py-2 rounded-md bg-primary text-on-primary text-xs font-semibold"
+                      >
+                        Save
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <select
+                        value={activeSavedView}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setActiveSavedView(id);
+                          if (id) applySavedView(id);
+                        }}
+                        className="px-3 py-2 border border-outline-variant rounded-md bg-surface text-xs min-w-[170px]"
+                      >
+                        <option value="">Apply saved view</option>
+                        {savedViews.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={deleteSavedView}
+                        disabled={!activeSavedView}
+                        className="px-3 py-2 rounded-md border border-outline-variant bg-white text-xs font-semibold disabled:opacity-50"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="px-5 py-4 border-t border-slate-200 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={resetFilters}
+                  className="px-4 py-2 rounded-md border border-outline-variant bg-white text-sm font-semibold hover:bg-slate-50"
+                >
+                  Reset filters
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedFilters(false)}
+                  className="px-4 py-2 rounded-md bg-primary text-on-primary text-sm font-semibold"
+                >
+                  Apply filters
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="flex items-center justify-center py-24">
@@ -305,46 +825,78 @@ function OrdersList({ onSelect }) {
             <p className="mt-4 text-gray-900-variant font-body">No orders found</p>
           </div>
         ) : (
-          <div className="bg-surface-container-low rounded-2xl overflow-hidden">
+          <div className="bg-white border border-outline-variant/20 rounded-lg overflow-hidden shadow-none">
             <div className="overflow-x-auto">
               <table className="min-w-full">
                 <thead>
-                  <tr className="border-b border-outline-variant/30">
+                  <tr className="border-b border-outline-variant/20 bg-surface-container-low/40">
                     {['Order', 'Customer', 'Amount', 'Status', 'Payment', 'Date', ''].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-bold text-gray-900-variant uppercase tracking-wider whitespace-nowrap">{h}</th>
+                      <th key={h} className="px-3 py-2 text-left text-[10px] font-semibold text-gray-900-variant uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-outline-variant/20">
+                <tbody className="divide-y divide-outline-variant/10">
                   {filtered.map((order) => {
                     const name = `${order.profile?.first_name || ''} ${order.profile?.last_name || ''}`.trim() || '—';
+                    const isSlaRisk = isSlaBreach(order);
+                    const slaSummary = getOrderSlaSummary(order);
                     return (
-                      <tr key={order.id} className="hover:bg-surface-container transition-colors cursor-pointer" onClick={() => onSelect(order.id)}>
-                        <td className="px-4 py-3">
-                          <p className="font-mono text-xs text-gray-900 font-semibold">#{order.id.slice(0, 8)}</p>
+                      <tr key={order.id} className="hover:bg-surface-container-low/40 transition-colors cursor-pointer" onClick={() => onSelect(order.id)}>
+                        <td className="px-3 py-2.5 align-top">
+                          <p className="font-mono text-[11px] text-gray-900 font-semibold">{getOrderDisplayId(order)}</p>
                           {order.tracking_number && (
-                            <p className="text-[10px] text-gray-900-variant mt-0.5">📦 {order.tracking_number}</p>
+                            <p className="text-[10px] text-gray-900-variant mt-0.5">{order.tracking_number}</p>
+                          )}
+                          {isSlaRisk && (
+                            <p className="text-[10px] text-red-700 mt-0.5 font-semibold">Lot SLA breached</p>
+                          )}
+                          {slaSummary && (
+                            <div className="mt-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p
+                                  className={`text-[10px] font-semibold ${slaSummary.breached ? 'text-red-700' : 'text-emerald-700'}`}
+                                  title={slaSummary.lotId ? `Source: ${slaSummary.lotLabel} (${slaSummary.lotId})` : `Source: ${slaSummary.lotLabel}`}
+                                >
+                                  {slaSummary.stageLabel}
+                                </p>
+                                <p className="text-[10px] text-gray-900-variant">
+                                  {Math.floor(slaSummary.ageHours)}h / {slaSummary.thresholdHours}h
+                                </p>
+                              </div>
+                              <p
+                                className="text-[10px] text-gray-900-variant mt-0.5 truncate"
+                                title={slaSummary.lotId ? `${slaSummary.lotLabel} (${slaSummary.lotId})` : slaSummary.lotLabel}
+                              >
+                                {slaSummary.lotLabel}
+                              </p>
+                              <div className="h-1 w-full rounded-full bg-slate-200 mt-1 overflow-hidden">
+                                <div
+                                  className={`h-full ${slaSummary.breached ? 'bg-red-500' : 'bg-emerald-500'}`}
+                                  style={{ width: `${slaSummary.progressPct}%` }}
+                                />
+                              </div>
+                            </div>
                           )}
                         </td>
-                        <td className="px-4 py-3">
-                          <p className="text-sm font-semibold text-gray-900">{name}</p>
-                          <p className="text-xs text-gray-900-variant">{order.profile?.email || '—'}</p>
+                        <td className="px-3 py-2.5 align-top">
+                          <p className="text-[13px] font-medium text-gray-900">{name}</p>
+                          <p className="text-[11px] text-gray-900-variant">{order.profile?.email || '—'}</p>
                         </td>
-                        <td className="px-4 py-3 text-sm font-semibold text-gray-900 whitespace-nowrap">{fmt(order.total_amount)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-2.5 text-[13px] font-semibold text-gray-900 whitespace-nowrap">{fmt(order.total_amount)}</td>
+                        <td className="px-3 py-2.5">
                           <Badge label={order.status?.replace(/_/g, ' ')} colorClass={STATUS_COLORS[order.status] || STATUS_COLORS.pending} />
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-2.5">
                           <Badge label={order.payment_status?.replace(/_/g, ' ')} colorClass={PAYMENT_COLORS[order.payment_status] || PAYMENT_COLORS.pending} />
                         </td>
-                        <td className="px-4 py-3 text-xs text-gray-900-variant whitespace-nowrap">{fmtDate(order.created_at)}</td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 py-2.5 text-[11px] text-gray-900-variant whitespace-nowrap">{fmtDate(order.created_at)}</td>
+                        <td className="px-3 py-2.5">
                           <button
                             onClick={(e) => { e.stopPropagation(); onSelect(order.id); }}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary text-on-primary text-xs font-semibold hover:bg-primary/90 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-primary text-on-primary text-[11px] font-semibold hover:bg-primary/90 transition-colors"
                           >
                             Manage
-                            <span className="material-symbols-outlined text-sm">chevron_right</span>
+                            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
                           </button>
                         </td>
                       </tr>
@@ -543,16 +1095,16 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
   }, [items, sellerDecisions, adminApprovals]);
 
   return (
-    <section className="bg-white rounded-xl p-4 lg:p-4 border border-neutral-200 shadow-sm">
+    <section className="bg-white rounded-lg p-4 border border-neutral-200">
       <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-gray-900 mb-2 flex items-center gap-2">
         <span className="material-symbols-outlined">fact_check</span> Item-Level Approval
       </h2>
-      <p className="text-xs text-gray-900-variant mb-6">
+      <p className="text-xs text-gray-900-variant mb-4">
         All items must be approved or rejected before the order can be finalized.
         Admin can approve/reject own-seller items directly, decide on behalf of third-party sellers (with a mandatory reason), and override any existing seller decision.
       </p>
 
-      <div className="space-y-3">
+      <div className="space-y-2.5">
         {displayLines.map((line) => {
           const sd = line.sellerDecision;
           const aa = line.adminApproval;
@@ -586,18 +1138,27 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
           }[effectiveStatus] || effectiveStatus;
 
           const statusColor = ITEM_DECISION_COLORS[effectiveStatus] || ITEM_DECISION_COLORS.pending;
+          const sourceMeta = decisionSource === 'admin_override'
+            ? { label: 'Admin override', className: 'bg-amber-50 text-amber-700 border border-amber-200' }
+            : decisionSource === 'admin_on_behalf'
+              ? { label: 'Admin (on behalf)', className: 'bg-blue-50 text-blue-700 border border-blue-200' }
+              : decisionSource === 'admin'
+                ? { label: 'Admin decision', className: 'bg-blue-50 text-blue-700 border border-blue-200' }
+                : decisionSource
+                  ? { label: 'Seller decision', className: 'bg-violet-50 text-violet-700 border border-violet-200' }
+                  : null;
 
           return (
             <div key={`${line.order_item_id}-${line.product_key}`}
-              className="rounded-2xl border border-outline-variant/20 p-4 bg-surface">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+              className="rounded-lg border border-outline-variant/20 p-3 bg-surface">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                 {/* Product info */}
-                <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="flex items-center gap-2.5 flex-1 min-w-0">
                   {line.image_url ? (
                     <img src={line.image_url} alt={line.name}
-                      className="w-12 h-12 rounded-xl object-cover border border-outline-variant/20 shrink-0" />
+                      className="w-12 h-12 rounded-lg object-cover border border-outline-variant/20 shrink-0" />
                   ) : (
-                    <div className="w-12 h-12 rounded-xl bg-surface-container-low flex items-center justify-center shrink-0 border border-outline-variant/20">
+                    <div className="w-12 h-12 rounded-lg bg-surface-container-low flex items-center justify-center shrink-0 border border-outline-variant/20">
                       <span className="material-symbols-outlined text-outline text-sm">local_mall</span>
                     </div>
                   )}
@@ -605,7 +1166,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                     <p className="font-semibold text-gray-900 text-sm truncate">{line.name}</p>
                     <div className="flex flex-wrap gap-1.5 mt-1">
                       {line.product_key && (
-                        <span className="text-[10px] font-mono text-gray-900-variant bg-surface-container px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] font-mono text-gray-900-variant bg-surface-container px-1.5 py-0.5 rounded-md">
                           {line.product_key}
                         </span>
                       )}
@@ -614,11 +1175,11 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                       )}
                       {/* Show item type: 3rd-party seller vs own-seller */}
                       {isAdminItem ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
                           {aa?.sync_with_insider ? '🔄 Insider sync' : '🏠 Own seller'}
                         </span>
                       ) : isSellerItem ? (
-                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
                           🏪 3rd-party seller
                         </span>
                       ) : null}
@@ -628,7 +1189,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                     </div>
                     {/* Show inventory snapshot if available (sync_with_insider items) */}
                     {aa?.inventory_snapshot && (
-                      <div className="mt-1.5 text-[10px] bg-blue-50 border border-blue-200 rounded px-2 py-1 text-blue-800">
+                      <div className="mt-1.5 text-[10px] bg-blue-50 border border-blue-200 rounded-md px-2 py-1 text-blue-800">
                         Insider stock: {aa.inventory_snapshot.qty_available ?? '—'} {aa.inventory_snapshot.unit || 'units'} available
                       </div>
                     )}
@@ -636,16 +1197,13 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                 </div>
 
                 {/* Decision status */}
-                <div className="flex items-center gap-3 shrink-0">
+                <div className="flex items-center gap-2.5 shrink-0">
                   <div className="text-right">
                     <Badge label={statusLabel} colorClass={statusColor} />
-                    {decisionSource && (
-                      <p className="text-[10px] text-gray-900-variant mt-1">
-                        {decisionSource === 'admin_override' ? '⚡ Admin override' :
-                         decisionSource === 'admin_on_behalf' ? '🔑 Admin (on behalf)' :
-                         decisionSource === 'admin' ? '🔑 Admin decision' :
-                         '🏪 Seller decision'}
-                      </p>
+                    {sourceMeta && (
+                      <span className={`inline-flex items-center rounded-md px-2 py-0.5 mt-1 text-[10px] font-medium ${sourceMeta.className}`}>
+                        {sourceMeta.label}
+                      </span>
                     )}
                     {(sd?.decision_reason || aa?.decision_reason) && (
                       <p className="text-[10px] text-red-600 mt-0.5 italic max-w-[160px] truncate">
@@ -666,13 +1224,13 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                       <>
                         <button
                           onClick={() => openAdminDecide(line, 'approved')}
-                          className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition-colors"
+                          className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => openAdminDecide(line, 'rejected')}
-                          className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700 transition-colors"
+                          className="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors"
                         >
                           Reject
                         </button>
@@ -683,7 +1241,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                     {isAdminItem && aa.status !== 'pending_review' && (
                       <button
                         onClick={() => openAdminDecide(line, aa.status === 'approved' ? 'rejected' : 'approved')}
-                        className="px-3 py-1.5 rounded-lg border border-outline-variant text-gray-900-variant text-xs font-bold hover:bg-surface-container transition-colors"
+                        className="px-3 py-1.5 rounded-md border border-outline-variant text-gray-900-variant text-xs font-semibold hover:bg-surface-container transition-colors"
                       >
                         Change
                       </button>
@@ -705,7 +1263,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                           setOverrideReason('');
                           setOverrideError('');
                         }}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
                           !sd || sd.decision === 'pending'
                             ? 'border border-blue-400 bg-blue-50 text-blue-800 hover:bg-blue-100'
                             : 'border border-amber-400 bg-amber-50 text-amber-800 hover:bg-amber-100'
@@ -725,7 +1283,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
       {/* Admin Decide Modal — inventory-aware for sync_with_insider items */}
       {adminDecideTarget && (
         <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-neutral-200">
+          <div className="bg-white rounded-lg max-w-sm w-full p-5 shadow-sm border border-neutral-200">
 
             <h3 className="font-bold text-lg text-gray-900 mb-1">
               {adminDecideTarget.isSyncItem && adminDecision === 'approved' ? 'Inventory Check' : 'Item Decision'}
@@ -1074,25 +1632,24 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
   const totalPending  = (readiness?.seller_pending  ?? 0) + (readiness?.admin_pending  ?? 0);
 
   return (
-    <section className="bg-surface-container-lowest rounded-3xl p-4 lg:p-5 border border-outline-variant/30 shadow-[0_10px_40px_rgba(0,123,71,0.03)] relative overflow-hidden">
-      <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10" />
+    <section className="bg-white rounded-lg p-4 lg:p-5 border border-outline-variant/25">
 
       <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-gray-900 mb-1 flex items-center gap-2">
         <span className="material-symbols-outlined">rule</span> Order Decision
       </h2>
-      <p className="text-xs text-gray-900-variant mb-6">
+      <p className="text-xs text-gray-900-variant mb-4">
         Once all items are reviewed, choose how to proceed with this order.
       </p>
 
       {/* ── Readiness status bar ── */}
       {isPending && (
-        <div className={`rounded-2xl p-4 mb-6 border ${allDecided ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
+        <div className={`rounded-lg p-3 mb-4 border ${allDecided ? 'bg-emerald-50 border-emerald-200' : 'bg-amber-50 border-amber-200'}`}>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-2">
-              <span className={`material-symbols-outlined text-lg ${allDecided ? 'text-emerald-600' : 'text-amber-600'}`}>
+              <span className={`material-symbols-outlined text-base ${allDecided ? 'text-emerald-600' : 'text-amber-600'}`}>
                 {allDecided ? 'check_circle' : 'pending'}
               </span>
-              <p className={`text-sm font-bold ${allDecided ? 'text-emerald-800' : 'text-amber-800'}`}>
+              <p className={`text-sm font-semibold ${allDecided ? 'text-emerald-800' : 'text-amber-800'}`}>
                 {allDecided
                   ? 'All items reviewed — choose an action below'
                   : `${totalPending} item${totalPending !== 1 ? 's' : ''} still pending review`}
@@ -1101,17 +1658,17 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
             {/* Compact pill summary */}
             <div className="flex items-center gap-2 flex-wrap">
               {totalApproved > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-emerald-100 text-emerald-800">
                   ✓ {totalApproved} approved
                 </span>
               )}
               {totalRejected > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-red-100 text-red-800">
                   ✕ {totalRejected} rejected
                 </span>
               )}
               {totalPending > 0 && (
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-800">
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-100 text-amber-800">
                   ● {totalPending} pending
                 </span>
               )}
@@ -1206,7 +1763,7 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
       {/* ── Confirm Modal ── */}
       {showConfirm && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-surface-container-lowest rounded-3xl max-w-md w-full p-8 shadow-2xl border border-outline-variant/20">
+          <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-sm border border-outline-variant/20">
 
             {/* Icon + title */}
             <div className="flex items-center gap-4 mb-4">
@@ -1232,7 +1789,7 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
             </div>
 
             {/* What will happen */}
-            <div className={`rounded-2xl p-4 mb-5 text-sm ${
+            <div className={`rounded-lg p-3 mb-4 text-sm ${
               action === 'accept' ? 'bg-emerald-50 text-emerald-800' :
               action === 'reject_full' ? 'bg-red-50 text-red-800' : 'bg-orange-50 text-orange-800'
             }`}>
@@ -1413,7 +1970,21 @@ function WarehousePills({ warehouses }) {
 
 /** One physical lot: manual tracking or Velocity flow (multi-shipment orders). */
 function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefresh, onNotice, onError }) {
+  const shouldLotStartExpanded = useMemo(() => {
+    const status = String(lot?.carrier_shipment_status || '').trim().toLowerCase();
+    const tracking = String(lot?.tracking_number || lot?.velocity_awb || '').trim();
+    const terminalStates = ['delivered', 'cancel', 'rto_delivered', 'returned', 'lost'];
+    const isTerminal = terminalStates.some((token) => status.includes(token));
+    if (isTerminal) return false;
+    if (!status) return true;
+    if (status.includes('pending') || status.includes('pickup') || status.includes('transit') || status.includes('manifest')) {
+      return true;
+    }
+    return tracking.length > 0;
+  }, [lot?.carrier_shipment_status, lot?.tracking_number, lot?.velocity_awb]);
+
   const [lotTab, setLotTab] = useState('manual');
+  const [expanded, setExpanded] = useState(shouldLotStartExpanded);
   const [lotTracking, setLotTracking] = useState(() => String(lot?.tracking_number || ''));
   const [savingLot, setSavingLot] = useState(false);
   const [lotProductWarehouses, setLotProductWarehouses] = useState([]);
@@ -1485,6 +2056,10 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   useEffect(() => {
     setLotTracking(String(lot?.tracking_number || ''));
   }, [lot?.id, lot?.tracking_number]);
+
+  useEffect(() => {
+    setExpanded(shouldLotStartExpanded);
+  }, [lot?.id, shouldLotStartExpanded]);
 
   const lotVelocityLocked = useMemo(
     () => Boolean(
@@ -1625,6 +2200,23 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   const whLabel = lot?.warehouse?.warehouse_name || lot?.warehouse?.name || 'Warehouse';
   const whPin = lot?.warehouse?.pincode;
   const whVelocity = lot?.warehouse?.velocity_warehouse_id;
+  const lotShipmentStatusRaw = String(lot?.carrier_shipment_status || '').trim();
+  const lotShipmentStatusLabel = lotShipmentStatusRaw
+    ? lotShipmentStatusRaw
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+    : 'Pending';
+  const lotStatusTone = (() => {
+    const s = lotShipmentStatusRaw.toLowerCase();
+    if (!s || s.includes('pending') || s.includes('ready')) return 'bg-slate-100 text-slate-700 border-slate-200';
+    if (s.includes('cancel') || s.includes('lost') || s.includes('rto')) return 'bg-red-50 text-red-700 border-red-200';
+    if (s.includes('deliver')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (s.includes('transit') || s.includes('pickup') || s.includes('manifest')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+  })();
 
   const saveLotManual = async () => {
     setSavingLot(true);
@@ -1664,6 +2256,9 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
                 <span className="ml-1 font-mono text-[10px]">· {lot.velocity_external_code}</span>
               ) : null}
             </p>
+            <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${lotStatusTone}`}>
+              Shipment status: {lotShipmentStatusLabel}
+            </span>
           </div>
           {/* ⓘ Products in this lot */}
           <div className="relative mt-0.5" ref={popoverRef}>
@@ -1727,7 +2322,16 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
             )}
           </div>
         </div>
-        <div className="flex rounded-xl bg-surface-container-low p-1 gap-1 shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-outline-variant/35 bg-white text-xs font-semibold text-gray-700 hover:bg-surface-container-low"
+          >
+            <span className="material-symbols-outlined text-[16px]">{expanded ? 'expand_less' : 'expand_more'}</span>
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+          <div className="flex rounded-xl bg-surface-container-low p-1 gap-1">
           {(lotVelocityLocked
             ? [{ key: 'velocity', label: 'Velocity', icon: 'electric_bolt' }]
             : [
@@ -1746,10 +2350,11 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
               {t.label}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
-      <div className="p-4">
+      {expanded && <div className="p-4">
         {lotTab === 'manual' && (
           <div className="space-y-3">
             <div>
@@ -1785,7 +2390,7 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
             />
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }
@@ -1833,6 +2438,9 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   const [singleShipmentLot, setSingleShipmentLot] = useState(null);
   const [singleTimelineLoading, setSingleTimelineLoading] = useState(false);
   const [singleTimelineRows, setSingleTimelineRows] = useState([]);
+  const [showSingleWebhookInfoModal, setShowSingleWebhookInfoModal] = useState(false);
+  const [singleWebhookPage, setSingleWebhookPage] = useState(1);
+  const [singleWebhookLive, setSingleWebhookLive] = useState(false);
 
   // ── Lot builder state (multi-shipment manual assignment) ──
   const [lotBuilderOpen, setLotBuilderOpen] = useState(false);
@@ -2151,6 +2759,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           .from('order_shipment_tracking_events')
           .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
           .eq('order_shipment_id', lot.id)
+          .in('source', ['webhook', 'cancel_api'])
           .order('event_time', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(50);
@@ -2690,6 +3299,9 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
         order?.fulfillment_mode === 'multi_shipment'
           ? (activeLotId ? { order_shipment_id: activeLotId } : {})
           : (singleShipmentLot?.id ? { order_shipment_id: singleShipmentLot.id } : {});
+      if (!trackPayload.order_shipment_id) {
+        throw new Error('Shipment refresh requires a shipment lot id. Please reload and retry.');
+      }
       await callVelocityFn({ action: 'track_order', payload: trackPayload });
       onNotice('Tracking data pulled from Velocity and saved on the order.');
       await onRefresh();
@@ -2714,6 +3326,9 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
         order?.fulfillment_mode === 'multi_shipment'
           ? (activeLotId ? { order_shipment_id: activeLotId } : {})
           : (singleShipmentLot?.id ? { order_shipment_id: singleShipmentLot.id } : {});
+      if (!trackPayload.order_shipment_id) {
+        throw new Error('Label fetch requires a shipment lot id. Please reload and retry.');
+      }
       const raw = await callVelocityFn({ action: 'track_order', payload: trackPayload });
       let url = findLabelUrlInApiResponse(raw);
       await onRefresh();
@@ -3109,11 +3724,64 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   const formatShipmentStatusLabel = (value) => {
     const raw = String(value || '').trim();
     if (!raw) return '—';
+    const compact = raw.replace(/\s+/g, '').toLowerCase();
+    if (compact === 'readyforreceive' || compact === 'readyforpickup') {
+      return 'Ready for Receive/Pickup';
+    }
     return raw
+      .replace(/([a-z])([A-Z])/g, '$1 $2')
       .replace(/[_-]+/g, ' ')
       .replace(/\s+/g, ' ')
       .toLowerCase()
       .replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+  const statusStageKey = (label) => {
+    const s = String(label || '').toLowerCase();
+    if (s.includes('deliver')) return 'delivered';
+    if (s.includes('transit') || s.includes('out for delivery')) return 'transit';
+    if (s.includes('pickup') || s.includes('receive') || s.includes('manifest')) return 'ready_pickup';
+    if (s.includes('cancel')) return 'cancelled';
+    return 'confirmed';
+  };
+  const resolveShipmentEventLocation = (ev) => {
+    if (typeof ev?.location === 'string' && ev.location.trim()) return ev.location.trim();
+    const payload = ev?.raw_payload && typeof ev.raw_payload === 'object' ? ev.raw_payload : null;
+    if (!payload) return '';
+    const candidates = [
+      payload.location,
+      payload.current_location,
+      payload.location_name,
+      payload.city,
+      payload.current_city,
+      payload.pickup_city,
+      payload.hub,
+      payload.hub_name,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim()) return c.trim();
+    }
+    return '';
+  };
+  const parseSingleWebhookStatusChange = (rawPayload, fallbackTs, ev = null) => {
+    const root = rawPayload && typeof rawPayload === 'object' ? rawPayload : null;
+    const data = root && root.data && typeof root.data === 'object' ? root.data : (root || {});
+    const statusRaw = String(data.status || data.shipment_status || ev?.activity || '').trim();
+    if (!statusRaw) return null;
+    const eventTs = String((root && root.event_timestamp) || fallbackTs || '').trim();
+    const eventMs = eventTs ? Date.parse(eventTs) : Number.NaN;
+    return {
+      eventId: String((root && root.event_id) || ev?.id || `${eventTs}:${statusRaw}:${ev?.source || ''}`).trim(),
+      source: String(ev?.source || '').toLowerCase(),
+      eventTimestamp: eventTs,
+      eventMs,
+      latestStatus: statusRaw,
+      ndrReason: String(data.ndr_reason || data.reason || '').trim(),
+      originalEdd: String(data.original_edd || data.promised_delivery_date || '').trim(),
+      updatedEdd: String(data.estimated_delivery_date || data.updated_estimated_delivery_date || '').trim(),
+      carrierName: String(data.carrier_name || '').trim(),
+      trackingNumber: String(data.tracking_number || data.awb || '').trim(),
+      rawPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : null,
+    };
   };
   const singleVelocityAwb = String(
     singleShipmentLot?.tracking_number ||
@@ -3147,9 +3815,185 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     showSingleVelocityControlCenter &&
     order?.status !== 'cancelled' &&
     !singleCancelBlocked;
+  const singleWebhookStatusRows = useMemo(() => (
+    singleTimelineRows
+      .map((ev) => parseSingleWebhookStatusChange(ev?.raw_payload, ev?.event_time || ev?.created_at, ev))
+      .filter(Boolean)
+  ), [singleTimelineRows]);
+  const singleAvailableWebhookStatuses = useMemo(() => {
+    const uniq = new Set(singleWebhookStatusRows.map((r) => formatShipmentStatusLabel(r.latestStatus || '')).filter(Boolean));
+    return [...uniq].sort((a, b) => a.localeCompare(b));
+  }, [singleWebhookStatusRows]);
+  const [singleWebhookSearch, setSingleWebhookSearch] = useState('');
+  const [singleWebhookStatusFilter, setSingleWebhookStatusFilter] = useState('all');
+  const [singleWebhookFromDate, setSingleWebhookFromDate] = useState('');
+  const [singleWebhookToDate, setSingleWebhookToDate] = useState('');
+  const [singleWebhookSortDir, setSingleWebhookSortDir] = useState('desc');
+  const [singleSelectedWebhookRowId, setSingleSelectedWebhookRowId] = useState('');
+  const filteredSingleWebhookRows = useMemo(() => {
+    const q = singleWebhookSearch.trim().toLowerCase();
+    const fromMs = singleWebhookFromDate ? Date.parse(`${singleWebhookFromDate}T00:00:00`) : Number.NaN;
+    const toMs = singleWebhookToDate ? Date.parse(`${singleWebhookToDate}T23:59:59`) : Number.NaN;
+    const rows = singleWebhookStatusRows.filter((row) => {
+      if (singleWebhookStatusFilter !== 'all' && formatShipmentStatusLabel(row.latestStatus || '') !== singleWebhookStatusFilter) return false;
+      if (Number.isFinite(fromMs) && (!Number.isFinite(row.eventMs) || row.eventMs < fromMs)) return false;
+      if (Number.isFinite(toMs) && (!Number.isFinite(row.eventMs) || row.eventMs > toMs)) return false;
+      if (!q) return true;
+      const hay = [
+        row.latestStatus,
+        row.ndrReason,
+        row.carrierName,
+        row.trackingNumber,
+        row.originalEdd,
+        row.updatedEdd,
+      ].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+    rows.sort((a, b) => {
+      const av = Number.isFinite(a.eventMs) ? a.eventMs : 0;
+      const bv = Number.isFinite(b.eventMs) ? b.eventMs : 0;
+      return singleWebhookSortDir === 'asc' ? av - bv : bv - av;
+    });
+    return rows;
+  }, [singleWebhookFromDate, singleWebhookSearch, singleWebhookSortDir, singleWebhookStatusFilter, singleWebhookStatusRows, singleWebhookToDate]);
+  const singleSelectedWebhookRow = useMemo(
+    () => filteredSingleWebhookRows.find((r) => r.eventId === singleSelectedWebhookRowId) || null,
+    [filteredSingleWebhookRows, singleSelectedWebhookRowId],
+  );
+  const singleWebhookSourceSummary = useMemo(() => {
+    const summary = { webhook: 0, cancelApi: 0 };
+    for (const ev of singleTimelineRows) {
+      const src = String(ev?.source || '').toLowerCase();
+      if (src === 'webhook') summary.webhook += 1;
+      if (src === 'cancel_api') summary.cancelApi += 1;
+    }
+    return summary;
+  }, [singleTimelineRows]);
+  const singleWebhookRowsPerPage = 12;
+  const singleWebhookTotalPages = Math.max(1, Math.ceil(filteredSingleWebhookRows.length / singleWebhookRowsPerPage));
+  const pagedSingleWebhookRows = useMemo(() => {
+    const start = (singleWebhookPage - 1) * singleWebhookRowsPerPage;
+    return filteredSingleWebhookRows.slice(start, start + singleWebhookRowsPerPage);
+  }, [filteredSingleWebhookRows, singleWebhookPage]);
+  const singleSelectedWebhookRowIdx = useMemo(
+    () => filteredSingleWebhookRows.findIndex((r) => r.eventId === singleSelectedWebhookRowId),
+    [filteredSingleWebhookRows, singleSelectedWebhookRowId],
+  );
+  const singlePreviousWebhookRow = useMemo(
+    () => (singleSelectedWebhookRowIdx >= 0 ? filteredSingleWebhookRows[singleSelectedWebhookRowIdx + 1] || null : null),
+    [filteredSingleWebhookRows, singleSelectedWebhookRowIdx],
+  );
+  const singleRowSlaRisk = (row) => {
+    const original = row?.originalEdd ? Date.parse(row.originalEdd) : Number.NaN;
+    const updated = row?.updatedEdd ? Date.parse(row.updatedEdd) : Number.NaN;
+    if (!Number.isFinite(original) || !Number.isFinite(updated)) return { label: '—', tone: 'slate' };
+    const diffDays = Math.round((updated - original) / 86400000);
+    if (diffDays <= 0) return { label: 'On track', tone: 'emerald' };
+    if (diffDays <= 1) return { label: `+${diffDays}d minor slip`, tone: 'amber' };
+    return { label: `+${diffDays}d delay`, tone: 'red' };
+  };
+  const exportSingleWebhookCsv = () => {
+    if (!filteredSingleWebhookRows.length) return;
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const header = ['event_timestamp', 'latest_status', 'ndr_reason', 'original_edd', 'updated_edd', 'carrier_name', 'tracking_number', 'source', 'sla_risk'];
+    const lines = filteredSingleWebhookRows.map((r) => {
+      const risk = singleRowSlaRisk(r).label;
+      return [
+        r.eventTimestamp,
+        formatShipmentStatusLabel(r.latestStatus || ''),
+        r.ndrReason || '',
+        r.originalEdd || '',
+        r.updatedEdd || '',
+        r.carrierName || '',
+        r.trackingNumber || '',
+        r.source || '',
+        risk,
+      ].map(esc).join(',');
+    });
+    const csv = [header.join(','), ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `single-shipment-webhook-updates-${orderId || 'order'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+  useEffect(() => {
+    if (singleWebhookFromDate && singleWebhookToDate && singleWebhookFromDate > singleWebhookToDate) {
+      setSingleWebhookToDate(singleWebhookFromDate);
+    }
+  }, [singleWebhookFromDate, singleWebhookToDate]);
+  useEffect(() => {
+    setSingleWebhookPage(1);
+  }, [singleWebhookSearch, singleWebhookStatusFilter, singleWebhookFromDate, singleWebhookToDate, singleWebhookSortDir]);
+  useEffect(() => {
+    if (!showSingleWebhookInfoModal) {
+      setSingleWebhookLive(false);
+    }
+  }, [showSingleWebhookInfoModal]);
+  const singleTimelineDisplayRows = useMemo(() => {
+    const rows = [...singleTimelineRows];
+    const collapsed = [];
+    for (const ev of rows) {
+      const status = formatShipmentStatusLabel(ev?.activity || 'Status updated');
+      const src = String(ev?.source || '').toLowerCase();
+      const location = resolveShipmentEventLocation(ev);
+      const prev = collapsed[collapsed.length - 1];
+      if (prev && prev.status === status && prev.source === src && prev.location === location) {
+        continue;
+      }
+      const ts = String(ev?.event_time || ev?.created_at || '').trim();
+      const dayKey = ts ? new Date(ts).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Unknown date';
+      collapsed.push({
+        id: ev?.id,
+        ts,
+        dayKey,
+        source: src,
+        status,
+        location,
+        remark: String(ev?.carrier_remark || '').trim(),
+      });
+    }
+    return collapsed;
+  }, [singleTimelineRows]);
+  const singleTimelineStageProgress = useMemo(() => {
+    const stages = ['confirmed', 'ready_pickup', 'transit', 'delivered'];
+    let highest = 0;
+    for (const row of singleTimelineDisplayRows) {
+      const k = statusStageKey(row.status);
+      const i = stages.indexOf(k);
+      if (i > highest) highest = i;
+    }
+    return stages.map((k, i) => ({
+      key: k,
+      label: k === 'ready_pickup' ? 'Ready for Pickup' : k === 'transit' ? 'Transit' : k === 'delivered' ? 'Delivered' : 'Confirmed',
+      done: i <= highest,
+    }));
+  }, [singleTimelineDisplayRows]);
+  useEffect(() => {
+    if (!showSingleWebhookInfoModal || !singleWebhookLive) return undefined;
+    const timer = setInterval(() => {
+      void syncVelocityTrackingFromApi();
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [showSingleWebhookInfoModal, singleWebhookLive]);
+  useEffect(() => {
+    if (!showSingleWebhookInfoModal) return;
+    const onKey = (e) => {
+      if (e.key === 'Escape') setShowSingleWebhookInfoModal(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showSingleWebhookInfoModal]);
+  useEffect(() => {
+    if (singleWebhookPage > singleWebhookTotalPages) setSingleWebhookPage(singleWebhookTotalPages);
+  }, [singleWebhookPage, singleWebhookTotalPages]);
 
   return (
-    <section className="bg-surface-container-lowest rounded-3xl p-4 lg:p-5 border border-outline-variant/30 shadow-[0_10px_40px_rgba(0,123,71,0.03)] relative overflow-hidden">
+    <section className="bg-white rounded-lg p-4 lg:p-5 border border-outline-variant/25 relative overflow-hidden">
       <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[100px] -z-10" />
       <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-gray-900 mb-1 flex items-center gap-2">
         <span className="material-symbols-outlined">local_shipping</span> Shipping &amp; Fulfillment
@@ -3220,7 +4064,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
       )}
 
       {showSingleVelocityControlCenter && (
-        <div className="mb-5 rounded-3xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm space-y-4">
+        <div className="mb-4 rounded-lg border border-slate-200 bg-white p-4 space-y-3">
           <div className="flex items-center justify-between gap-2">
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">Shipment Control Center</p>
@@ -3228,34 +4072,56 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Shipment Status</p>
               <p className="text-sm font-bold text-slate-900 mt-1">{formatShipmentStatusLabel(singleVelocityStatusRaw)}</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Courier Details</p>
               <p className="text-sm font-semibold text-slate-900 mt-1">{singleVelocityCarrier || '—'}</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking ID (AWB)</p>
               <p className="text-sm font-mono text-slate-900 mt-1 break-all">{singleVelocityAwb}</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking Events Count</p>
-              <p className="text-sm font-bold text-slate-900 mt-1">{singleTimelineRows.length}</p>
+            <div className="rounded-md border border-slate-200 bg-white px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setShowSingleWebhookInfoModal(true)}
+                className="w-full text-left"
+              >
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">More Info</p>
+                <p className="text-sm font-bold text-slate-900 mt-1">See more updates &amp; info</p>
+                <p className="text-[10px] text-slate-500 mt-1">{singleWebhookStatusRows.length} status change event{singleWebhookStatusRows.length !== 1 ? 's' : ''}</p>
+              </button>
             </div>
           </div>
+          {singleShipmentLot && (
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <p className="text-xs font-bold text-slate-900 mb-2">Shipment Lot Status Panel</p>
+              <div className="overflow-auto rounded-xl border border-slate-200">
+                <table className="w-full min-w-[520px] text-left">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr className="text-[10px] uppercase tracking-[0.08em] text-slate-500">
+                      <th className="px-3 py-2 font-semibold">Lot</th>
+                      <th className="px-3 py-2 font-semibold">Shipment Status</th>
+                      <th className="px-3 py-2 font-semibold">AWB</th>
+                      <th className="px-3 py-2 font-semibold">Carrier</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="text-xs text-slate-700">
+                      <td className="px-3 py-2.5">{singleShipmentLot.label || `Shipment ${singleShipmentLot.lot_index || 1}`}</td>
+                      <td className="px-3 py-2.5 font-semibold text-slate-900">{formatShipmentStatusLabel(singleVelocityStatusRaw)}</td>
+                      <td className="px-3 py-2.5 font-mono">{singleVelocityAwb || '—'}</td>
+                      <td className="px-3 py-2.5">{singleVelocityCarrier || '—'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              onClick={syncVelocityTrackingFromApi}
-              disabled={syncingVelTrack || printingLabel || cancellingPickup}
-              variant="contained"
-              color="primary"
-              size="small"
-            >
-              {syncingVelTrack ? 'Refreshing...' : 'Refresh shipment status'}
-            </Button>
             <Button
               type="button"
               onClick={cancelVelocityPickup}
@@ -3287,26 +4153,66 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
               Cancel courier is disabled because pickup has already started for this shipment.
             </p>
           )}
-          <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
-            <p className="text-xs font-bold text-slate-900 mb-2">Tracking timeline/history for this specific shipment</p>
+          <div className="rounded-lg border border-slate-200 bg-white p-3">
+            <p className="text-xs font-bold text-slate-900 mb-1">Tracking timeline/history for this specific shipment</p>
+            <p className="text-[11px] text-slate-500 mb-3">Showing webhook and cancellation updates only.</p>
+            <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                {singleTimelineStageProgress.map((s) => (
+                  <span key={s.key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${s.done ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-slate-200 text-slate-500'}`}>
+                    <span className="material-symbols-outlined text-[11px]">{s.done ? 'check_circle' : 'radio_button_unchecked'}</span>
+                    {s.label}
+                  </span>
+                ))}
+              </div>
+            </div>
             {singleTimelineLoading ? (
               <p className="text-xs text-slate-500">Loading timeline...</p>
-            ) : singleTimelineRows.length === 0 ? (
+            ) : singleTimelineDisplayRows.length === 0 ? (
               <p className="text-xs text-slate-500">No tracking history yet for this shipment.</p>
             ) : (
-              <div className="space-y-2 max-h-64 overflow-auto pr-1">
-                {singleTimelineRows.map((ev) => {
-                  const ts = ev?.event_time || ev?.created_at;
+              <div className="max-h-80 overflow-auto pr-1">
+                {singleTimelineDisplayRows.map((ev, idx) => {
+                  const isWebhook = ev.source === 'webhook';
+                  const prevDay = idx > 0 ? singleTimelineDisplayRows[idx - 1].dayKey : null;
+                  const showDay = prevDay !== ev.dayKey;
                   return (
-                    <div key={ev.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5">
-                      <p className="text-xs font-semibold text-slate-900">{formatShipmentStatusLabel(ev.activity || 'Status updated')}</p>
-                      <p className="text-[11px] text-slate-600">
-                        {ev.location || 'Unknown location'}
-                        {ev.carrier_remark ? ` · ${ev.carrier_remark}` : ''}
-                      </p>
-                      <p className="text-[10px] text-slate-500 mt-0.5">
-                        {ts ? new Date(ts).toLocaleString('en-IN') : '—'} · {formatShipmentStatusLabel(ev.source || 'system')}
-                      </p>
+                    <div key={ev.id} className="relative">
+                      {showDay && (
+                        <div className="sticky top-0 z-10 mb-2 bg-white/95 backdrop-blur px-2 py-1 rounded-md border border-slate-200 text-[10px] font-semibold text-slate-500 inline-flex">
+                          {ev.dayKey}
+                        </div>
+                      )}
+                      <div className="relative pl-9 pb-4 last:pb-0">
+                      <div className="absolute left-3 top-6 bottom-0 w-px bg-slate-200 last:hidden" />
+                      <div className={`absolute left-0.5 top-1 h-5 w-5 rounded-full border flex items-center justify-center ${isWebhook ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
+                        <span className="material-symbols-outlined text-[12px]">{isWebhook ? 'radio_button_checked' : 'block'}</span>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_0_rgba(2,6,23,0.04)]">
+                        <div className="flex items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-slate-900">{ev.status}</p>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${isWebhook ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
+                          {isWebhook ? 'Webhook' : 'Cancelled'}
+                        </span>
+                      </div>
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        {ev.location && (
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Location</p>
+                            <p className="text-[11px] text-slate-700 mt-1">{ev.location}</p>
+                          </div>
+                        )}
+                        <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Event timestamp</p>
+                          <p className="text-[11px] text-slate-700 mt-1">{ev.ts ? new Date(ev.ts).toLocaleString('en-IN') : '—'}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2">
+                          <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">Courier remarks</p>
+                          <p className="text-[11px] text-slate-700 mt-1">{ev.remark || 'No remarks'}</p>
+                        </div>
+                      </div>
+                      </div>
+                    </div>
                     </div>
                   );
                 })}
@@ -3315,9 +4221,180 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           </div>
         </div>
       )}
+      {showSingleWebhookInfoModal && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="More info webhook updates">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px]" onClick={() => setShowSingleWebhookInfoModal(false)} />
+          <div className="relative w-full max-w-6xl rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-slate-200">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-500">More Info</p>
+                <h3 className="text-lg font-bold text-slate-900">Shipment Webhook Updates</h3>
+              </div>
+              <button type="button" onClick={() => setShowSingleWebhookInfoModal(false)} className="w-8 h-8 rounded-full border border-slate-300 text-slate-600 hover:bg-slate-100">
+                <span className="material-symbols-outlined text-[16px]">close</span>
+              </button>
+            </div>
+            <div className="p-5">
+              {singleWebhookStatusRows.length === 0 ? (
+                <p className="text-sm text-slate-500">No webhook status_change payload rows found yet for this shipment.</p>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500 font-semibold">Total rows</p>
+                      <p className="text-sm font-bold text-slate-900 mt-1">{singleWebhookStatusRows.length}</p>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-blue-600 font-semibold">Webhook events</p>
+                      <p className="text-sm font-bold text-blue-900 mt-1">{singleWebhookSourceSummary.webhook}</p>
+                    </div>
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-red-600 font-semibold">Cancel API events</p>
+                      <p className="text-sm font-bold text-red-900 mt-1">{singleWebhookSourceSummary.cancelApi}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSingleWebhookLive((v) => !v)}
+                        className={`px-2.5 py-1.5 text-[11px] rounded-lg border font-semibold ${singleWebhookLive ? 'border-emerald-300 bg-emerald-50 text-emerald-700' : 'border-slate-300 bg-white text-slate-600'}`}
+                      >
+                        {singleWebhookLive ? 'Live refresh: ON' : 'Live refresh: OFF'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportSingleWebhookCsv}
+                        className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-50"
+                      >
+                        Export CSV
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500">Page {singleWebhookPage} of {singleWebhookTotalPages}</p>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+                    <input
+                      type="text"
+                      value={singleWebhookSearch}
+                      onChange={(e) => setSingleWebhookSearch(e.target.value)}
+                      placeholder="Search status/carrier/tracking"
+                      className="md:col-span-2 px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    />
+                    <select
+                      value={singleWebhookStatusFilter}
+                      onChange={(e) => setSingleWebhookStatusFilter(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-300 bg-white focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    >
+                      <option value="all">All statuses</option>
+                      {singleAvailableWebhookStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <input
+                      type="date"
+                      value={singleWebhookFromDate}
+                      onChange={(e) => setSingleWebhookFromDate(e.target.value)}
+                      className="px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={singleWebhookToDate}
+                        onChange={(e) => setSingleWebhookToDate(e.target.value)}
+                        className="flex-1 px-3 py-2 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setSingleWebhookSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+                        className="px-2.5 py-2 text-[11px] font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50"
+                        title="Toggle date sort"
+                      >
+                        {singleWebhookSortDir === 'desc' ? 'Newest' : 'Oldest'}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="overflow-auto rounded-lg border border-slate-200">
+                  <table className="w-full min-w-[980px] text-left">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr className="text-[10px] uppercase tracking-[0.1em] text-slate-500">
+                        <th className="px-3 py-2 font-semibold">Event Timestamp</th>
+                        <th className="px-3 py-2 font-semibold">Latest Shipment Status</th>
+                        <th className="px-3 py-2 font-semibold">NDR Reason</th>
+                        <th className="px-3 py-2 font-semibold">Original / Promised Delivery Date</th>
+                        <th className="px-3 py-2 font-semibold">Updated EDD</th>
+                        <th className="px-3 py-2 font-semibold">Carrier Name</th>
+                        <th className="px-3 py-2 font-semibold">Tracking Number</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pagedSingleWebhookRows.map((row, idx) => (
+                        <tr
+                          key={`single-webhook-row-${idx}`}
+                          onClick={() => setSingleSelectedWebhookRowId(row.eventId || `idx-${idx}`)}
+                          className="border-b border-slate-100 last:border-0 text-xs text-slate-700 cursor-pointer hover:bg-slate-50"
+                        >
+                          <td className="px-3 py-2.5">{row.eventTimestamp || '—'}</td>
+                          <td className="px-3 py-2.5 font-semibold text-slate-900">{formatShipmentStatusLabel(row.latestStatus || '—')}</td>
+                          <td className="px-3 py-2.5">{row.ndrReason || '—'}</td>
+                          <td className="px-3 py-2.5">{row.originalEdd || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            <div>{row.updatedEdd || '—'}</div>
+                            {(() => {
+                              const risk = singleRowSlaRisk(row);
+                              return risk.label !== '—' ? (
+                                <span className={`inline-flex mt-1 px-1.5 py-0.5 rounded text-[10px] border ${
+                                  risk.tone === 'emerald' ? 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                                    : risk.tone === 'amber' ? 'bg-amber-50 border-amber-200 text-amber-700'
+                                      : 'bg-red-50 border-red-200 text-red-700'
+                                }`}>{risk.label}</span>
+                              ) : null;
+                            })()}
+                          </td>
+                          <td className="px-3 py-2.5">{row.carrierName || '—'}</td>
+                          <td className="px-3 py-2.5 font-mono">{row.trackingNumber || '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mt-3 flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={singleWebhookPage <= 1}
+                    onClick={() => setSingleWebhookPage((p) => Math.max(1, p - 1))}
+                    className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Prev
+                  </button>
+                  <button
+                    type="button"
+                    disabled={singleWebhookPage >= singleWebhookTotalPages}
+                    onClick={() => setSingleWebhookPage((p) => Math.min(singleWebhookTotalPages, p + 1))}
+                    className="px-2.5 py-1.5 text-[11px] rounded-lg border border-slate-300 bg-white disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+                {singleSelectedWebhookRow && (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500 font-semibold mb-1">Selected row payload</p>
+                    {singlePreviousWebhookRow && (
+                      <p className="text-[11px] text-slate-600 mb-2">
+                        Diff from previous: status <span className="font-semibold">{formatShipmentStatusLabel(singlePreviousWebhookRow.latestStatus || '—')}</span> {'->'} <span className="font-semibold">{formatShipmentStatusLabel(singleSelectedWebhookRow.latestStatus || '—')}</span>
+                      </p>
+                    )}
+                    <pre className="text-[11px] text-slate-700 overflow-auto max-h-48 whitespace-pre-wrap">
+{JSON.stringify(singleSelectedWebhookRow.rawPayload || {}, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {showSingleChosenBanner && (
-        <div className="rounded-2xl border border-outline-variant/25 bg-surface-container-low p-4 mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="rounded-lg border border-outline-variant/25 bg-surface-container-low p-3 mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
               <span className="material-symbols-outlined text-primary text-[20px]">inventory</span>
@@ -3339,7 +4416,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
       )}
 
       {showMultiChosenBanner && (
-        <div className="rounded-2xl border border-secondary/25 bg-secondary/5 p-4 mb-6 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div className="rounded-lg border border-secondary/25 bg-secondary/5 p-3 mb-4 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex items-center gap-3 flex-1 min-w-0">
             <div className="w-9 h-9 rounded-xl bg-secondary/15 flex items-center justify-center shrink-0">
               <span className="material-symbols-outlined text-secondary text-[20px]">splitscreen</span>
@@ -3362,7 +4439,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
       )}
 
       {showFulfillmentRouting && (
-        <div className="rounded-2xl border border-outline-variant/25 bg-white p-5 shadow-sm space-y-4 mb-6">
+        <div className="rounded-lg border border-outline-variant/25 bg-white p-4 space-y-3 mb-4">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
               <span className="material-symbols-outlined text-primary text-[22px]">warehouse</span>
@@ -3402,7 +4479,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
       {/* ── Lot Builder — inline manual assignment UI ── */}
       {lotBuilderOpen && (
-        <div className="rounded-2xl border border-secondary/30 bg-white shadow-sm mb-6 overflow-hidden">
+        <div className="rounded-lg border border-secondary/30 bg-white mb-4 overflow-hidden">
           {/* Header */}
           <div className="px-5 py-4 bg-secondary/5 border-b border-secondary/15 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -3586,13 +4663,13 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
             </button>
           </div>
           {shipmentLotsLoading && shipmentLots.length === 0 && (
-            <div className="rounded-2xl border border-outline-variant/25 bg-white p-4 flex items-center gap-2.5">
+            <div className="rounded-lg border border-outline-variant/25 bg-white p-3 flex items-center gap-2.5">
               <span className="material-symbols-outlined animate-spin text-secondary text-[18px]">progress_activity</span>
               <p className="text-xs text-gray-900-variant">Loading shipment lots...</p>
             </div>
           )}
           {!shipmentLotsLoading && shipmentLots.length === 0 && (
-            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
               <p className="text-xs text-amber-900">
                 No shipment lots found yet. Use "Change mode" to rebuild routing if needed.
               </p>
@@ -3702,7 +4779,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
           {velocityMethodLocked && null}
 
-          <div className="rounded-2xl border border-outline-variant/20 bg-surface-container-low/50 p-4">
+          <div className="rounded-lg border border-outline-variant/20 bg-surface-container-low/50 p-3">
             <p className="text-[10px] font-black uppercase tracking-[0.2em] text-gray-900-variant mb-3">Fulfillment steps</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               {[
@@ -3738,7 +4815,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           </div>
 
           {(pendingVelocitySid || velShipmentId) && velStep !== 'done' && (
-            <div className="rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 to-sky-50 p-4 md:p-5 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 md:p-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] font-black uppercase tracking-[0.2em] text-blue-900/90 mb-1">Fulfillment in progress</p>
                 <p className="text-sm font-bold text-blue-950">
@@ -3780,7 +4857,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
           {/* Step 1 — Dimensions & warehouse (Velocity doc §4 iv) */}
           {(velStep !== 'done') && (
-            <div className="rounded-2xl border border-outline-variant/30 bg-white p-4 lg:p-5 shadow-sm">
+            <div className="rounded-lg border border-outline-variant/30 bg-white p-3 lg:p-4">
               <p className="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">1</span>
                 Package dimensions &amp; pickup warehouse
@@ -3835,7 +4912,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
           {/* Step 2 — Serviceability (hidden while pending order exists — avoids duplicate SHI) */}
           {velStep === 'idle' && !pendingVelocitySid && (
-            <div className="rounded-2xl border border-outline-variant/30 bg-white p-4 lg:p-5 shadow-sm">
+            <div className="rounded-lg border border-outline-variant/30 bg-white p-3 lg:p-4">
               <p className="text-sm font-bold text-gray-900 mb-1 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">2</span>
                 Check serviceability
@@ -3855,14 +4932,14 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           )}
 
           {velStep === 'checking' && (
-            <div className="rounded-2xl border border-outline-variant/30 bg-white p-4 lg:p-5 flex items-center gap-3 shadow-sm">
+            <div className="rounded-lg border border-outline-variant/30 bg-white p-3 lg:p-4 flex items-center gap-3">
               <span className="material-symbols-outlined animate-spin text-gray-900 text-xl">progress_activity</span>
               <p className="text-sm text-gray-900-variant">Checking serviceability with Velocity Shipping...</p>
             </div>
           )}
 
           {velStep === 'error' && (
-            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 shadow-sm">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-3">
               <p className="text-sm font-bold text-red-800 flex items-center gap-2">
                 <span className="material-symbols-outlined text-red-600">error</span>
                 {velError}
@@ -3889,7 +4966,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           {(velStep === 'ready' || velStep === 'creating_order') && velServiceability && !pendingVelocitySid && (
             <>
               {null}
-              <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm">
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <p className="text-sm font-bold text-emerald-900">Route is serviceable</p>
@@ -3938,7 +5015,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
               </div>
 
               {sortedVelocityCarriers.length > 0 && (
-                <div className="rounded-2xl border border-outline-variant/30 bg-white overflow-hidden shadow-sm">
+                <div className="rounded-lg border border-outline-variant/30 bg-white overflow-hidden">
                   <div className="px-4 py-3 border-b border-gray-100 bg-gray-50">
                     <p className="text-[11px] font-bold text-gray-900 uppercase tracking-wider">
                       Available couriers &amp; quotes
@@ -4047,7 +5124,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
                 </div>
               )}
 
-              <div className="rounded-2xl border border-outline-variant/30 bg-white p-4 lg:p-5 space-y-3 shadow-sm">
+              <div className="rounded-lg border border-outline-variant/30 bg-white p-3 lg:p-4 space-y-3">
                 <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                   <span className="w-6 h-6 rounded-full bg-primary text-on-primary text-xs font-bold flex items-center justify-center shrink-0">3</span>
                   Create shipment order <span className="text-xs font-normal text-gray-900-variant">(forward-order — no courier selection yet)</span>
@@ -4069,7 +5146,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
           {/* Step 4 — Assign courier / manifest (forward-order-shipment only) */}
           {velStep !== 'done' && (velStep === 'pending_assign' || velStep === 'assigning' || !!pendingVelocitySid) && (
-            <div className="rounded-2xl border border-outline-variant/30 bg-surface-container-lowest p-4 lg:p-5 space-y-4 shadow-sm">
+            <div className="rounded-lg border border-outline-variant/30 bg-surface-container-lowest p-3 lg:p-4 space-y-4">
               <p className="text-sm font-bold text-gray-900 flex items-center gap-2">
                 <span className="w-6 h-6 rounded-full bg-gray-900 text-white text-xs font-bold flex items-center justify-center shrink-0">4</span>
                 Select courier and generate AWB
@@ -4172,7 +5249,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
           )}
 
           {velocityDonePayload && (
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 shadow-sm">
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
               <p className="text-sm font-bold text-emerald-800 flex items-center gap-2 mb-3">
                 <span className="material-symbols-outlined text-emerald-600">check_circle</span>
                 Shipping created successfully
@@ -4309,37 +5386,37 @@ function OrderDetail({ orderId, onBack }) {
   const isPartialOrder = order?.partial_fulfillment === true;
 
   return (
-    <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">
+    <div className="min-h-screen bg-surface pt-24 md:pt-28 pb-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* Header */}
-        <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-outline-variant/20">
+        <div className="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-3 pb-4 border-b border-outline-variant/15">
           <div className="flex items-start gap-4">
             <button onClick={onBack}
-              className="mt-1 p-2.5 rounded-2xl bg-surface-container-lowest hover:bg-surface-container-low border border-outline-variant/30 group shadow-sm transition-colors">
+              className="mt-1 p-2 rounded-md bg-white hover:bg-slate-50 border border-outline-variant/25 group transition-colors">
               <span className="material-symbols-outlined text-gray-900 group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
             </button>
             <div>
-              <p className="text-[10px] font-bold tracking-[0.2em] text-secondary uppercase mb-1">
+              <p className="text-[10px] font-semibold tracking-[0.16em] text-secondary uppercase mb-1">
                 Order Management · Admin
               </p>
-              <h1 className="font-brand text-2xl lg:text-3xl text-gray-900 tracking-tight">#{orderId.slice(0, 8)}</h1>
+              <h1 className="font-brand text-xl lg:text-2xl text-gray-900 tracking-tight">{getOrderDisplayId(order || { id: orderId })}</h1>
               {isPartialOrder && (
-                <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-100 text-orange-800">
+                <span className="inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-orange-100 text-orange-800">
                   ⚡ Partial fulfillment
                 </span>
               )}
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
-            <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-xl px-4 py-2 flex items-center gap-2 shadow-sm">
+            <div className="bg-white border border-outline-variant/25 rounded-md px-3 py-1.5 flex items-center gap-2">
               <span className="text-[10px] uppercase font-bold text-gray-900-variant">Status</span>
               <Badge
                 label={(order?.status || '').replace(/_/g, ' ')}
                 colorClass={STATUS_COLORS[order?.status] || STATUS_COLORS.pending}
               />
             </div>
-            <div className="bg-surface-container-lowest border border-outline-variant/30 rounded-xl px-4 py-2 flex items-center gap-2 shadow-sm">
+            <div className="bg-white border border-outline-variant/25 rounded-md px-3 py-1.5 flex items-center gap-2">
               <span className="text-[10px] uppercase font-bold text-gray-900-variant">Payment</span>
               <Badge
                 label={(order?.payment_status || '').replace(/_/g, ' ')}
@@ -4348,34 +5425,34 @@ function OrderDetail({ orderId, onBack }) {
             </div>
             <button
               onClick={() => setShowLog((v) => !v)}
-              className="px-4 py-2 rounded-xl border border-outline-variant text-xs font-bold text-gray-900-variant hover:bg-surface-container transition-colors">
+              className="px-3 py-1.5 rounded-md border border-outline-variant/25 text-xs font-semibold text-gray-900-variant hover:bg-slate-50 transition-colors">
               {showLog ? 'Hide' : 'Show'} Audit Log
             </button>
           </div>
         </div>
 
         {notice && (
-          <div className="mb-6 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center gap-3 shadow-sm">
+          <div className="mb-4 px-3 py-2.5 rounded-md bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm flex items-center gap-2.5">
             <span className="material-symbols-outlined text-emerald-600">check_circle</span>
             <p className="font-medium flex-1">{notice}</p>
             <button onClick={() => setNotice('')} className="text-emerald-600 hover:text-emerald-800 font-bold">✕</button>
           </div>
         )}
         {error && (
-          <div className="mb-6 px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm flex items-center gap-3 shadow-sm">
+          <div className="mb-4 px-3 py-2.5 rounded-md bg-red-50 border border-red-200 text-red-800 text-sm flex items-center gap-2.5">
             <span className="material-symbols-outlined text-red-600">error</span>
             <p className="font-medium flex-1">{error}</p>
             <button onClick={() => setError('')} className="text-red-600 hover:text-red-800 font-bold">✕</button>
           </div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-8">
-          <div className="lg:col-span-2 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
+          <div className="lg:col-span-2 space-y-4">
 
             {/* Audit log */}
             {showLog && (
-              <section className="bg-white rounded-xl p-4 border border-neutral-200 shadow-sm">
-                <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <section className="bg-white rounded-lg p-4 border border-neutral-200">
+                <h2 className="text-xs uppercase tracking-[0.12em] font-semibold text-gray-900 mb-3 flex items-center gap-2">
                   <span className="material-symbols-outlined">history</span> Workflow Audit Log
                 </h2>
                 <WorkflowLog orderId={orderId} />
@@ -4418,8 +5495,8 @@ function OrderDetail({ orderId, onBack }) {
             )}
 
             {/* Order items summary */}
-            <section className="bg-white rounded-xl p-4 lg:p-4 border border-neutral-200 shadow-sm">
-              <h2 className="text-sm uppercase tracking-[0.15em] font-bold text-gray-900 mb-6 flex items-center gap-2">
+            <section className="bg-white rounded-lg p-4 border border-neutral-200">
+              <h2 className="text-xs uppercase tracking-[0.12em] font-semibold text-gray-900 mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined">receipt_long</span> Order Items
               </h2>
               <div className="space-y-4">

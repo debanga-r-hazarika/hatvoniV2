@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { cartService } from '../services/cartService';
+import AdminNotificationsMenu from './admin/AdminNotificationsMenu';
+import SellerNotificationsMenu from './seller/SellerNotificationsMenu';
+import CustomerNotificationsMenu from './customer/CustomerNotificationsMenu';
 
 import AppBar from '@mui/material/AppBar';
 import Toolbar from '@mui/material/Toolbar';
@@ -320,26 +323,31 @@ export default function Navbar() {
                   }}
                 >
                   {(isAdmin || isEmployee) && (
-                    <Button
-                      component={Link}
-                      to="/admin"
-                      size="small"
-                      sx={{
-                        bgcolor: '#f59e0b',
-                        color: '#fff',
-                        fontSize: '0.6875rem',
-                        fontWeight: 700,
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        px: 2,
-                        py: 0.75,
-                        borderRadius: '9999px',
-                        '&:hover': { bgcolor: '#d97706' },
-                      }}
-                    >
-                      {isAdmin ? 'Admin' : 'Staff'}
-                    </Button>
+                    <>
+                      <AdminNotificationsMenu userId={user?.id} />
+                      <Button
+                        component={Link}
+                        to="/admin"
+                        size="small"
+                        sx={{
+                          bgcolor: '#f59e0b',
+                          color: '#fff',
+                          fontSize: '0.6875rem',
+                          fontWeight: 700,
+                          letterSpacing: '0.1em',
+                          textTransform: 'uppercase',
+                          px: 2,
+                          py: 0.75,
+                          borderRadius: '9999px',
+                          '&:hover': { bgcolor: '#d97706' },
+                        }}
+                      >
+                        {isAdmin ? 'Admin' : 'Staff'}
+                      </Button>
+                    </>
                   )}
+                  {isSeller && <SellerNotificationsMenu userId={user?.id} />}
+                  {!isAdmin && !isEmployee && !isSeller && <CustomerNotificationsMenu userId={user?.id} />}
                   {isSeller && (
                     <Button
                       component={Link}

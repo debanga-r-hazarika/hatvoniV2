@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { cartService } from '../services/cartService';
 import AccountSidebar from '../components/AccountSidebar';
+import { getOrderDisplayId, getOrderItemDisplayId } from '../lib/orderDisplay';
 
 /* ─────────────── constants ─────────────── */
 const statusFlow = ['placed', 'processing', 'shipped', 'delivered'];
@@ -46,8 +47,6 @@ const statusConfig = {
   placed:               { icon: 'receipt_long',    label: 'Order Placed',        color: '#78716c', bg: '#f5f5f4', pill: 'bg-stone-100 text-stone-600 border-stone-200' },
   processing:          { icon: 'autorenew',       label: 'Processing',          color: '#b45309', bg: '#fffbeb', pill: 'bg-amber-50 text-amber-700 border-amber-200' },
   shipped:             { icon: 'local_shipping',  label: 'Shipped',             color: '#1d4ed8', bg: '#eff6ff', pill: 'bg-blue-50 text-blue-700 border-blue-200' },
-  partially_shipped:   { icon: 'inventory_2',    label: 'Partially shipped',    color: '#0369a1', bg: '#f0f9ff', pill: 'bg-sky-50 text-sky-800 border-sky-200' },
-  partially_delivered: { icon: 'move_item',       label: 'Partially delivered', color: '#0f766e', bg: '#ecfdfa', pill: 'bg-teal-50 text-teal-800 border-teal-200' },
   delivered:           { icon: 'check_circle',    label: 'Delivered',           color: '#047857', bg: '#ecfdf5', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   cancelled:           { icon: 'cancel',          label: 'Cancelled',           color: '#dc2626', bg: '#fef2f2', pill: 'bg-red-50 text-red-700 border-red-200' },
 };
@@ -93,8 +92,8 @@ function resolveCustomerStatus(order) {
   const s = String(order.order_status || order.status || 'placed').toLowerCase();
   if (s === 'processed')          return 'processing';
   if (s === 'partially_approved') return 'processing';
-  if (s === 'partially_shipped')  return 'partially_shipped';
-  if (s === 'partially_delivered') return 'partially_delivered';
+  if (s === 'partially_shipped')  return 'shipped';
+  if (s === 'partially_delivered') return 'shipped';
   if (s === 'rejected')           return 'cancelled';
   return s;
 }
@@ -103,7 +102,7 @@ function resolveCustomerStatus(order) {
 
 function SectionCard({ children, className = '' }) {
   return (
-    <div className={`bg-white rounded-2xl border border-outline-variant/12 shadow-sm overflow-hidden ${className}`}>
+    <div className={`bg-white rounded-2xl border border-outline-variant/12 shadow-sm hover:shadow-md transition-shadow overflow-hidden ${className}`}>
       {children}
     </div>
   );
@@ -150,6 +149,9 @@ export default function OrderDetail() {
   const [copied, setCopied] = useState(false);
   const [trackingEmbedLoaded, setTrackingEmbedLoaded] = useState(false);
   const [showFullTracking, setShowFullTracking] = useState(false);
+  const [activeProduct, setActiveProduct] = useState(null);
+  const [activeShipment, setActiveShipment] = useState(null);
+  const [loadingProductShipment, setLoadingProductShipment] = useState(false);
 
   /* fetch + realtime */
   useEffect(() => {
@@ -250,6 +252,22 @@ export default function OrderDetail() {
   const isPartial    = order?.partial_fulfillment && rejectedItems.length > 0;
   const refundAmount = Number(order?.refund_amount || 0);
   const refundInfo   = order?.refund_status ? REFUND_LABELS[order.refund_status] : null;
+  const normalizeShipmentStatus = (value) => String(value || '').toLowerCase().trim();
+  const resolveItemStatus = (item) => {
+    const s = normalizeShipmentStatus(item?.order_shipment?.carrier_shipment_status || item?.shipment_status || '');
+    if (s.includes('cancel') || s.includes('reject') || s.includes('lost')) return 'cancelled';
+    if (s.includes('deliver')) return 'delivered';
+    if (item?.order_shipment_id || s) return 'shipped';
+    if (String(order?.status || '').toLowerCase() === 'pending') return 'pending';
+    return 'processing';
+  };
+  const itemStatusPill = (status) => {
+    if (status === 'delivered') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status === 'shipped') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (status === 'cancelled') return 'bg-red-50 text-red-700 border-red-200';
+    if (status === 'pending') return 'bg-stone-100 text-stone-600 border-stone-200';
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+  };
 
   /* actions */
   const handleCancel = async () => {
@@ -308,9 +326,29 @@ export default function OrderDetail() {
   };
 
   const copyOrderId = () => {
-    navigator.clipboard.writeText(order.id);
+    navigator.clipboard.writeText(getOrderDisplayId(order));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const openProductModal = async (item) => {
+    setActiveProduct(item);
+    setActiveShipment(null);
+    if (!item?.order_shipment_id) return;
+    try {
+      setLoadingProductShipment(true);
+      const { data, error: e } = await supabase
+        .from('order_shipments')
+        .select('id, tracking_number, carrier_shipment_status, velocity_tracking_url, label, shipment_provider, order_shipment_tracking_events(activity, location, carrier_remark, event_time, created_at)')
+        .eq('id', item.order_shipment_id)
+        .maybeSingle();
+      if (e) throw e;
+      setActiveShipment(data || null);
+    } catch (err) {
+      console.warn('Unable to load product shipment', err);
+    } finally {
+      setLoadingProductShipment(false);
+    }
   };
 
   /* ── Loading State ── */
@@ -320,12 +358,18 @@ export default function OrderDetail() {
         <div className="max-w-6xl mx-auto px-4 sm:px-6">
           <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
             <AccountSidebar />
-            <div className="flex items-center justify-center min-h-[50vh]">
-              <div className="flex flex-col items-center gap-3">
-                <div className="w-10 h-10 rounded-full border-2 border-secondary border-t-transparent animate-spin" />
-                <p className="text-xs text-on-surface-variant/50 font-body">Loading order details…</p>
+            <section className="space-y-4">
+              <div className="h-36 rounded-2xl border border-outline-variant/15 bg-white animate-pulse" />
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-16 rounded-xl border border-outline-variant/15 bg-white animate-pulse" />
+                ))}
               </div>
-            </div>
+              <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
+                <div className="lg:col-span-3 h-[420px] rounded-2xl border border-outline-variant/15 bg-white animate-pulse" />
+                <div className="lg:col-span-2 h-[420px] rounded-2xl border border-outline-variant/15 bg-white animate-pulse" />
+              </div>
+            </section>
           </div>
         </div>
       </main>
@@ -340,14 +384,14 @@ export default function OrderDetail() {
           <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
             <AccountSidebar />
             <div className="flex flex-col items-center justify-center min-h-[50vh] text-center gap-5">
-              <div className="w-16 h-16 rounded-2xl bg-surface-container-low flex items-center justify-center">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-surface-container-low to-surface-container flex items-center justify-center border border-outline-variant/10">
                 <span className="material-symbols-outlined text-3xl text-on-surface-variant/25">receipt_long</span>
               </div>
               <div>
                 <h1 className="font-headline text-xl font-bold text-primary mb-1.5">Order not found</h1>
                 <p className="text-sm text-on-surface-variant/60 font-body max-w-xs">{error || 'This order does not exist or you do not have permission to view it.'}</p>
               </div>
-              <Link to="/orders" className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-xl font-headline font-semibold text-sm hover:bg-primary/90 active:scale-[0.98] transition-all">
+              <Link to="/orders" className="inline-flex items-center gap-2 bg-primary text-white px-6 py-2.5 rounded-xl font-headline font-semibold text-sm hover:bg-primary/90 hover:shadow-md active:scale-[0.98] transition-all">
                 <span className="material-symbols-outlined text-[16px]">arrow_back</span>
                 Back to Orders
               </Link>
@@ -362,7 +406,7 @@ export default function OrderDetail() {
   const bb          = order.billing_breakdown || {};
   const bbSub       = Number(bb.subtotal || summary?.subtotal || 0);
   const deliveryFee = Number(bb.delivery_fee || 0);
-  const shippingFee = Number(bb.shipping_fee ?? order.shipping_charge ?? 0);
+  const shippingFee = Number(bb.shipping_fee ?? 0);
   const codFee      = Number(bb.cod_fee || 0);
   const couponDisc  = Number(bb.coupon_discount || order.discount_amount || 0);
   const couponCode  = bb.coupon_code || order.coupon_code || '';
@@ -392,7 +436,7 @@ export default function OrderDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
           <AccountSidebar />
 
-          <section className="min-w-0 space-y-5 animate-fade-up">
+          <section className="min-w-0 space-y-6 animate-fade-up">
 
             {/* ══ Breadcrumb + Order Header ══ */}
             <div>
@@ -406,7 +450,7 @@ export default function OrderDetail() {
 
               {/* Hero header card */}
               <div
-                className="rounded-2xl p-5 sm:p-6 border"
+                className="rounded-2xl p-5 sm:p-6 border shadow-sm"
                 style={{
                   background: isCancelled
                     ? 'linear-gradient(135deg, #fef2f2 0%, #fff 60%)'
@@ -431,7 +475,7 @@ export default function OrderDetail() {
                 }}
               >
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-start sm:items-center gap-4">
                     {/* Status icon circle */}
                     <div
                       className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm"
@@ -447,7 +491,7 @@ export default function OrderDetail() {
                     <div>
                       <div className="flex flex-wrap items-center gap-2 mb-0.5">
                         <h1 className="font-headline text-lg font-bold text-primary">
-                          Order #{order.id.slice(0, 8).toUpperCase()}
+                          Order {getOrderDisplayId(order)}
                         </h1>
                         <span
                           className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${sMeta.pill}`}
@@ -468,13 +512,30 @@ export default function OrderDetail() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-col items-start sm:items-end gap-1 shrink-0">
+                  <div className="flex flex-col items-start sm:items-end gap-1 shrink-0 sm:pl-4">
                     <p className="font-headline text-2xl font-bold text-primary">{money(grandTotal)}</p>
                     <p className="text-[10px] text-on-surface-variant/45 font-body">{items.length} item{items.length !== 1 ? 's' : ''}</p>
                   </div>
                 </div>
               </div>
             </div>
+
+            {!isCancelled && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div className="rounded-xl border border-outline-variant/15 bg-white px-3.5 py-2.5">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-on-surface-variant/45 font-semibold">Order ID</p>
+                  <p className="text-xs font-mono text-primary mt-1 break-all">{getOrderDisplayId(order)}</p>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-3.5 py-2.5">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-blue-700/70 font-semibold">Shipment</p>
+                  <p className="text-xs font-semibold text-blue-800 mt-1">{hasTracking ? 'Tracking available' : 'Preparing dispatch'}</p>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5">
+                  <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-700/70 font-semibold">Payment</p>
+                  <p className="text-xs font-semibold text-emerald-800 mt-1">{payStatus === 'paid' ? 'Confirmed' : payStatus === 'refunded' ? 'Refunded' : 'Pending'}</p>
+                </div>
+              </div>
+            )}
 
             {/* ══ Alert Banners ══ */}
             {isFreshOrder && !isCancelled && (
@@ -935,7 +996,7 @@ export default function OrderDetail() {
                     title={`${items.length} Item${items.length !== 1 ? 's' : ''} in this order`}
                   />
                   <div className="divide-y divide-outline-variant/10">
-                    {items.map((item) => {
+                    {items.map((item, itemIndex) => {
                       const name      = item.lot_name || item.lots?.lot_name || item.products?.name || 'Item';
                       const img       = item.lots?.image_url || item.products?.image_url || 'https://placehold.co/80x80?text=Item';
                       const isVoid    = isPartial && (
@@ -943,10 +1004,17 @@ export default function OrderDetail() {
                         rejectedItems.some((r) => r.order_item_id === item.id)
                       );
                       const lineTotal = Number(item.price || 0) * Number(item.quantity || 0);
+                      const lineDisplayId = getOrderItemDisplayId(order, item, itemIndex);
+                      const itemRefundStatus = String(item.refund_status || '').toLowerCase();
+                      const hasItemRefund = itemRefundStatus && itemRefundStatus !== 'not_required';
 
                       return (
-                        <div key={item.id} className={`flex items-start gap-4 px-5 py-4 hover:bg-surface-container-low/30 transition-colors ${isVoid ? 'opacity-50' : ''}`}>
-                          <div className="w-14 h-14 rounded-xl overflow-hidden bg-surface-container-low shrink-0 relative border border-outline-variant/10">
+                        <button
+                          type="button"
+                          onClick={() => openProductModal(item)}
+                          className={`w-full text-left flex items-start gap-4 px-5 py-4 hover:bg-surface-container-low/30 transition-all duration-200 hover:translate-x-0.5 ${isVoid ? 'opacity-50' : ''}`}
+                        >
+                          <div className="w-16 h-16 rounded-xl overflow-hidden bg-surface-container-low shrink-0 relative border border-outline-variant/10">
                             <img
                               className={`w-full h-full object-cover ${isVoid ? 'grayscale' : ''}`}
                               src={img}
@@ -961,7 +1029,7 @@ export default function OrderDetail() {
                           </div>
                           <div className="flex-1 min-w-0 pt-0.5">
                             <div className="flex justify-between items-start gap-2">
-                              <h3 className={`text-sm font-semibold font-headline leading-snug ${isVoid ? 'text-red-500 line-through' : 'text-on-surface'}`}>
+                              <h3 className={`text-sm sm:text-[15px] font-semibold font-headline leading-snug ${isVoid ? 'text-red-500 line-through' : 'text-on-surface'}`}>
                                 {name}
                               </h3>
                               <span className={`text-sm font-bold font-headline shrink-0 ${isVoid ? 'text-red-400' : 'text-primary'}`}>
@@ -971,6 +1039,18 @@ export default function OrderDetail() {
                             <p className="text-[11px] text-on-surface-variant/50 font-body mt-0.5">
                               {item.quantity} × {money(item.price)}
                             </p>
+                            <p className="text-[10px] text-on-surface-variant/45 font-mono mt-1">
+                              Item ID: {lineDisplayId}
+                            </p>
+                            <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${itemStatusPill(resolveItemStatus(item))}`}>
+                              {resolveItemStatus(item)}
+                            </span>
+                            {hasItemRefund && (
+                              <span className={`inline-flex mt-2 ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${refundInfo?.badge || 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                                Refund: {itemRefundStatus.replace(/_/g, ' ')}
+                                {Number(item.refund_amount || 0) > 0 ? ` · ${money(item.refund_amount)}` : ''}
+                              </span>
+                            )}
                             {item.lot_snapshot?.length > 0 && (
                               <div className="mt-2 flex flex-wrap gap-1">
                                 {item.lot_snapshot.slice(0, 4).map((b) => (
@@ -988,18 +1068,18 @@ export default function OrderDetail() {
                               </div>
                             )}
                           </div>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
                 </SectionCard>
 
                 {/* Actions */}
-                <div className="flex gap-3">
+                <div className="flex flex-col sm:flex-row gap-3">
                   <button
                     onClick={handleReorder}
                     disabled={!items.length}
-                    className="flex-1 flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-headline font-semibold text-sm hover:bg-primary/90 transition-all active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
+                    className="flex-1 flex items-center justify-center gap-2 bg-primary text-white py-3 rounded-xl font-headline font-semibold text-sm hover:bg-primary/90 hover:shadow-md transition-all active:scale-[0.98] disabled:opacity-30 disabled:cursor-not-allowed shadow-sm"
                   >
                     <span className="material-symbols-outlined text-[17px]">shopping_cart</span>
                     Reorder Items
@@ -1007,7 +1087,7 @@ export default function OrderDetail() {
                   {canCancel && !isCancelled && (
                     <button
                       onClick={() => setShowCancelModal(true)}
-                      className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl border-2 border-red-200 text-red-600 font-headline font-semibold text-sm hover:bg-red-50 hover:border-red-300 transition-all active:scale-[0.98]"
+                      className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl border-2 border-red-200 text-red-600 font-headline font-semibold text-sm hover:bg-red-50 hover:border-red-300 hover:shadow-sm transition-all active:scale-[0.98] sm:min-w-[140px]"
                     >
                       <span className="material-symbols-outlined text-[17px]">close</span>
                       Cancel
@@ -1017,7 +1097,7 @@ export default function OrderDetail() {
               </div>
 
               {/* RIGHT — Info Sidebar */}
-              <aside className="lg:col-span-2 space-y-4">
+              <aside className="lg:col-span-2 space-y-4 lg:sticky lg:top-28 self-start">
 
                 {/* Order Summary */}
                 <SectionCard>
@@ -1108,6 +1188,17 @@ export default function OrderDetail() {
                         <span className="text-[10px] text-emerald-600 font-body ml-auto">Applied</span>
                       </div>
                     )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      <div className="rounded-lg border border-outline-variant/15 bg-surface-container-low/40 px-2.5 py-2">
+                        <p className="text-[9px] uppercase tracking-[0.12em] text-on-surface-variant/45 font-semibold">Payment security</p>
+                        <p className="text-[11px] text-on-surface-variant/75 mt-0.5">Encrypted and verified through trusted gateways.</p>
+                      </div>
+                      <div className="rounded-lg border border-outline-variant/15 bg-surface-container-low/40 px-2.5 py-2">
+                        <p className="text-[9px] uppercase tracking-[0.12em] text-on-surface-variant/45 font-semibold">Refund assurance</p>
+                        <p className="text-[11px] text-on-surface-variant/75 mt-0.5">If eligible, refunds are tracked here automatically.</p>
+                      </div>
+                    </div>
                   </div>
                 </SectionCard>
 
@@ -1143,7 +1234,7 @@ export default function OrderDetail() {
                 <SectionCard>
                   <SectionHeader icon="info" title="Order Info" />
                   <div className="px-5 py-3 space-y-0">
-                    <InfoRow label="Order ID" value={<code className="font-mono text-[10px] text-primary/80 break-all">{order.id}</code>} />
+                    <InfoRow label="Order ID" value={<code className="font-mono text-[10px] text-primary/80 break-all">{getOrderDisplayId(order)}</code>} />
                     <InfoRow label="Placed on" value={formatDateTime(order.created_at)} />
                     {order.updated_at && order.updated_at !== order.created_at && (
                       <InfoRow label="Last update" value={formatDateTime(order.updated_at)} />
@@ -1165,11 +1256,128 @@ export default function OrderDetail() {
                     </button>
                   </div>
                 </SectionCard>
+
+                <SectionCard>
+                  <SectionHeader icon="support_agent" title="Need Help?" />
+                  <div className="p-5 space-y-3">
+                    <p className="text-xs text-on-surface-variant/70 leading-relaxed">
+                      Our order support team can help with shipment updates, delivery exceptions, and payment/refund questions.
+                    </p>
+                    <div className="space-y-2">
+                      <a
+                        href="mailto:support@hatvoni.com?subject=Order%20Support%20Request"
+                        className="w-full inline-flex items-center justify-between rounded-xl border border-outline-variant/20 px-3 py-2.5 hover:bg-surface-container-low transition-all"
+                      >
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-on-surface">
+                          <span className="material-symbols-outlined text-[15px] text-secondary">mail</span>
+                          support@hatvoni.com
+                        </span>
+                        <span className="material-symbols-outlined text-[15px] text-on-surface-variant/40">open_in_new</span>
+                      </a>
+                      <div className="w-full inline-flex items-center justify-between rounded-xl border border-outline-variant/20 px-3 py-2.5 bg-surface-container-low/30">
+                        <span className="inline-flex items-center gap-2 text-xs font-semibold text-on-surface">
+                          <span className="material-symbols-outlined text-[15px] text-secondary">schedule</span>
+                          Support hours
+                        </span>
+                        <span className="text-[11px] text-on-surface-variant/70">Mon-Sat, 10 AM - 7 PM</span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-on-surface-variant/55">
+                      Include your order ID <span className="font-mono text-primary">{getOrderDisplayId(order)}</span> for faster resolution.
+                    </p>
+                  </div>
+                </SectionCard>
               </aside>
             </div>
           </section>
         </div>
       </div>
+
+      {activeProduct && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => { setActiveProduct(null); setActiveShipment(null); }} />
+          <div className="relative bg-white rounded-3xl w-full max-w-2xl border border-outline-variant/15 shadow-2xl overflow-auto max-h-[85vh]">
+            <div className="p-5 border-b border-outline-variant/10 flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-on-surface-variant/50">Product Details</p>
+                <p className="text-base font-semibold text-on-surface">
+                  {activeProduct.lot_name || activeProduct.lots?.lot_name || activeProduct.products?.name || 'Product'}
+                </p>
+                <p className="text-xs text-on-surface-variant/60 mt-0.5">
+                  {getOrderDisplayId(order)} · {activeProduct.quantity} × {money(activeProduct.price)}
+                </p>
+              </div>
+              <button onClick={() => { setActiveProduct(null); setActiveShipment(null); }} className="material-symbols-outlined text-on-surface-variant/60 hover:text-on-surface">close</button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-on-surface-variant/60">Current status</span>
+                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border capitalize ${itemStatusPill(resolveItemStatus(activeProduct))}`}>
+                  {resolveItemStatus(activeProduct)}
+                </span>
+              </div>
+
+              {!activeProduct.order_shipment_id && (
+                <p className="text-xs text-on-surface-variant/70 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  This product is processing and will stay in Processing until shipment lot assignment and AWB generation.
+                </p>
+              )}
+
+              {activeProduct.order_shipment_id && (
+                <>
+                  {loadingProductShipment ? (
+                    <p className="text-xs text-on-surface-variant/70">Loading shipment details...</p>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-outline-variant/15 p-3 bg-surface-container-low/40">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50 mb-1">Shipment</p>
+                        <p className="text-xs text-on-surface-variant/75">
+                          {(activeShipment?.shipment_provider || order?.shipment_provider || 'Courier')} · AWB: <span className="font-mono text-primary">{activeShipment?.tracking_number || 'Pending'}</span>
+                        </p>
+                        {(activeShipment?.velocity_tracking_url || activeShipment?.tracking_number) && (
+                          <a
+                            href={activeShipment?.velocity_tracking_url || `/track/${encodeURIComponent(activeShipment?.tracking_number || '')}`}
+                            className="inline-flex mt-2 text-[11px] font-semibold text-secondary hover:underline"
+                            target={activeShipment?.velocity_tracking_url ? '_blank' : undefined}
+                            rel={activeShipment?.velocity_tracking_url ? 'noopener noreferrer' : undefined}
+                          >
+                            Track shipment
+                          </a>
+                        )}
+                      </div>
+
+                      <div>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50 mb-2">Shipping timeline</p>
+                        {(activeShipment?.order_shipment_tracking_events || []).length === 0 ? (
+                          <p className="text-xs text-on-surface-variant/60">No tracking events available yet.</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {[...(activeShipment?.order_shipment_tracking_events || [])]
+                              .sort((a, b) => new Date(b.event_time || b.created_at || 0) - new Date(a.event_time || a.created_at || 0))
+                              .slice(0, 8)
+                              .map((ev, idx) => (
+                                <div key={idx} className="rounded-lg border border-outline-variant/12 p-2.5">
+                                  <p className="text-xs font-semibold text-on-surface">{ev.activity || 'Update'}</p>
+                                  <p className="text-[11px] text-on-surface-variant/70">
+                                    {[ev.location, ev.carrier_remark].filter(Boolean).join(' · ') || '—'}
+                                  </p>
+                                  <p className="text-[10px] text-on-surface-variant/50 mt-0.5">
+                                    {new Date(ev.event_time || ev.created_at).toLocaleString('en-IN')}
+                                  </p>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ═══════════ CANCEL MODAL ═══════════ */}
       {showCancelModal && (

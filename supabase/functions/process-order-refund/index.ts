@@ -188,10 +188,12 @@ Deno.serve(async (req: Request) => {
       if (Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0) {
         const snap = item.lot_snapshot.find((s: any) => s.product_key === rejected.product_key);
         if (snap) {
-          refundAmountRupees += Number(snap.unit_price || 0) * Number(snap.quantity || 0) * Number(item.quantity || 0);
+          const lineRefund = Number(snap.unit_price || 0) * Number(snap.quantity || 0) * Number(item.quantity || 0);
+          refundAmountRupees += lineRefund;
         }
       } else {
-        refundAmountRupees += Number(item.price || 0) * Number(item.quantity || 0);
+        const lineRefund = Number(item.price || 0) * Number(item.quantity || 0);
+        refundAmountRupees += lineRefund;
       }
     }
 
@@ -241,6 +243,60 @@ Deno.serve(async (req: Request) => {
     payment_status: newPaymentStatus,
     updated_at: new Date().toISOString(),
   }).eq('id', order_id);
+
+  if (mode === 'full') {
+    const { data: allItems } = await adminClient
+      .from('order_items')
+      .select('id, quantity, price')
+      .eq('order_id', order_id);
+    if (Array.isArray(allItems) && allItems.length > 0) {
+      for (const oi of allItems) {
+        await adminClient
+          .from('order_items')
+          .update({
+            refund_status: 'initiated',
+            refund_amount: Number(oi.price || 0) * Number(oi.quantity || 0),
+            refund_reason: reason || 'Order rejected by admin',
+            refund_reference: refundResult.id,
+          })
+          .eq('id', oi.id);
+      }
+    }
+  } else {
+    const rejectedItems: Array<{ order_item_id: string; product_key: string }> =
+      Array.isArray(order.rejected_items) ? order.rejected_items : [];
+    const itemRefundMap = new Map<string, number>();
+    const { data: orderItems } = await adminClient
+      .from('order_items')
+      .select('id, quantity, price, lot_snapshot')
+      .eq('order_id', order_id);
+    const itemMap = new Map((orderItems || []).map((i: any) => [i.id, i]));
+    for (const rejected of rejectedItems) {
+      const item = itemMap.get(rejected.order_item_id);
+      if (!item) continue;
+      if (Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0) {
+        const snap = item.lot_snapshot.find((s: any) => s.product_key === rejected.product_key);
+        if (snap) {
+          const lineRefund = Number(snap.unit_price || 0) * Number(snap.quantity || 0) * Number(item.quantity || 0);
+          itemRefundMap.set(item.id, (itemRefundMap.get(item.id) || 0) + lineRefund);
+        }
+      } else {
+        const lineRefund = Number(item.price || 0) * Number(item.quantity || 0);
+        itemRefundMap.set(item.id, (itemRefundMap.get(item.id) || 0) + lineRefund);
+      }
+    }
+    for (const [itemId, amount] of itemRefundMap.entries()) {
+      await adminClient
+        .from('order_items')
+        .update({
+          refund_status: 'initiated',
+          refund_amount: amount,
+          refund_reason: reason || 'Partial fulfillment refund',
+          refund_reference: refundResult.id,
+        })
+        .eq('id', itemId);
+    }
+  }
 
   // ── Audit log ─────────────────────────────────────────────────────────────
   await adminClient.from('order_workflow_log').insert({

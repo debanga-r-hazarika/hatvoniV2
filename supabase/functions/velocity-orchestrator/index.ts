@@ -1213,60 +1213,26 @@ async function handleShipfastInboundWebhook(
   }
 
   const singleLotId = await ensureSingleShipmentLot(adminClient, routing.orderId, externalId);
+  let singleLotErr: unknown = null;
   if (singleLotId) {
     const lotPatch = buildShipmentLotPatchFromWebhook(data, velocityStatus, event);
     const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', singleLotId);
+    singleLotErr = lotErr;
     if (lotErr) console.error('webhook single-lot update', lotErr);
     await appendInboundWebhookShipmentEvent(adminClient, singleLotId, data, velocityStatus, event);
-  }
-
-  const patch: Record<string, unknown> = {
-    updated_at: nowIso(),
-  };
-
-  if (velocityStatus) patch.shipment_status = velocityStatus;
-
-  const tn = typeof data.tracking_number === 'string' ? data.tracking_number.trim() : '';
-  if (tn) {
-    patch.tracking_number = tn;
-    patch.velocity_awb = tn;
-  }
-
-  const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
-  if (tu) patch.velocity_tracking_url = tu;
-
-  const cn = typeof data.carrier_name === 'string' ? data.carrier_name.trim() : '';
-  if (cn) patch.velocity_carrier_name = cn;
-
-  const labelFromWebhook = extractVelocityLabelUrl(data);
-  if (labelFromWebhook) patch.velocity_label_url = labelFromWebhook;
-
-  const ndrReason = typeof data.ndr_reason === 'string' ? data.ndr_reason.trim() : '';
-  mergeOrderPatchFromShipmentStatus(
-    patch,
-    velocityStatus,
-    orderMeta?.status as string | undefined,
-    ndrReason ? { carrierReason: ndrReason } : undefined,
-  );
-
-  if (event === 'tracking_addition' && data.new_tracking && typeof data.new_tracking === 'object') {
-    const snap = {
-      webhook_at: nowIso(),
-      event,
-      last_event: data.new_tracking,
-    };
-    patch.velocity_tracking_snapshot = snap;
-  }
-
-  const { error: upErr } = await adminClient.from('orders').update(patch).eq('id', routing.orderId);
-  if (upErr) {
-    console.error('webhook order update', upErr);
+    await recomputeFulfillmentAggregate(adminClient, routing.orderId);
   }
 
   await logVelocityCall(adminClient, {
     action: 'webhook_update',
     requestPayload: body,
-    responsePayload: { applied: !upErr, order_id: routing.orderId, event, route: 'legacy_order' },
+    responsePayload: {
+      applied: singleLotId ? !singleLotErr : false,
+      order_id: routing.orderId,
+      shipment_id: singleLotId,
+      event,
+      route: 'shipment_lot_single',
+    },
     statusCode: 200,
     success: true,
     orderId: routing.orderId,
@@ -2446,14 +2412,12 @@ async function handleTrackOrder(
           await adminClient.from('order_shipment_tracking_events').insert(rows).then(() => {}, () => {});
         }
 
-        if (lotMeta.order_id) {
-          await recomputeFulfillmentAggregate(adminClient, lotMeta.order_id);
-        }
+        // Do not alter whole-order status from manual track refresh.
       }
     }
 
     let targetOrderId = orderId;
-    if (!targetOrderId && picked.awb) {
+    if (!orderShipmentId && !targetOrderId && picked.awb) {
       const { data: byAwb } = await adminClient
         .from('orders')
         .select('id, status')
@@ -2462,7 +2426,9 @@ async function handleTrackOrder(
       targetOrderId = typeof byAwb?.id === 'string' ? byAwb.id : null;
     }
 
-    if (targetOrderId) {
+    // IMPORTANT: when tracking is requested for a specific shipment lot,
+    // keep updates shipment-scoped and do not mutate whole-order lifecycle fields.
+    if (!orderShipmentId && targetOrderId) {
       const { data: orderRow } = await adminClient
         .from('orders')
         .select('status')
@@ -2655,7 +2621,7 @@ async function handleCancelOrder(
         event_time: nowIso(),
       }).then(() => {}, () => {});
 
-      await recomputeFulfillmentAggregate(adminClient, internalOrderId);
+      // Shipment-level cancel should not change full customer order status.
     }
 
     await logVelocityCall(adminClient, {
@@ -2937,45 +2903,21 @@ async function handleWebhookUpdate(
         resolvedOrderId = routing.orderId;
       } else {
         const singleLotId = await ensureSingleShipmentLot(adminClient, routing.orderId, externalId);
+        let lotErr: unknown = null;
         if (singleLotId) {
           const lotPatch = buildShipmentLotPatchFromWebhook(data, shipmentStatus, eventType);
           if (awb) {
             lotPatch.velocity_awb = awb;
             lotPatch.tracking_number = awb;
           }
-          const { error: lotErr } = await adminClient.from('order_shipments').update(lotPatch).eq('id', singleLotId);
-          if (!lotErr) {
+          const lotUpdate = await adminClient.from('order_shipments').update(lotPatch).eq('id', singleLotId);
+          lotErr = lotUpdate.error;
+          if (!lotUpdate.error) {
             await appendInboundWebhookShipmentEvent(adminClient, singleLotId, data, shipmentStatus, eventType);
+            await recomputeFulfillmentAggregate(adminClient, routing.orderId);
           }
         }
-
-        const patch: Record<string, unknown> = {
-          updated_at: nowIso(),
-        };
-        if (shipmentStatus) patch.shipment_status = shipmentStatus;
-        if (awb) {
-          patch.velocity_awb = awb;
-          patch.tracking_number = awb;
-        }
-        const tu = typeof data.tracking_url === 'string' ? data.tracking_url.trim() : '';
-        if (tu) patch.velocity_tracking_url = tu;
-
-        const labelUrl = extractVelocityLabelUrl(data);
-        if (labelUrl) patch.velocity_label_url = labelUrl;
-
-        const ndrReason =
-          typeof data.ndr_reason === 'string'
-            ? data.ndr_reason.trim()
-            : '';
-        mergeOrderPatchFromShipmentStatus(
-          patch,
-          shipmentStatus || undefined,
-          orderRow?.status as string | undefined,
-          ndrReason ? { carrierReason: ndrReason } : undefined,
-        );
-
-        const { error } = await adminClient.from('orders').update(patch).eq('id', routing.orderId);
-        applied = !error;
+        applied = singleLotId ? !lotErr : false;
         resolvedOrderId = routing.orderId;
       }
     }
