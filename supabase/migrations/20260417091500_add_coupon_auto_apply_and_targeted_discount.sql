@@ -1,12 +1,9 @@
 ALTER TABLE public.coupons
   ADD COLUMN IF NOT EXISTS auto_apply boolean NOT NULL DEFAULT false;
-
 CREATE INDEX IF NOT EXISTS idx_coupons_auto_apply ON public.coupons(auto_apply);
-
 UPDATE public.coupons
 SET auto_apply = true
 WHERE code IN ('WELCOME100', 'SAVE10');
-
 CREATE OR REPLACE FUNCTION public.validate_coupon_code(
   p_coupon_code text,
   p_user_id uuid,
@@ -120,6 +117,5 @@ BEGIN
   );
 END;
 $$ LANGUAGE plpgsql;
-
 GRANT EXECUTE ON FUNCTION public.validate_coupon_code TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.validate_coupon_code FROM anon;

@@ -20,26 +20,20 @@
 
 ALTER TABLE public.orders
   RENAME COLUMN insider_order_status  TO order_status;
-
 ALTER TABLE public.orders
   RENAME COLUMN insider_notes         TO order_notes;
-
 ALTER TABLE public.orders
   RENAME COLUMN last_received_version TO sync_version_received;
-
 ALTER TABLE public.orders
   RENAME COLUMN last_synced_at        TO admin_updated_at;
-
 -- ============================================================
 -- 2. Rename the sync failures table
 -- ============================================================
 
 ALTER TABLE public.insider_sync_failures
   RENAME TO order_sync_log;
-
 -- Update the RLS policy name to match (drop old, recreate)
 DROP POLICY IF EXISTS "Admins can read insider sync failures" ON public.order_sync_log;
-
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -61,16 +55,13 @@ BEGIN
       );
   END IF;
 END $$;
-
 -- ============================================================
 -- 3. Update the index that referenced last_received_version
 -- ============================================================
 
 DROP INDEX IF EXISTS public.idx_orders_last_received_version;
-
 CREATE INDEX IF NOT EXISTS idx_orders_sync_version_received
   ON public.orders (sync_version_received);
-
 -- ============================================================
 -- 4. Replace the order defaults trigger function
 --    (was referencing insider_order_status, insider_notes,
@@ -116,7 +107,6 @@ BEGIN
   RETURN NEW;
 END;
 $func$;
-
 -- ============================================================
 -- 5. Replace the cancel_customer_order function
 --    (was referencing insider_order_status, insider_notes)

@@ -12,13 +12,17 @@ function requireEnv(name: string): string {
   return v;
 }
 
-/**
- * Checks Hatvoni Heritage inventory for a given order by querying the local
- * hatvoni_inventory / hatvoni_inventory_lots tables (synced from Insider).
- *
- * No cross-project call needed — fast local query.
- * Admin-only endpoint (verifies JWT + is_admin).
- */
+type ActionBody = {
+  action?: 'check' | 'deduct' | 'restock';
+  order_id?: string;
+  order_item_id?: string;
+  product_key?: string;
+  qty?: number;
+  assigned_batch_id?: string;
+  assigned_batch_reference?: string;
+  idempotency_key?: string;
+};
+
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') {
@@ -59,14 +63,182 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── 2. Parse request ─────────────────────────────────────────────────────
-    const body = await req.json().catch(() => ({})) as { order_id?: string };
+    const body = await req.json().catch(() => ({})) as ActionBody;
+    const action = body.action || 'check';
+    if (action !== 'check' && action !== 'deduct' && action !== 'restock') {
+      return new Response(JSON.stringify({ error: 'action must be check, deduct, or restock' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
     if (!body.order_id) {
       return new Response(JSON.stringify({ error: 'order_id is required' }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    // ── 3. Load order items ──────────────────────────────────────────────────
+    // ── 3. Deduct/restock path (batch-level, idempotent) ────────────────────
+    if (action === 'deduct' || action === 'restock') {
+      const orderItemId = String(body.order_item_id || '').trim();
+      const productKey = String(body.product_key || '').trim();
+      const assignedBatchId = String(body.assigned_batch_id || '').trim();
+      const assignedBatchReference = String(body.assigned_batch_reference || '').trim();
+      const idempotencyKey = String(body.idempotency_key || `${orderItemId}:${productKey}:${assignedBatchId}`).trim();
+      const qty = Number(body.qty || 0);
+      const isRestock = action === 'restock';
+
+      if (!orderItemId || !productKey || !assignedBatchId || !idempotencyKey) {
+        return new Response(JSON.stringify({ error: 'order_item_id, product_key, assigned_batch_id and idempotency_key are required' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return new Response(JSON.stringify({ error: 'qty must be a positive number' }), {
+          status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const { data: approval, error: approvalErr } = await supabase
+        .from('order_item_approvals')
+        .select('id, order_item_id, product_key, inventory_deduction_status, inventory_deduction_ref, assigned_batch_id, assigned_batch_reference')
+        .eq('order_item_id', orderItemId)
+        .eq('product_key', productKey)
+        .maybeSingle();
+      if (approvalErr) throw approvalErr;
+      if (!approval) {
+        return new Response(JSON.stringify({ error: 'Approval record not found for order item/product key' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      if (!isRestock && approval.inventory_deduction_status === 'success' && approval.inventory_deduction_ref === idempotencyKey) {
+        return new Response(JSON.stringify({ ok: true, idempotent: true, inventory_deduction_ref: idempotencyKey }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      if (isRestock) {
+        const { data: restockEvents, error: restockEventsErr } = await supabase
+          .from('order_item_batch_events')
+          .select('payload')
+          .eq('order_item_id', orderItemId)
+          .eq('product_key', productKey)
+          .eq('event_type', 'restock_success')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        if (restockEventsErr) throw restockEventsErr;
+        const alreadyDone = (restockEvents || []).some((ev: any) => String(ev?.payload?.idempotency_key || '') === idempotencyKey);
+        if (alreadyDone) {
+          return new Response(JSON.stringify({ ok: true, action: 'restock', idempotent: true, inventory_deduction_ref: idempotencyKey }), {
+            status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
+      const { data: lot, error: lotErr } = await supabase
+        .from('hatvoni_inventory_lots')
+        .select('insider_lot_id, batch_reference, qty_available, tag_key')
+        .eq('insider_lot_id', assignedBatchId)
+        .eq('tag_key', productKey)
+        .maybeSingle();
+      if (lotErr) throw lotErr;
+      if (!lot) {
+        return new Response(JSON.stringify({ error: 'Assigned batch not found for this product key' }), {
+          status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const lotQty = Number(lot.qty_available || 0);
+      if (!isRestock && lotQty < qty) {
+        await supabase
+          .from('order_item_approvals')
+          .update({
+            inventory_deduction_status: 'failed',
+            inventory_deduction_ref: idempotencyKey,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('order_item_id', orderItemId)
+          .eq('product_key', productKey);
+        return new Response(JSON.stringify({ error: 'Insufficient quantity in assigned batch', qty_available: lotQty, qty_required: qty }), {
+          status: 409, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+
+      const nextQty = isRestock ? lotQty + qty : lotQty - qty;
+      const { error: lotUpdateErr } = await supabase
+        .from('hatvoni_inventory_lots')
+        .update({
+          qty_available: nextQty,
+          last_synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('insider_lot_id', assignedBatchId)
+        .eq('tag_key', productKey);
+      if (lotUpdateErr) throw lotUpdateErr;
+
+      const { data: remainingLots, error: remErr } = await supabase
+        .from('hatvoni_inventory_lots')
+        .select('qty_available')
+        .eq('tag_key', productKey);
+      if (remErr) throw remErr;
+      const nextTotal = (remainingLots || []).reduce((sum: number, row: any) => sum + Number(row.qty_available || 0), 0);
+
+      const { error: invUpdateErr } = await supabase
+        .from('hatvoni_inventory')
+        .update({
+          total_qty_available: nextTotal,
+          lot_count: (remainingLots || []).filter((row: any) => Number(row.qty_available || 0) > 0).length,
+          last_synced_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('tag_key', productKey);
+      if (invUpdateErr) throw invUpdateErr;
+
+      const { error: approvalUpdateErr } = await supabase
+        .from('order_item_approvals')
+        .update({
+          assigned_batch_id: assignedBatchId,
+          assigned_batch_reference: assignedBatchReference || lot.batch_reference,
+          inventory_deduction_status: isRestock ? 'retried' : 'success',
+          inventory_deduction_ref: idempotencyKey,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('order_item_id', orderItemId)
+        .eq('product_key', productKey);
+      if (approvalUpdateErr) throw approvalUpdateErr;
+
+      await supabase.from('order_item_batch_events').insert({
+        order_item_id: orderItemId,
+        product_key: productKey,
+        event_type: isRestock ? 'restock_success' : 'deduction_success',
+        actor_id: user.id,
+        payload: {
+          idempotency_key: idempotencyKey,
+          assigned_batch_id: assignedBatchId,
+          assigned_batch_reference: assignedBatchReference || lot.batch_reference,
+          quantity: qty,
+          operation: isRestock ? 'restock' : 'deduct',
+          lot_qty_before: lotQty,
+          lot_qty_after: nextQty,
+          inventory_total_after: nextTotal,
+        },
+      }).then(() => {}, () => {});
+
+      return new Response(JSON.stringify({
+        ok: true,
+        action: isRestock ? 'restock' : 'deduct',
+        order_item_id: orderItemId,
+        product_key: productKey,
+        assigned_batch_id: assignedBatchId,
+        assigned_batch_reference: assignedBatchReference || lot.batch_reference,
+        quantity: qty,
+        lot_qty_after: nextQty,
+        inventory_total_after: nextTotal,
+        inventory_deduction_ref: idempotencyKey,
+      }), {
+        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
+    // ── 4. Load order items for check action ─────────────────────────────────
     const { data: orderItems, error: itemsErr } = await supabase
       .from('order_items')
       .select('id, quantity, lot_snapshot, products(key, seller_id, name)')
@@ -114,7 +286,7 @@ Deno.serve(async (req: Request) => {
       }), { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    // ── 4. Query local hatvoni_inventory ─────────────────────────────────────
+    // ── 5. Query local hatvoni_inventory ─────────────────────────────────────
     const keys = [...new Set(hatvoniItems.map((i) => i.product_key))];
 
     const { data: inventory, error: invErr } = await supabase
@@ -169,7 +341,7 @@ Deno.serve(async (req: Request) => {
 
     const allAvailable = results.every((r) => r.available);
 
-    return new Response(JSON.stringify({ ok: true, all_available: allAvailable, items: results }), {
+    return new Response(JSON.stringify({ ok: true, action: 'check', all_available: allAvailable, items: results }), {
       status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
 

@@ -42,3 +42,4 @@ This document is reserved for future notification architecture notes.
   - Realtime updates via Supabase channel on `customer_notifications`
 - Action:
   - Notification deep-links to order detail page (`/order/:order_id`)
+

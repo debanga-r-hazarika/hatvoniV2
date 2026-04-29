@@ -1,7 +1,9 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { AuthProvider } from './contexts/AuthContext';
+import { useAuth } from './contexts/AuthContext';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
+import RequiredPhoneDialog from './components/RequiredPhoneDialog';
 import Home from './pages/Home';
 import About from './pages/About';
 import Lots from './pages/Lots';
@@ -60,10 +62,25 @@ function Layout({ children, path }) {
   );
 }
 
+function PhoneCompletionGate() {
+  const location = useLocation();
+  const { user, loading, profile } = useAuth();
+
+  const hiddenRoutes = ['/login', '/signup', '/forgot-password', '/reset-password', '/confirm-account'];
+  const shouldHide = hiddenRoutes.includes(location.pathname);
+
+  if (loading || !user || shouldHide) return null;
+  const hasPhone = Boolean(String(profile?.phone || '').trim());
+  if (hasPhone) return null;
+
+  return <RequiredPhoneDialog open />;
+}
+
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <PhoneCompletionGate />
         <Routes>
           <Route path="/" element={<Layout path="/"><Home /></Layout>} />
           <Route path="/about" element={<Layout path="/about"><About /></Layout>} />

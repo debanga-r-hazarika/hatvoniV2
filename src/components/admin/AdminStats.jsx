@@ -20,6 +20,7 @@ export default function AdminStats({ stats, setActiveTab }) {
     { id: 'support',     label: 'Support',       desc: 'Tickets & SLA',    icon: 'support_agent',   action: () => navigate('/admin/support') },
     { id: 'recipe-page', label: 'Page Config',   desc: 'Edit sections',    icon: 'web',             action: () => setActiveTab('recipe-page') },
     { id: 'layout',      label: 'Shop Layout',   desc: 'Sort catalog',     icon: 'grid_on',         action: () => setActiveTab('layout') },
+    { id: 'waba-details', label: 'WABA Details',  desc: 'WABA setup APIs',  icon: 'chat',            action: () => setActiveTab('waba-details') },
     { id: 'employees',   label: 'Employees',     desc: 'Manage access',    icon: 'badge',           action: () => navigate('/admin/employees') },
   ];
 

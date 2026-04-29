@@ -4,7 +4,6 @@
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS is_own_seller boolean NOT NULL DEFAULT false;
-
 COMMENT ON COLUMN public.profiles.is_own_seller IS
   'When true, this seller is treated as an in-house / own seller (e.g. Hatvoni Heritage). '
   'Own sellers skip the manual approve/reject decision flow for order items.';

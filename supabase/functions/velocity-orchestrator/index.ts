@@ -748,86 +748,6 @@ function pickTrackingActivitiesFromResponse(data: unknown): TrackingActivityEven
   return [];
 }
 
-/**
- * Maps Velocity/Shipfast shipment_status → storefront `orders.status` / `customer_status`.
- * See Shipfast guide status list + Velocity API §7 tracking statuses.
- */
-function mergeOrderPatchFromShipmentStatus(
-  patch: Record<string, unknown>,
-  shipmentStatus: string | undefined,
-  currentOrderStatus: string | undefined,
-  opts?: { carrierReason?: string },
-): void {
-  const s = String(shipmentStatus || '').toLowerCase();
-  const cur = String(currentOrderStatus || '').toLowerCase();
-  if (!s) return;
-
-  if (cur === 'cancelled' || cur === 'rejected') return;
-
-  if (cur === 'delivered' && s !== 'delivered') {
-    return;
-  }
-
-  const inProgress = new Set([
-    'pending',
-    'processing',
-    'ready_for_pickup',
-    'pickup_scheduled',
-    'not_picked',
-    'in_transit',
-    'out_for_delivery',
-    'reattempt_delivery',
-    'externally_fulfilled',
-    'need_attention',
-    'ndr_raised',
-    'rto_initiated',
-    'rto_in_transit',
-    'rto_need_attention',
-    'rto_cancelled',
-  ]);
-
-  const terminalFail = new Set(['cancelled', 'rejected', 'lost']);
-
-  const rtoClosed = new Set(['rto_delivered']);
-
-  if (s === 'delivered') {
-    patch.status = 'delivered';
-    patch.customer_status = 'delivered';
-    patch.processed_at = patch.processed_at ?? nowIso();
-    return;
-  }
-
-  if (inProgress.has(s)) {
-    if (cur === 'placed' || cur === 'processing') {
-      patch.status = 'shipped';
-      patch.customer_status = 'shipped';
-      patch.shipped_at = patch.shipped_at ?? nowIso();
-    }
-    return;
-  }
-
-  if (terminalFail.has(s)) {
-    if (cur !== 'delivered') {
-      patch.status = 'cancelled';
-      patch.customer_status = 'cancelled';
-      const reason = opts?.carrierReason?.trim()
-        ? String(opts.carrierReason)
-        : `Shipment ${s.replace(/_/g, ' ')} (Velocity)`;
-      patch.cancellation_reason = patch.cancellation_reason ?? reason;
-    }
-    return;
-  }
-
-  if (rtoClosed.has(s)) {
-    if (cur !== 'delivered') {
-      patch.status = 'cancelled';
-      patch.customer_status = 'cancelled';
-      patch.cancellation_reason = patch.cancellation_reason ??
-        'Return to origin completed — shipment closed (Velocity)';
-    }
-  }
-}
-
 function verifyVelocityWebhookSecret(req: Request): boolean {
   const configured = getEnvOptional('VELOCITY_WEBHOOK_SECRET');
   if (!configured) return false;
@@ -946,13 +866,35 @@ async function ensureSingleShipmentLot(
   return inserted?.id ?? null;
 }
 
+/** Align webhook data.status with hatvoni_shipment_lifecycle_bucket snake_case tokens. */
+function normalizeWebhookCarrierStatus(raw: string): string {
+  const t = String(raw || '').trim();
+  if (!t) return '';
+  let s = t.replace(/([a-z0-9])([A-Z])/g, '$1_$2');
+  s = s.replace(/[\s-]+/g, '_').replace(/_+/g, '_').toLowerCase();
+  const aliases: Record<string, string> = {
+    shipped: 'in_transit',
+    dispatched: 'in_transit',
+    dispatch: 'in_transit',
+    int_transit: 'in_transit',
+    intransit: 'in_transit',
+    picked_up: 'in_transit',
+    pickup_done: 'in_transit',
+    manifested: 'processing',
+    manifest: 'processing',
+    forward: 'processing',
+  };
+  return aliases[s] ?? s;
+}
+
 function buildShipmentLotPatchFromWebhook(
   data: Record<string, unknown>,
   velocityStatus: string,
   event: string,
 ): Record<string, unknown> {
+  const normalizedStatus = velocityStatus ? normalizeWebhookCarrierStatus(velocityStatus) : '';
   const patch: Record<string, unknown> = {
-    carrier_shipment_status: velocityStatus || null,
+    carrier_shipment_status: normalizedStatus || null,
     updated_at: nowIso(),
   };
 
@@ -1841,7 +1783,13 @@ async function handleCreateOrder(
     throw new Error('No warehouse is configured. Sync a pickup location or set VELOCITY_WAREHOUSE_ID.');
   }
 
-  if (String(order.status || '') !== 'processing') {
+  const orderStatus = String(order.status || '').trim().toLowerCase();
+  if (orderShipmentId) {
+    // Multi-shipment reorder should be governed by lot readiness, not whole-order status.
+    if (['cancelled', 'delivered', 'rejected'].includes(orderStatus)) {
+      throw new Error('Cannot create shipment for this lot because the overall order is closed.');
+    }
+  } else if (orderStatus !== 'processing') {
     throw new Error("Order must be in 'processing' state to create shipment.");
   }
   if (order.velocity_shipment_id) {
@@ -1955,7 +1903,7 @@ async function handleCreateForwardOrder(
     const { data: lotRow, error: lotErr } = await adminClient
       .from('order_shipments')
       .select(
-        'id, order_id, warehouse_id, velocity_external_code, velocity_pending_shipment_id, velocity_shipment_id, tracking_number',
+        'id, order_id, warehouse_id, velocity_external_code, velocity_pending_shipment_id, velocity_shipment_id, tracking_number, velocity_fulfillment',
       )
       .eq('id', orderShipmentId)
       .eq('order_id', orderId)
@@ -1969,8 +1917,15 @@ async function handleCreateForwardOrder(
     const pend = String(shipmentLot.velocity_pending_shipment_id || '').trim();
     const sidExisting = String(shipmentLot.velocity_shipment_id || '').trim();
     const tnLot = String(shipmentLot.tracking_number || '').trim();
+    const lotFulfillment = shipmentLot.velocity_fulfillment && typeof shipmentLot.velocity_fulfillment === 'object'
+      ? shipmentLot.velocity_fulfillment as Record<string, unknown>
+      : null;
+    const lotWorkflowStage = String(lotFulfillment?.workflow_stage || '').trim().toLowerCase();
     if (pend || sidExisting || tnLot) {
       throw new Error('This shipment lot already has a Velocity draft or AWB. Cancel it before creating another.');
+    }
+    if (lotWorkflowStage === 'cancelled_reorder_ready') {
+      throw new Error('Click Back on this lot before creating a re-order.');
     }
   } else if (String(order.fulfillment_mode || '') === 'multi_shipment') {
     throw new Error(
@@ -1978,11 +1933,22 @@ async function handleCreateForwardOrder(
     );
   }
 
-  if (String(order.status || '') !== 'processing') {
-    throw new Error("Order must be in 'processing' state to create shipment.");
-  }
-
   if (!orderShipmentId) {
+    const shipmentStatusLc = String(order.shipment_status || '').trim().toLowerCase();
+    const shipmentLockedStatuses = new Set([
+      'picked_up',
+      'picked',
+      'picked up',
+      'manifested',
+      'in_transit',
+      'out_for_delivery',
+      'delivered',
+      'rto_initiated',
+      'rto_in_transit',
+      'rto_delivered',
+      'lost',
+    ]);
+
     if (order.velocity_shipment_id) {
       throw new Error('Shipment already exists for this order.');
     }
@@ -1994,16 +1960,8 @@ async function handleCreateForwardOrder(
         'A Velocity shipment draft already exists for this order. Assign a courier to generate the AWB, or cancel the draft before creating another.',
       );
     }
-    {
-      const vf = order.velocity_fulfillment && typeof order.velocity_fulfillment === 'object'
-        ? order.velocity_fulfillment as Record<string, unknown>
-        : null;
-      const history = Array.isArray(vf?.historical_velocity_orders) ? vf?.historical_velocity_orders : [];
-      if (history.length > 0) {
-        throw new Error(
-          'A Velocity shipment order already exists for this order. Resume the existing shipment order instead of creating a new one.',
-        );
-      }
+    if (shipmentLockedStatuses.has(shipmentStatusLc)) {
+      throw new Error('Cannot create a new shipment while the current shipment status is in pickup/transit/delivery lifecycle.');
     }
   }
 
@@ -2120,7 +2078,11 @@ async function handleCreateForwardOrder(
     if (orderShipmentId && shipmentLot) {
       await adminClient.from('order_shipments').update({
         velocity_pending_shipment_id: sid,
-        velocity_fulfillment: fulfillmentMeta,
+        velocity_fulfillment: {
+          ...fulfillmentMeta,
+          workflow_stage: 'order_created',
+          latest_velocity_shipment_id: sid,
+        },
         updated_at: nowIso(),
       }).eq('id', orderShipmentId).then(() => {}, () => {});
     } else {
@@ -2429,12 +2391,6 @@ async function handleTrackOrder(
     // IMPORTANT: when tracking is requested for a specific shipment lot,
     // keep updates shipment-scoped and do not mutate whole-order lifecycle fields.
     if (!orderShipmentId && targetOrderId) {
-      const { data: orderRow } = await adminClient
-        .from('orders')
-        .select('status')
-        .eq('id', targetOrderId)
-        .maybeSingle();
-
       const patch: Record<string, unknown> = { updated_at: nowIso() };
       if (picked.shipmentStatus) patch.shipment_status = picked.shipmentStatus;
       if (picked.awb) {
@@ -2445,9 +2401,8 @@ async function handleTrackOrder(
       if (picked.snapshot) patch.velocity_tracking_snapshot = picked.snapshot;
       if (picked.labelUrl) patch.velocity_label_url = picked.labelUrl;
 
-      mergeOrderPatchFromShipmentStatus(patch, picked.shipmentStatus, orderRow?.status as string | undefined);
-
       await adminClient.from('orders').update(patch).eq('id', targetOrderId).then(() => {}, () => {});
+      await recomputeFulfillmentAggregate(adminClient, targetOrderId);
     }
   }
 
@@ -2557,7 +2512,7 @@ async function handleCancelOrder(
   if (orderShipmentId) {
     const { data: lotRow, error: lotErr } = await adminClient
       .from('order_shipments')
-      .select('id, order_id, tracking_number, velocity_awb, velocity_pending_shipment_id, carrier_shipment_status')
+      .select('id, order_id, tracking_number, velocity_awb, velocity_pending_shipment_id, carrier_shipment_status, velocity_fulfillment')
       .eq('id', orderShipmentId)
       .eq('order_id', internalOrderId)
       .maybeSingle();
@@ -2598,6 +2553,9 @@ async function handleCancelOrder(
 
     const apiResult = await callVelocityApi('cancel_order', endpoint, token, requestPayload);
     if (apiResult.ok) {
+      const lotMeta = lotRow.velocity_fulfillment && typeof lotRow.velocity_fulfillment === 'object'
+        ? lotRow.velocity_fulfillment as Record<string, unknown>
+        : {};
       await adminClient.from('order_shipments').update({
         tracking_number: null,
         velocity_awb: null,
@@ -2609,6 +2567,12 @@ async function handleCancelOrder(
         velocity_tracking_snapshot: null,
         // Cancel only this lot pickup and keep the lot/order open for re-booking.
         carrier_shipment_status: 'pending',
+        velocity_fulfillment: {
+          ...lotMeta,
+          workflow_stage: 'cancelled_reorder_ready',
+          cancelled_at: nowIso(),
+          cancelled_awb: awb || null,
+        },
         updated_at: nowIso(),
       }).eq('id', orderShipmentId).then(() => {}, () => {});
 

@@ -35,17 +35,14 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 -- ─── Attach trigger to hatvoni_inventory ─────────────────────────────────────
 
 DROP TRIGGER IF EXISTS trg_sync_product_stock_from_insider ON public.hatvoni_inventory;
-
 CREATE TRIGGER trg_sync_product_stock_from_insider
   AFTER INSERT OR UPDATE OF total_qty_available
   ON public.hatvoni_inventory
   FOR EACH ROW
   EXECUTE FUNCTION public.sync_product_stock_from_insider();
-
 -- ─── Back-fill: sync current inventory into products right now ───────────────
 -- Runs once at migration time so existing products are immediately correct.
 

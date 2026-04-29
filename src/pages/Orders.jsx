@@ -63,14 +63,25 @@ export default function Orders() {
   };
 
   const normalizeShipmentStatus = (value) => String(value || '').toLowerCase().trim();
+  const aggregateToVisualStatus = (value) => {
+    const s = normalizeShipmentStatus(value);
+    if (['delivered'].includes(s)) return 'delivered';
+    if (['failed', 'cancelled', 'rejected', 'partially_failed'].includes(s)) return 'cancelled';
+    if (['attention_required'].includes(s)) return 'attention';
+    if (['in_transit', 'partially_delivered', 'partially_returning'].includes(s)) return 'shipped';
+    if (['processing', 'pre_shipping', 'pending', 'placed'].includes(s)) return 'processing';
+    return '';
+  };
   const isDeliveredState = (s) => s.includes('delivered');
   const isCancelledState = (s) => s.includes('cancel') || s.includes('reject') || s.includes('lost');
 
   const resolveProductStatus = (order, item) => {
-    const orderStatus = normalizeShipmentStatus(order?.order_status || order?.status || '');
+    const orderStatus = normalizeShipmentStatus(order?.customer_status || order?.order_status || order?.status || '');
     const shipmentStatus = normalizeShipmentStatus(item?.shipment_status || order?.shipment_status || '');
     if (isCancelledState(shipmentStatus)) return 'cancelled';
     if (isDeliveredState(shipmentStatus)) return 'delivered';
+    const aggregateVisual = aggregateToVisualStatus(orderStatus);
+    if (aggregateVisual) return aggregateVisual;
     if (orderStatus.includes('cancel') || orderStatus.includes('reject')) return 'cancelled';
     if (orderStatus.includes('delivered')) return 'delivered';
     if (item?.order_shipment_id || order?.tracking_number || shipmentStatus.includes('ship') || orderStatus.includes('ship')) return 'shipped';
@@ -81,6 +92,7 @@ export default function Orders() {
   const statusPill = (status) => {
     if (status === 'delivered') return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (status === 'shipped') return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (status === 'attention') return 'bg-orange-50 text-orange-700 border-orange-200';
     if (status === 'cancelled') return 'bg-red-50 text-red-700 border-red-200';
     if (status === 'pending') return 'bg-surface-container-low text-on-surface-variant/70 border-outline-variant/20';
     return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -89,6 +101,7 @@ export default function Orders() {
   const prettyStatus = (status) => {
     if (!status) return 'Processing';
     if (status === 'pending') return 'Processing';
+    if (status === 'attention') return 'Attention Required';
     return status.charAt(0).toUpperCase() + status.slice(1);
   };
 

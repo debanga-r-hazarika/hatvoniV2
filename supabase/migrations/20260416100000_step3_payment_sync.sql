@@ -16,14 +16,12 @@
 
 ALTER TABLE public.orders
   DROP CONSTRAINT IF EXISTS orders_payment_status_check;
-
 ALTER TABLE public.orders
   ADD CONSTRAINT orders_payment_status_check
   CHECK (payment_status IN (
     'pending', 'initiated', 'paid', 'failed',
     'refunded', 'partially_refunded'
   ));
-
 -- ─── 2. Notification columns — used by customer/seller realtime subscriptions ─
 
 ALTER TABLE public.orders
@@ -40,10 +38,8 @@ ALTER TABLE public.orders
         ELSE 'unknown'
       END
     ) STORED;
-
 COMMENT ON COLUMN public.orders.workflow_stage IS
   'Human-readable workflow stage derived from status. Used for customer/seller display.';
-
 -- ─── 3. customer_visible_status — what the customer sees ─────────────────────
 -- Customers should not see internal statuses like 'partially_approved'.
 -- Map them to friendly labels stored as a computed column.
@@ -62,10 +58,8 @@ ALTER TABLE public.orders
         ELSE 'placed'
       END
     ) STORED;
-
 COMMENT ON COLUMN public.orders.customer_status IS
   'Customer-facing status. Hides internal workflow states like partially_approved/rejected.';
-
 -- ─── 4. seller_visible_status — what sellers see ─────────────────────────────
 
 ALTER TABLE public.orders
@@ -82,12 +76,10 @@ ALTER TABLE public.orders
         ELSE 'pending_approval'
       END
     ) STORED;
-
 -- ─── 5. Extend order_workflow_log with notification_sent flag ─────────────────
 
 ALTER TABLE public.order_workflow_log
   ADD COLUMN IF NOT EXISTS notification_sent boolean NOT NULL DEFAULT false;
-
 -- ─── 6. Function: log_order_event ─────────────────────────────────────────────
 -- Convenience wrapper used by triggers to insert workflow log entries
 -- without needing auth.uid() (runs as service role via SECURITY DEFINER).
@@ -116,7 +108,6 @@ BEGIN
   );
 END;
 $$;
-
 -- ─── 7. Trigger: auto-log order status transitions ───────────────────────────
 -- Every time orders.status changes, write a system log entry.
 -- This covers transitions made by admin_finalize_order AND
@@ -154,14 +145,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_log_order_status_change ON public.orders;
-
 CREATE TRIGGER trg_log_order_status_change
   AFTER UPDATE OF status ON public.orders
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_log_order_status_change();
-
 -- ─── 8. Trigger: auto-log payment status transitions ─────────────────────────
 
 CREATE OR REPLACE FUNCTION public.trg_log_payment_status_change()
@@ -194,14 +182,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_log_payment_status_change ON public.orders;
-
 CREATE TRIGGER trg_log_payment_status_change
   AFTER UPDATE OF payment_status ON public.orders
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_log_payment_status_change();
-
 -- ─── 9. Trigger: auto-log refund status transitions ──────────────────────────
 
 CREATE OR REPLACE FUNCTION public.trg_log_refund_status_change()
@@ -234,14 +219,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_log_refund_status_change ON public.orders;
-
 CREATE TRIGGER trg_log_refund_status_change
   AFTER UPDATE OF refund_status ON public.orders
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_log_refund_status_change();
-
 -- ─── 10. Trigger: auto-log seller item decisions ─────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.trg_log_seller_decision()
@@ -284,14 +266,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_log_seller_decision ON public.seller_order_item_decisions;
-
 CREATE TRIGGER trg_log_seller_decision
   AFTER INSERT OR UPDATE OF decision ON public.seller_order_item_decisions
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_log_seller_decision();
-
 -- ─── 11. Trigger: auto-log admin item approvals ──────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.trg_log_admin_approval()
@@ -329,14 +308,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_log_admin_approval ON public.order_item_approvals;
-
 CREATE TRIGGER trg_log_admin_approval
   AFTER INSERT OR UPDATE OF status ON public.order_item_approvals
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_log_admin_approval();
-
 -- ─── 12. get_order_workflow_summary — used by all panels for sync ─────────────
 -- Returns a single-row summary of the order's current workflow state.
 -- Customers, sellers, and admins all call this for their respective views.
@@ -406,7 +382,6 @@ BEGIN
     v_last.created_at;
 END;
 $$;
-
 -- ─── 13. RLS on get_order_workflow_summary ────────────────────────────────────
 -- The function is SECURITY DEFINER so it bypasses RLS internally,
 -- but we add a wrapper check: customers can only query their own orders.
@@ -455,17 +430,13 @@ BEGIN
   RETURN QUERY SELECT * FROM public.get_order_workflow_summary(p_order_id);
 END;
 $$;
-
 -- ─── 14. Indexes for realtime performance ────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_orders_customer_status
   ON public.orders (customer_status);
-
 CREATE INDEX IF NOT EXISTS idx_orders_seller_status
   ON public.orders (seller_status);
-
 CREATE INDEX IF NOT EXISTS idx_orders_workflow_stage
   ON public.orders (workflow_stage);
-
 CREATE INDEX IF NOT EXISTS idx_workflow_log_order_created
   ON public.order_workflow_log (order_id, created_at DESC);

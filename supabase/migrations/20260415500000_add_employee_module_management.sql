@@ -39,12 +39,9 @@ CREATE TABLE IF NOT EXISTS public.employees (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_employees_profile_id ON public.employees(profile_id);
 CREATE INDEX IF NOT EXISTS idx_employees_is_active  ON public.employees(is_active) WHERE is_active = true;
-
 ALTER TABLE public.employees ENABLE ROW LEVEL SECURITY;
-
 -- Admins: full access
 CREATE POLICY "Admins can manage employees"
   ON public.employees
@@ -52,14 +49,12 @@ CREATE POLICY "Admins can manage employees"
   TO authenticated
   USING   ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true)
   WITH CHECK ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 -- Employees: read their own record
 CREATE POLICY "Employees can view own record"
   ON public.employees
   FOR SELECT
   TO authenticated
   USING (profile_id = auth.uid());
-
 -- ─── employee_modules table ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.employee_modules (
@@ -69,11 +64,8 @@ CREATE TABLE IF NOT EXISTS public.employee_modules (
   created_at  timestamptz NOT NULL DEFAULT now(),
   UNIQUE (employee_id, module)
 );
-
 CREATE INDEX IF NOT EXISTS idx_employee_modules_employee_id ON public.employee_modules(employee_id);
-
 ALTER TABLE public.employee_modules ENABLE ROW LEVEL SECURITY;
-
 -- Admins: full access
 CREATE POLICY "Admins can manage employee modules"
   ON public.employee_modules
@@ -81,7 +73,6 @@ CREATE POLICY "Admins can manage employee modules"
   TO authenticated
   USING   ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true)
   WITH CHECK ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 -- Employees: read their own modules
 CREATE POLICY "Employees can view own modules"
   ON public.employee_modules
@@ -92,16 +83,13 @@ CREATE POLICY "Employees can view own modules"
       SELECT id FROM public.employees WHERE profile_id = auth.uid()
     )
   );
-
 -- ─── profiles: is_employee flag ──────────────────────────────────────────────
 
 ALTER TABLE public.profiles
   ADD COLUMN IF NOT EXISTS is_employee boolean NOT NULL DEFAULT false;
-
 CREATE INDEX IF NOT EXISTS idx_profiles_is_employee_true
   ON public.profiles(is_employee)
   WHERE is_employee = true;
-
 -- Keep is_employee in sync automatically
 CREATE OR REPLACE FUNCTION public.sync_employee_flag()
 RETURNS TRIGGER
@@ -125,12 +113,10 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_sync_employee_flag ON public.employees;
 CREATE TRIGGER trg_sync_employee_flag
   AFTER INSERT OR UPDATE OR DELETE ON public.employees
   FOR EACH ROW EXECUTE FUNCTION public.sync_employee_flag();
-
 -- ─── helper function ─────────────────────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.get_my_employee_modules()

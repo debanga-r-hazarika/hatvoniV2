@@ -8,13 +8,10 @@
 
 ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS show_as_individual_product boolean;
-
 UPDATE public.products
 SET show_as_individual_product = true
 WHERE show_as_individual_product IS NULL;
-
 ALTER TABLE public.products
   ALTER COLUMN show_as_individual_product SET DEFAULT true;
-
 ALTER TABLE public.products
   ALTER COLUMN show_as_individual_product SET NOT NULL;

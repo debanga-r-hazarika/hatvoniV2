@@ -20,7 +20,6 @@ BEGIN
 EXCEPTION
   WHEN duplicate_object THEN NULL;
 END $$;
-
 CREATE TABLE IF NOT EXISTS public.seller_order_item_decisions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_item_id uuid NOT NULL REFERENCES public.order_items(id) ON DELETE CASCADE,
@@ -36,16 +35,12 @@ CREATE TABLE IF NOT EXISTS public.seller_order_item_decisions (
     decision <> 'rejected' OR NULLIF(BTRIM(COALESCE(decision_reason, '')), '') IS NOT NULL
   )
 );
-
 CREATE INDEX IF NOT EXISTS idx_seller_order_item_decisions_seller_id
   ON public.seller_order_item_decisions (seller_id);
-
 CREATE INDEX IF NOT EXISTS idx_seller_order_item_decisions_order_item_id
   ON public.seller_order_item_decisions (order_item_id);
-
 CREATE INDEX IF NOT EXISTS idx_seller_order_item_decisions_decision
   ON public.seller_order_item_decisions (decision);
-
 CREATE OR REPLACE FUNCTION public.is_seller_order_item_line_owner(
   p_order_item_id uuid,
   p_product_key text,
@@ -77,9 +72,7 @@ AS $$
       )
   )
 $$;
-
 ALTER TABLE public.seller_order_item_decisions ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Sellers can view their item decisions" ON public.seller_order_item_decisions;
 CREATE POLICY "Sellers can view their item decisions"
   ON public.seller_order_item_decisions FOR SELECT
@@ -88,7 +81,6 @@ CREATE POLICY "Sellers can view their item decisions"
     public.is_admin() = true
     OR seller_id = auth.uid()
   );
-
 DROP POLICY IF EXISTS "Sellers can insert their item decisions" ON public.seller_order_item_decisions;
 CREATE POLICY "Sellers can insert their item decisions"
   ON public.seller_order_item_decisions FOR INSERT
@@ -98,7 +90,6 @@ CREATE POLICY "Sellers can insert their item decisions"
     AND seller_id = auth.uid()
     AND public.is_seller_order_item_line_owner(order_item_id, product_key, auth.uid())
   );
-
 DROP POLICY IF EXISTS "Sellers can update their item decisions" ON public.seller_order_item_decisions;
 CREATE POLICY "Sellers can update their item decisions"
   ON public.seller_order_item_decisions FOR UPDATE

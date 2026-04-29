@@ -39,31 +39,23 @@ CREATE TABLE IF NOT EXISTS public.seller_pickup_locations (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 ALTER TABLE public.seller_pickup_locations
   ADD CONSTRAINT seller_pickup_locations_pincode_format
   CHECK (pincode ~ '^[0-9]{6}$');
-
 ALTER TABLE public.seller_pickup_locations
   ADD CONSTRAINT seller_pickup_locations_contact_number_format
   CHECK (warehouse_contact_number ~ '^[0-9]{10}$');
-
 ALTER TABLE public.seller_pickup_locations
   ADD CONSTRAINT seller_pickup_locations_email_format
   CHECK (warehouse_email_id ~* '^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$');
-
 CREATE INDEX IF NOT EXISTS idx_seller_pickup_locations_seller_id
   ON public.seller_pickup_locations (seller_id);
-
 CREATE INDEX IF NOT EXISTS idx_seller_pickup_locations_default
   ON public.seller_pickup_locations (seller_id, is_default)
   WHERE is_default = true;
-
 ALTER TABLE public.seller_pickup_locations ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Sellers can view own pickup locations" ON public.seller_pickup_locations;
 DROP POLICY IF EXISTS "Admins can manage pickup locations" ON public.seller_pickup_locations;
-
 CREATE POLICY "Sellers can view own pickup locations"
   ON public.seller_pickup_locations
   FOR SELECT
@@ -72,14 +64,12 @@ CREATE POLICY "Sellers can view own pickup locations"
     seller_id = auth.uid()
     OR public.is_admin() = true
   );
-
 CREATE POLICY "Admins can manage pickup locations"
   ON public.seller_pickup_locations
   FOR ALL
   TO authenticated
   USING (public.is_admin() = true)
   WITH CHECK (public.is_admin() = true);
-
 CREATE OR REPLACE FUNCTION public.ensure_single_default_seller_pickup_location()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -98,9 +88,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trigger_ensure_single_default_seller_pickup_location ON public.seller_pickup_locations;
-
 CREATE TRIGGER trigger_ensure_single_default_seller_pickup_location
   BEFORE INSERT OR UPDATE ON public.seller_pickup_locations
   FOR EACH ROW

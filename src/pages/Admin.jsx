@@ -13,6 +13,7 @@ import RecipesTable from '../components/admin/RecipesTable';
 import RecipePageTable from '../components/admin/RecipePageTable';
 import ProductLayoutTable from '../components/admin/ProductLayoutTable';
 import OrdersTable from '../components/admin/OrdersTable';
+import WabaManager from '../components/admin/WabaManager';
 import AdminModal from '../components/admin/AdminModal';
 import ConfirmDialog from '../components/admin/ConfirmDialog';
 import AdminFilters from '../components/admin/AdminFilters';
@@ -27,6 +28,7 @@ const TAB_META = {
   recipes:      { icon: 'restaurant_menu', label: 'Recipes' },
   'recipe-page':{ icon: 'web',             label: 'Page Config' },
   layout:       { icon: 'grid_on',         label: 'Shop Layout' },
+  'waba-details': { icon: 'chat',          label: 'WABA Details' },
 };
 
 export default function Admin() {
@@ -63,7 +65,7 @@ export default function Admin() {
   }, [activeTab]);
 
   const fetchData = useCallback(async () => {
-    if (activeTab === 'dashboard') return;
+    if (activeTab === 'dashboard' || activeTab === 'waba-details') return;
     setDataLoading(true);
     try {
       let query;
@@ -442,7 +444,7 @@ export default function Admin() {
 
         {activeTab === 'dashboard' ? (
           <div className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex flex-wrap justify-end gap-2">
               <Link
                 to="/admin/notifications"
                 className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-[#004a2b] text-white text-xs font-semibold hover:bg-[#004a2b]/90 transition-all active:scale-[0.98]"
@@ -476,7 +478,7 @@ export default function Admin() {
                   Filters
                 </button>
 
-                {activeTab !== 'recipe-page' && (
+                {!['recipe-page', 'waba-details'].includes(activeTab) && (
                   <div className="relative flex-1 lg:flex-none">
                     <span className="material-symbols-outlined absolute left-2.5 top-1/2 -translate-y-1/2 text-[#3f4942]/30 text-base">search</span>
                     <input
@@ -502,7 +504,7 @@ export default function Admin() {
             </div>
 
             {/* Advanced Filters Panel */}
-            {showAdvancedFilters && (
+            {showAdvancedFilters && activeTab !== 'waba-details' && (
               <AdminFilters
                 tab={activeTab}
                 filters={filters}
@@ -528,6 +530,7 @@ export default function Admin() {
                 {activeTab === 'recipe-page' && <RecipePageTable data={filteredData} onEdit={(item) => { setEditingItem(item); setShowModal(true); }} />}
                 {activeTab === 'layout' && <ProductLayoutTable data={filteredData} onUpdate={fetchData} />}
                 {activeTab === 'orders' && <OrdersTable data={filteredData} sellerOptions={sellerOptions} />}
+                {activeTab === 'waba-details' && <WabaManager />}
               </div>
             )}
           </div>

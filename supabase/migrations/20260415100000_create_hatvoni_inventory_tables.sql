@@ -13,9 +13,7 @@ CREATE TABLE IF NOT EXISTS public.hatvoni_inventory (
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
-
 ALTER TABLE public.hatvoni_inventory ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Admins can manage hatvoni_inventory" ON public.hatvoni_inventory;
 CREATE POLICY "Admins can manage hatvoni_inventory"
   ON public.hatvoni_inventory
@@ -33,7 +31,6 @@ CREATE POLICY "Admins can manage hatvoni_inventory"
       WHERE profiles.id = auth.uid() AND profiles.is_admin = true
     )
   );
-
 -- ============================================================
 -- hatvoni_inventory_lots: lot-level detail (one row per batch lot)
 -- Captures batch_reference, output_size, unit, production_date from Insider.
@@ -53,9 +50,7 @@ CREATE TABLE IF NOT EXISTS public.hatvoni_inventory_lots (
   created_at          timestamptz NOT NULL DEFAULT now(),
   updated_at          timestamptz NOT NULL DEFAULT now()
 );
-
 ALTER TABLE public.hatvoni_inventory_lots ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Admins can manage hatvoni_inventory_lots" ON public.hatvoni_inventory_lots;
 CREATE POLICY "Admins can manage hatvoni_inventory_lots"
   ON public.hatvoni_inventory_lots
@@ -73,7 +68,6 @@ CREATE POLICY "Admins can manage hatvoni_inventory_lots"
       WHERE profiles.id = auth.uid() AND profiles.is_admin = true
     )
   );
-
 CREATE INDEX IF NOT EXISTS idx_hatvoni_inventory_tag_key ON public.hatvoni_inventory (tag_key);
 CREATE INDEX IF NOT EXISTS idx_hatvoni_inventory_lots_tag_key ON public.hatvoni_inventory_lots (tag_key);
 CREATE INDEX IF NOT EXISTS idx_hatvoni_inventory_lots_insider_lot_id ON public.hatvoni_inventory_lots (insider_lot_id);

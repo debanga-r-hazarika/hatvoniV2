@@ -14,7 +14,6 @@
 
 ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS cancellation_reason text;
-
 CREATE OR REPLACE FUNCTION public.cancel_customer_order(p_order_id uuid, p_reason text)
 RETURNS public.orders
 LANGUAGE plpgsql

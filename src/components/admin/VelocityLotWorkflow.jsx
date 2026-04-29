@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@mui/material/Button';
 import { supabase } from '../../lib/supabase';
+import { formatShipmentStatusForDisplay } from '../../lib/velocityShipmentStatusCatalog';
 
 const fmtInr = (v) => {
   if (v === undefined || v === null || v === '') return '—';
@@ -96,20 +97,7 @@ function pickEtaText(carrier) {
   return '';
 }
 
-function formatStatusLabel(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '—';
-  const compact = raw.replace(/\s+/g, '').toLowerCase();
-  if (compact === 'readyforreceive' || compact === 'readyforpickup') {
-    return 'Ready for Receive/Pickup';
-  }
-  return raw
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
-}
+const formatStatusLabel = formatShipmentStatusForDisplay;
 
 function resolveEventLocation(ev) {
   if (typeof ev?.location === 'string' && ev.location.trim()) return ev.location.trim();
@@ -186,6 +174,7 @@ export default function VelocityLotWorkflow({
   const [velError, setVelError] = useState('');
   const [trackingBusy, setTrackingBusy] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [backBusy, setBackBusy] = useState(false);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineRows, setTimelineRows] = useState([]);
   const [showWebhookInfoModal, setShowWebhookInfoModal] = useState(false);
@@ -248,7 +237,7 @@ export default function VelocityLotWorkflow({
           .from('order_shipment_tracking_events')
           .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
           .eq('order_shipment_id', lotId)
-          .in('source', ['webhook', 'cancel_api'])
+          .in('source', ['webhook', 'cancel_api', 'admin_back'])
           .order('event_time', { ascending: false, nullsFirst: false })
           .order('created_at', { ascending: false })
           .limit(50);
@@ -470,10 +459,18 @@ export default function VelocityLotWorkflow({
   const effectiveShipmentStatus = String(lot?.carrier_shipment_status || '').trim();
   const pickupStartedStatuses = new Set([
     'picked_up', 'picked', 'picked up', 'manifested',
-    'in_transit', 'out_for_delivery', 'delivered', 'ndr_raised', 'need_attention',
+    'in_transit', 'shipped', 'dispatched', 'out_for_delivery', 'delivered', 'ndr_raised', 'need_attention',
     'reattempt_delivery', 'rto_initiated', 'rto_in_transit', 'rto_delivered', 'lost', 'cancelled',
   ]);
   const canCancelCourier = !!effectiveAwb && !pickupStartedStatuses.has(effectiveShipmentStatus.toLowerCase());
+  const isCancelledShipment = effectiveShipmentStatus.toLowerCase().includes('cancel');
+  const lotFulfillmentMeta = lot?.velocity_fulfillment && typeof lot.velocity_fulfillment === 'object'
+    ? lot.velocity_fulfillment
+    : null;
+  const lotWorkflowStage = String(lotFulfillmentMeta?.workflow_stage || '').trim().toLowerCase();
+  const lotAttemptNo = Number(lot?.shipping_attempt_no || 1);
+  const canBackToShipping = lotWorkflowStage === 'cancelled_reorder_ready';
+  const isReorderFlow = lotWorkflowStage === 'reorder_ready' || lotAttemptNo > 1;
   const parcelDims = {
     length: lot?.velocity_fulfillment?.length ?? velLength,
     breadth: lot?.velocity_fulfillment?.breadth ?? velBreadth,
@@ -586,11 +583,12 @@ export default function VelocityLotWorkflow({
     }
   }, [showWebhookInfoModal]);
   const webhookSourceSummary = useMemo(() => {
-    const summary = { webhook: 0, cancelApi: 0 };
+    const summary = { webhook: 0, cancelApi: 0, adminBack: 0 };
     for (const ev of timelineRows) {
       const src = String(ev?.source || '').toLowerCase();
       if (src === 'webhook') summary.webhook += 1;
       if (src === 'cancel_api') summary.cancelApi += 1;
+      if (src === 'admin_back') summary.adminBack += 1;
     }
     return summary;
   }, [timelineRows]);
@@ -693,7 +691,7 @@ export default function VelocityLotWorkflow({
         .from('order_shipment_tracking_events')
         .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
         .eq('order_shipment_id', lotId)
-        .in('source', ['webhook', 'cancel_api'])
+        .in('source', ['webhook', 'cancel_api', 'admin_back'])
         .order('event_time', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(50);
@@ -720,7 +718,7 @@ export default function VelocityLotWorkflow({
         .from('order_shipment_tracking_events')
         .select('id, source, activity, location, carrier_remark, event_time, created_at, raw_payload')
         .eq('order_shipment_id', lotId)
-        .in('source', ['webhook', 'cancel_api'])
+        .in('source', ['webhook', 'cancel_api', 'admin_back'])
         .order('event_time', { ascending: false, nullsFirst: false })
         .order('created_at', { ascending: false })
         .limit(50);
@@ -729,6 +727,29 @@ export default function VelocityLotWorkflow({
       setVelError(toUserError(e, 'Courier cancellation failed.'));
     } finally {
       setCancelBusy(false);
+    }
+  };
+
+  const moveLotBackToShipping = async () => {
+    if (!lotId) return;
+    setBackBusy(true);
+    setVelError('');
+    try {
+      const { data, error } = await supabase.rpc('admin_mark_shipment_lot_reorder_ready', {
+        p_order_shipment_id: lotId,
+      });
+      if (error) throw error;
+      setVelStep('idle');
+      setVelServiceability(null);
+      setVelResult(null);
+      setVelCarrierId('');
+      setVelShipmentId('');
+      onNotice(`Lot moved back to shipping setup. Re-order code: ${String(data || '').trim() || 'generated'}.`);
+      await onRefresh();
+    } catch (e) {
+      setVelError(toUserError(e, 'Could not move lot back to shipping setup.'));
+    } finally {
+      setBackBusy(false);
     }
   };
 
@@ -786,6 +807,20 @@ export default function VelocityLotWorkflow({
               </select>
             </div>
           </div>
+        </div>
+      )}
+
+      {canBackToShipping && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-bold text-amber-900">Pickup cancelled for this lot</p>
+            <p className="text-xs text-amber-800 mt-1">
+              Click Back to return to serviceability and create a re-order.
+            </p>
+          </div>
+          <Button type="button" onClick={moveLotBackToShipping} disabled={backBusy} variant="outlined" color="inherit" size="small">
+            {backBusy ? 'Moving back…' : 'Back'}
+          </Button>
         </div>
       )}
 
@@ -877,7 +912,7 @@ export default function VelocityLotWorkflow({
               Create shipment order <span className="text-xs font-normal text-gray-900-variant">(forward-order)</span>
             </p>
             <Button type="button" onClick={createVelocityForwardOrder} disabled={velStep === 'creating_order'} variant="contained" color="primary">
-              {velStep === 'creating_order' ? 'Creating…' : 'Create order on Velocity'}
+              {velStep === 'creating_order' ? 'Creating…' : (isReorderFlow ? 'Create Re-order on Velocity' : 'Create order on Velocity')}
             </Button>
           </div>
         </>
@@ -1035,19 +1070,23 @@ export default function VelocityLotWorkflow({
               )}
             </div>
           )}
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className={`grid grid-cols-1 sm:grid-cols-2 ${isCancelledShipment ? 'xl:grid-cols-2' : 'xl:grid-cols-4'} gap-3`}>
             <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
               <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Shipment Status</p>
               <p className="text-sm font-bold text-slate-900 mt-1">{formatStatusLabel(effectiveShipmentStatus)}</p>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Courier Details</p>
-              <p className="text-sm font-semibold text-slate-900 mt-1">{effectiveCarrierName || '—'}</p>
-            </div>
-            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking ID (AWB)</p>
-              <p className="text-sm font-mono text-slate-900 mt-1 break-all">{effectiveAwb}</p>
-            </div>
+            {!isCancelledShipment && (
+              <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Courier Details</p>
+                <p className="text-sm font-semibold text-slate-900 mt-1">{effectiveCarrierName || '—'}</p>
+              </div>
+            )}
+            {!isCancelledShipment && (
+              <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Tracking ID (AWB)</p>
+                <p className="text-sm font-mono text-slate-900 mt-1 break-all">{effectiveAwb}</p>
+              </div>
+            )}
             <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
               <button
                 type="button"
@@ -1061,9 +1100,11 @@ export default function VelocityLotWorkflow({
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={cancelLotCourier} disabled={cancelBusy || !canCancelCourier} variant="outlined" color="error" size="small">
-              {cancelBusy ? 'Cancelling…' : 'Cancel courier'}
-            </Button>
+            {!isCancelledShipment && (
+              <Button type="button" onClick={cancelLotCourier} disabled={cancelBusy || !canCancelCourier} variant="outlined" color="error" size="small">
+                {cancelBusy ? 'Cancelling…' : 'Cancel courier'}
+              </Button>
+            )}
             {effectiveLabelUrl && (
               <Button
                 type="button"
@@ -1075,20 +1116,20 @@ export default function VelocityLotWorkflow({
                 Print label
               </Button>
             )}
-            {effectiveTrackingUrl && (
+            {!isCancelledShipment && effectiveTrackingUrl && (
               <a href={effectiveTrackingUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-800">
                 Tracking page link
               </a>
             )}
           </div>
-          {!canCancelCourier && (
+          {!isCancelledShipment && !canCancelCourier && (
             <p className="text-[11px] text-slate-500">
               Cancel courier is disabled because pickup has already started for this shipment.
             </p>
           )}
           <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
             <p className="text-xs font-bold text-slate-900 mb-1">Tracking timeline/history for this specific lot</p>
-            <p className="text-[11px] text-slate-500 mb-3">Showing webhook and cancellation updates only.</p>
+            <p className="text-[11px] text-slate-500 mb-3">Showing webhook, cancellation, and admin backstep audit updates.</p>
             {timelineLoading ? (
               <p className="text-xs text-slate-500">Loading timeline…</p>
             ) : timelineRows.length === 0 ? (
@@ -1099,18 +1140,26 @@ export default function VelocityLotWorkflow({
                   const ts = ev?.event_time || ev?.created_at;
                   const src = String(ev?.source || '').toLowerCase();
                   const isWebhook = src === 'webhook';
+                  const isAdminBack = src === 'admin_back';
+                  const sourceTone = isWebhook
+                    ? 'bg-blue-50 border-blue-200 text-blue-700'
+                    : isAdminBack
+                      ? 'bg-amber-50 border-amber-200 text-amber-700'
+                      : 'bg-red-50 border-red-200 text-red-700';
+                  const sourceLabel = isWebhook ? 'Webhook' : (isAdminBack ? 'Admin Back' : 'Cancelled');
+                  const sourceIcon = isWebhook ? 'radio_button_checked' : (isAdminBack ? 'undo' : 'block');
                   const locationText = resolveEventLocation(ev);
                   return (
                     <div key={ev.id} className="relative pl-9 pb-4 last:pb-0">
                       <div className="absolute left-3 top-6 bottom-0 w-px bg-slate-200 last:hidden" />
-                      <div className={`absolute left-0.5 top-1 h-5 w-5 rounded-full border flex items-center justify-center ${isWebhook ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
-                        <span className="material-symbols-outlined text-[12px]">{isWebhook ? 'radio_button_checked' : 'block'}</span>
+                      <div className={`absolute left-0.5 top-1 h-5 w-5 rounded-full border flex items-center justify-center ${sourceTone}`}>
+                        <span className="material-symbols-outlined text-[12px]">{sourceIcon}</span>
                       </div>
                       <div className="rounded-xl border border-slate-200 bg-white px-3.5 py-3 shadow-[0_1px_0_rgba(2,6,23,0.04)]">
                         <div className="flex items-center justify-between gap-2">
                           <p className="text-sm font-semibold text-slate-900">{formatStatusLabel(ev.activity || 'Status updated')}</p>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${isWebhook ? 'border-blue-200 bg-blue-50 text-blue-700' : 'border-red-200 bg-red-50 text-red-700'}`}>
-                          {isWebhook ? 'Webhook' : 'Cancelled'}
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${sourceTone}`}>
+                          {sourceLabel}
                         </span>
                       </div>
                         <div className="mt-2 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1156,7 +1205,7 @@ export default function VelocityLotWorkflow({
                 <p className="text-sm text-slate-500">No webhook status_change payload rows found yet for this shipment lot.</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
                     <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                       <p className="text-[10px] uppercase tracking-[0.08em] text-slate-500 font-semibold">Total rows</p>
                       <p className="text-sm font-bold text-slate-900 mt-1">{webhookStatusRows.length}</p>
@@ -1168,6 +1217,10 @@ export default function VelocityLotWorkflow({
                     <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2">
                       <p className="text-[10px] uppercase tracking-[0.08em] text-red-600 font-semibold">Cancel API events</p>
                       <p className="text-sm font-bold text-red-900 mt-1">{webhookSourceSummary.cancelApi}</p>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                      <p className="text-[10px] uppercase tracking-[0.08em] text-amber-700 font-semibold">Admin Back events</p>
+                      <p className="text-sm font-bold text-amber-900 mt-1">{webhookSourceSummary.adminBack}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">

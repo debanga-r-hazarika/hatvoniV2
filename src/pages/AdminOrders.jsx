@@ -7,6 +7,11 @@ import { supabase } from '../lib/supabase';
 import Button from '@mui/material/Button';
 import VelocityLotWorkflow from '../components/admin/VelocityLotWorkflow';
 import { getOrderDisplayId } from '../lib/orderDisplay';
+import {
+  formatShipmentStatusForDisplay,
+  getShipmentStatusDropdownOptions,
+  normalizeShipmentStatusKey,
+} from '../lib/velocityShipmentStatusCatalog';
 
 /** Velocity Get Rates: format currency */
 const fmtInr = (v) => {
@@ -99,6 +104,49 @@ const STATUS_COLORS = {
   cancelled:  'bg-red-100 text-red-800',
   rejected:   'bg-red-200 text-red-900',
 };
+
+const AGG_STATUS_COLORS = {
+  attention_required: 'bg-orange-100 text-orange-800',
+  partially_failed: 'bg-rose-100 text-rose-800',
+  partially_returning: 'bg-violet-100 text-violet-800',
+  partially_delivered: 'bg-cyan-100 text-cyan-800',
+  partially_shipped: 'bg-sky-100 text-sky-800',
+  in_transit: 'bg-blue-100 text-blue-800',
+  processing: 'bg-amber-100 text-amber-800',
+  delivered: 'bg-emerald-100 text-emerald-800',
+  failed: 'bg-rose-100 text-rose-800',
+};
+
+/**
+ * Single admin order status badge.
+ * - Multi-shipment (`fulfillment_mode === 'multi_shipment'`): use `order_status` (lot rollup) after approval.
+ * - Single-shipment (null / legacy / one lot): use workflow `status` only — no separate aggregate label.
+ */
+function getAdminOrderCombinedStatusBadge(order) {
+  const w = String(order.status || '').toLowerCase();
+  const a = String(order.order_status || '').toLowerCase().trim();
+  const isMulti = order.fulfillment_mode === 'multi_shipment';
+  const colors = { ...STATUS_COLORS, ...AGG_STATUS_COLORS };
+
+  if (w === 'pending' || w === 'rejected' || w === 'cancelled') {
+    return {
+      label: String(order.status || w).replace(/_/g, ' '),
+      colorClass: colors[w] || 'bg-slate-100 text-slate-700',
+    };
+  }
+
+  if (isMulti && a && a !== 'placed') {
+    return {
+      label: String(order.order_status || a).replace(/_/g, ' '),
+      colorClass: colors[a] || colors[w] || 'bg-slate-100 text-slate-700',
+    };
+  }
+
+  return {
+    label: String(order.status || w).replace(/_/g, ' '),
+    colorClass: colors[w] || 'bg-slate-100 text-slate-700',
+  };
+}
 
 const PAYMENT_COLORS = {
   pending:            'bg-slate-100 text-slate-700',
@@ -314,6 +362,8 @@ function OrdersList({ onSelect }) {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+  const [restockBusyOrderId, setRestockBusyOrderId] = useState('');
+  const [restockConfirmOrder, setRestockConfirmOrder] = useState(null);
 
   const clearMessages = () => {
     setNotice('');
@@ -343,7 +393,7 @@ function OrdersList({ onSelect }) {
     try {
       const { data, error } = await supabase
         .from('orders')
-        .select('id, display_order_id, status, order_status, payment_status, payment_method, total_amount, created_at, shipping_address, user_id, tracking_number, shipment_status, cancellation_reason, refund_status, refund_amount')
+        .select('id, display_order_id, status, order_status, fulfillment_mode, payment_status, payment_method, total_amount, created_at, shipping_address, user_id, tracking_number, shipment_status, cancellation_reason, refund_status, refund_amount')
         .order('created_at', { ascending: false });
       if (error) throw error;
 
@@ -358,6 +408,7 @@ function OrdersList({ onSelect }) {
       }
 
       let lotsByOrder = {};
+      let pendingBatchCountByOrder = {};
       try {
         const orderIds = (data || []).map((o) => o.id);
         if (orderIds.length > 0) {
@@ -390,9 +441,36 @@ function OrdersList({ onSelect }) {
             acc[lot.order_id].push({ ...lot, last_event_at: latestEventByLot[lot.id] || null });
             return acc;
           }, {});
+
+          const { data: orderItems } = await supabase
+            .from('order_items')
+            .select('id, order_id')
+            .in('order_id', orderIds);
+          const itemRows = Array.isArray(orderItems) ? orderItems : [];
+          const orderIdByItemId = itemRows.reduce((acc, row) => {
+            acc[row.id] = row.order_id;
+            return acc;
+          }, {});
+          const itemIds = itemRows.map((row) => row.id);
+          if (itemIds.length > 0) {
+            const { data: approvals } = await supabase
+              .from('order_item_approvals')
+              .select('order_item_id, sync_with_insider, status, batch_assignment_status')
+              .in('order_item_id', itemIds)
+              .eq('sync_with_insider', true)
+              .eq('status', 'approved')
+              .neq('batch_assignment_status', 'assigned');
+            pendingBatchCountByOrder = (approvals || []).reduce((acc, row) => {
+              const orderId = orderIdByItemId[row.order_item_id];
+              if (!orderId) return acc;
+              acc[orderId] = (acc[orderId] || 0) + 1;
+              return acc;
+            }, {});
+          }
         }
       } catch {
         lotsByOrder = {};
+        pendingBatchCountByOrder = {};
       }
 
       const mergedOrders = (data || []).map((o) => {
@@ -400,6 +478,7 @@ function OrdersList({ onSelect }) {
           ...o,
           profile: profilesById[o.user_id] || null,
           shipmentLots: lotsByOrder[o.id] || [],
+          pendingBatchCount: pendingBatchCountByOrder[o.id] || 0,
         };
       });
       setOrders(mergedOrders);
@@ -457,6 +536,11 @@ function OrdersList({ onSelect }) {
     shipped: orders.filter((o) => o.status === 'shipped').length,
     revenue: orders.filter((o) => o.payment_status === 'paid').reduce((s, o) => s + Number(o.total_amount || 0), 0),
   }), [orders]);
+
+  const pendingBatchTotal = useMemo(
+    () => filtered.reduce((sum, order) => sum + Number(order.pendingBatchCount || 0), 0),
+    [filtered],
+  );
 
   const queueStats = useMemo(() => ([
     { id: 'sla_breach', label: 'SLA Breach', count: orders.filter((o) => isSlaBreach(o)).length, color: 'border-red-200 bg-red-50 text-red-700' },
@@ -546,6 +630,121 @@ function OrdersList({ onSelect }) {
     setActiveSavedView('');
   };
 
+  const restockCancelledOrder = async (orderId) => {
+    if (!orderId) return;
+    clearMessages();
+    setRestockBusyOrderId(orderId);
+    try {
+      const { data: orderItems, error: orderItemsErr } = await supabase
+        .from('order_items')
+        .select('id, quantity, lot_snapshot, products(key)')
+        .eq('order_id', orderId);
+      if (orderItemsErr) throw orderItemsErr;
+
+      const itemIds = (orderItems || []).map((i) => i.id);
+      if (itemIds.length === 0) {
+        setNotice('No order items found to restock.');
+        return;
+      }
+
+      const { data: approvals, error: approvalsErr } = await supabase
+        .from('order_item_approvals')
+        .select('order_item_id, product_key, sync_with_insider, status, assigned_batch_id, assigned_batch_reference, batch_assignment_status, inventory_deduction_status')
+        .in('order_item_id', itemIds);
+      if (approvalsErr) throw approvalsErr;
+
+      const candidates = [];
+      for (const item of (orderItems || [])) {
+        if (Array.isArray(item.lot_snapshot) && item.lot_snapshot.length > 0) {
+          for (const snap of item.lot_snapshot) {
+            const aa = (approvals || []).find((a) => a.order_item_id === item.id && a.product_key === snap.product_key);
+            if (
+              aa?.sync_with_insider === true &&
+              aa?.status === 'approved' &&
+              aa?.assigned_batch_id &&
+              aa?.batch_assignment_status === 'assigned' &&
+              ['success', 'retried'].includes(String(aa.inventory_deduction_status || '').toLowerCase())
+            ) {
+              candidates.push({
+                order_item_id: item.id,
+                product_key: snap.product_key,
+                qty: Number(snap.quantity || 0) * Number(item.quantity || 0),
+                assigned_batch_id: aa.assigned_batch_id,
+                assigned_batch_reference: aa.assigned_batch_reference || null,
+              });
+            }
+          }
+        } else {
+          const productKey = item.products?.key;
+          const aa = (approvals || []).find((a) => a.order_item_id === item.id && a.product_key === productKey);
+          if (
+            aa?.sync_with_insider === true &&
+            aa?.status === 'approved' &&
+            aa?.assigned_batch_id &&
+            aa?.batch_assignment_status === 'assigned' &&
+            ['success', 'retried'].includes(String(aa.inventory_deduction_status || '').toLowerCase())
+          ) {
+            candidates.push({
+              order_item_id: item.id,
+              product_key: productKey,
+              qty: Number(item.quantity || 0),
+              assigned_batch_id: aa.assigned_batch_id,
+              assigned_batch_reference: aa.assigned_batch_reference || null,
+            });
+          }
+        }
+      }
+
+      if (candidates.length === 0) {
+        setNotice('No insider batch-assigned items found to restock for this cancelled order.');
+        return;
+      }
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('No auth token — please sign in again.');
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+      let okCount = 0;
+      const failures = [];
+      for (const line of candidates) {
+        const res = await fetch(`${supabaseUrl}/functions/v1/check-hatvoni-inventory`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            apikey: supabaseAnonKey,
+          },
+          body: JSON.stringify({
+            action: 'restock',
+            order_id: orderId,
+            order_item_id: line.order_item_id,
+            product_key: line.product_key,
+            qty: line.qty,
+            assigned_batch_id: line.assigned_batch_id,
+            assigned_batch_reference: line.assigned_batch_reference,
+            idempotency_key: `restock:${orderId}:${line.order_item_id}:${line.product_key}:${line.assigned_batch_id}`,
+          }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (res.ok) okCount += 1;
+        else failures.push(payload?.error || `HTTP ${res.status}`);
+      }
+
+      if (failures.length > 0) {
+        setError(`Restock completed partially (${okCount}/${candidates.length}). ${failures[0]}`);
+      } else {
+        setNotice(`Restocked ${okCount} insider line item(s) for cancelled order.`);
+      }
+      await load();
+    } catch (e) {
+      setError(e.message || 'Failed to restock cancelled order.');
+    } finally {
+      setRestockBusyOrderId('');
+    }
+  };
+
   return (
     <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -557,6 +756,12 @@ function OrdersList({ onSelect }) {
                 <span className="material-symbols-outlined text-lg">arrow_back</span>
               </Link>
               <h1 className="font-brand text-2xl md:text-3xl text-gray-900 tracking-tight">Orders</h1>
+              {pendingBatchTotal > 0 && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                  <span className="material-symbols-outlined text-[12px]">inventory</span>
+                  {pendingBatchTotal} pending batch
+                </span>
+              )}
             </div>
             <p className="text-xs text-gray-900-variant ml-7">Minimal order operations console</p>
           </div>
@@ -840,12 +1045,18 @@ function OrdersList({ onSelect }) {
                     const name = `${order.profile?.first_name || ''} ${order.profile?.last_name || ''}`.trim() || '—';
                     const isSlaRisk = isSlaBreach(order);
                     const slaSummary = getOrderSlaSummary(order);
+                    const statusBadge = getAdminOrderCombinedStatusBadge(order);
                     return (
                       <tr key={order.id} className="hover:bg-surface-container-low/40 transition-colors cursor-pointer" onClick={() => onSelect(order.id)}>
                         <td className="px-3 py-2.5 align-top">
                           <p className="font-mono text-[11px] text-gray-900 font-semibold">{getOrderDisplayId(order)}</p>
                           {order.tracking_number && (
                             <p className="text-[10px] text-gray-900-variant mt-0.5">{order.tracking_number}</p>
+                          )}
+                          {Number(order.pendingBatchCount || 0) > 0 && (
+                            <p className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200">
+                              Batch pending: {order.pendingBatchCount}
+                            </p>
                           )}
                           {isSlaRisk && (
                             <p className="text-[10px] text-red-700 mt-0.5 font-semibold">Lot SLA breached</p>
@@ -883,27 +1094,81 @@ function OrdersList({ onSelect }) {
                           <p className="text-[11px] text-gray-900-variant">{order.profile?.email || '—'}</p>
                         </td>
                         <td className="px-3 py-2.5 text-[13px] font-semibold text-gray-900 whitespace-nowrap">{fmt(order.total_amount)}</td>
-                        <td className="px-3 py-2.5">
-                          <Badge label={order.status?.replace(/_/g, ' ')} colorClass={STATUS_COLORS[order.status] || STATUS_COLORS.pending} />
+                        <td className="px-3 py-2.5 space-y-1">
+                          <Badge label={statusBadge.label} colorClass={statusBadge.colorClass} />
                         </td>
                         <td className="px-3 py-2.5">
                           <Badge label={order.payment_status?.replace(/_/g, ' ')} colorClass={PAYMENT_COLORS[order.payment_status] || PAYMENT_COLORS.pending} />
                         </td>
                         <td className="px-3 py-2.5 text-[11px] text-gray-900-variant whitespace-nowrap">{fmtDate(order.created_at)}</td>
                         <td className="px-3 py-2.5">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); onSelect(order.id); }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-primary text-on-primary text-[11px] font-semibold hover:bg-primary/90 transition-colors"
-                          >
-                            Manage
-                            <span className="material-symbols-outlined text-[14px]">chevron_right</span>
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            {String(order.status || '').toLowerCase() === 'cancelled' && Number(order.pendingBatchCount || 0) < 9999 && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setRestockConfirmOrder({
+                                    id: order.id,
+                                    displayId: getOrderDisplayId(order),
+                                    pendingBatchCount: Number(order.pendingBatchCount || 0),
+                                  });
+                                }}
+                                disabled={restockBusyOrderId === order.id}
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md bg-amber-600 text-white text-[10px] font-bold hover:bg-amber-700 disabled:opacity-60 transition-colors"
+                                title="Restock insider batch-assigned quantities for this cancelled order"
+                              >
+                                <span className="material-symbols-outlined text-[12px]">inventory</span>
+                                {restockBusyOrderId === order.id ? 'Restocking...' : 'Restock'}
+                              </button>
+                            )}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); onSelect(order.id); }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md bg-primary text-on-primary text-[11px] font-semibold hover:bg-primary/90 transition-colors"
+                            >
+                              Manage
+                              <span className="material-symbols-outlined text-[14px]">chevron_right</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {restockConfirmOrder && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/40 backdrop-blur-sm">
+            <div className="w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-5 shadow-xl">
+              <h3 className="text-base font-bold text-gray-900">Confirm restock</h3>
+              <p className="mt-2 text-sm text-gray-700">
+                Restock insider batch-assigned items for <span className="font-semibold">{restockConfirmOrder.displayId}</span>?
+              </p>
+              <p className="mt-1 text-xs text-gray-500">
+                This adds quantities back to internal inventory for previously deducted insider batches.
+              </p>
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRestockConfirmOrder(null)}
+                  className="px-3 py-2 rounded-md border border-outline-variant/40 bg-white text-xs font-semibold text-gray-700 hover:bg-slate-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const targetOrderId = restockConfirmOrder.id;
+                    setRestockConfirmOrder(null);
+                    await restockCancelledOrder(targetOrderId);
+                  }}
+                  className="px-3 py-2 rounded-md bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 transition-colors"
+                >
+                  Confirm Restock
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -916,7 +1181,7 @@ function OrdersList({ onSelect }) {
 // Handles both admin approvals (own-seller/Hatvoni items) and
 // admin overrides of third-party seller decisions.
 
-function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }) {
+function ItemDecisionPanel({ orderId, items, sellerDecisions, adminApprovals, onRefresh }) {
   const [overrideTarget, setOverrideTarget] = useState(null);
   const [overrideDecision, setOverrideDecision] = useState('approved');
   const [overrideReason, setOverrideReason] = useState('');
@@ -925,7 +1190,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
 
   // adminDecideTarget carries the line + whether it's a sync item + fetched inventory
   const [adminDecideTarget, setAdminDecideTarget] = useState(null);
-  // { order_item_id, product_key, isSyncItem, inventoryLoading, inventory, inventoryError }
+  // { order_item_id, product_key, isSyncItem, inventoryLoading, inventory, inventoryLots, selectedBatchId, selectedBatchReference, inventoryError }
   const [adminDecision, setAdminDecision] = useState('approved');
   const [adminReason, setAdminReason] = useState('');
   const [adminDecideError, setAdminDecideError] = useState('');
@@ -942,6 +1207,17 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
     return data; // null if not found
   };
 
+  const fetchInventoryLotsForKey = async (productKey) => {
+    const { data, error } = await supabase
+      .from('hatvoni_inventory_lots')
+      .select('insider_lot_id, batch_reference, qty_available, production_date, unit')
+      .eq('tag_key', productKey)
+      .gt('qty_available', 0)
+      .order('production_date', { ascending: true, nullsFirst: false });
+    if (error) throw error;
+    return data || [];
+  };
+
   // Called when admin clicks Approve or Reject on an admin item
   const openAdminDecide = async (line, initialDecision) => {
     const isSyncItem = line.adminApproval?.sync_with_insider === true;
@@ -956,6 +1232,9 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
         isSyncItem: true,
         inventoryLoading: true,
         inventory: null,
+        inventoryLots: [],
+        selectedBatchId: '',
+        selectedBatchReference: '',
         inventoryError: null,
       });
       setAdminDecision('approved');
@@ -964,11 +1243,17 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
 
       // Fetch inventory in background
       try {
-        const inv = await fetchInventoryForKey(line.product_key);
+        const [inv, lots] = await Promise.all([
+          fetchInventoryForKey(line.product_key),
+          fetchInventoryLotsForKey(line.product_key),
+        ]);
         setAdminDecideTarget((prev) => prev ? {
           ...prev,
           inventoryLoading: false,
           inventory: inv,
+          inventoryLots: lots,
+          selectedBatchId: lots[0]?.insider_lot_id || '',
+          selectedBatchReference: lots[0]?.batch_reference || '',
           inventoryError: null,
         } : null);
       } catch (err) {
@@ -976,6 +1261,9 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
           ...prev,
           inventoryLoading: false,
           inventory: null,
+          inventoryLots: [],
+          selectedBatchId: '',
+          selectedBatchReference: '',
           inventoryError: err.message || 'Failed to fetch inventory',
         } : null);
       }
@@ -989,6 +1277,9 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
         isSyncItem,
         inventoryLoading: false,
         inventory: null,
+        inventoryLots: [],
+        selectedBatchId: '',
+        selectedBatchReference: '',
         inventoryError: null,
       });
       setAdminDecision(initialDecision);
@@ -1010,8 +1301,23 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
             unit: adminDecideTarget.inventory.unit,
             last_synced_at: adminDecideTarget.inventory.last_synced_at,
             force_approved: forceApprove,
+            selected_batch_id: adminDecideTarget.selectedBatchId || null,
+            selected_batch_reference: adminDecideTarget.selectedBatchReference || null,
           }
         : null;
+
+      const qtyAvail = Number(adminDecideTarget.inventory?.total_qty_available ?? 0);
+      const qtyNeeded = Number(adminDecideTarget.qty_ordered ?? 0);
+      const inStock = !!adminDecideTarget.inventory && qtyAvail >= qtyNeeded;
+
+      if (
+        adminDecideTarget.isSyncItem &&
+        adminDecision === 'approved' &&
+        inStock &&
+        !adminDecideTarget.selectedBatchId
+      ) {
+        throw new Error('Batch ID is required before approving insider item.');
+      }
 
       const { error } = await supabase.rpc('admin_approve_item', {
         p_order_item_id: adminDecideTarget.order_item_id,
@@ -1019,8 +1325,48 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
         p_decision: adminDecision,
         p_reason: adminReason || (forceApprove ? 'Approved — production will fulfill' : null),
         p_inventory_snap: inventorySnap,
+        p_assigned_batch_id: !forceApprove ? (adminDecideTarget.selectedBatchId || null) : null,
+        p_assigned_batch_reference: !forceApprove ? (adminDecideTarget.selectedBatchReference || null) : null,
+        p_fulfillment_mode: forceApprove ? 'production' : (inStock ? 'batch' : 'production'),
       });
       if (error) throw error;
+
+      if (
+        adminDecideTarget.isSyncItem &&
+        adminDecision === 'approved' &&
+        inStock &&
+        !forceApprove &&
+        adminDecideTarget.selectedBatchId
+      ) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData?.session?.access_token;
+        if (!token) throw new Error('No auth token — please sign in again.');
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const deductRes = await fetch(`${supabaseUrl}/functions/v1/check-hatvoni-inventory`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+            apikey: supabaseAnonKey,
+          },
+          body: JSON.stringify({
+            action: 'deduct',
+            order_id: orderId,
+            order_item_id: adminDecideTarget.order_item_id,
+            product_key: adminDecideTarget.product_key,
+            qty: Number(adminDecideTarget.qty_ordered || 0),
+            assigned_batch_id: adminDecideTarget.selectedBatchId,
+            assigned_batch_reference: adminDecideTarget.selectedBatchReference || null,
+            idempotency_key: `${adminDecideTarget.order_item_id}:${adminDecideTarget.product_key}:${adminDecideTarget.selectedBatchId}`,
+          }),
+        });
+        const deductPayload = await deductRes.json().catch(() => ({}));
+        if (!deductRes.ok) {
+          throw new Error(deductPayload?.error || `Batch deduction failed (HTTP ${deductRes.status})`);
+        }
+      }
+
       setAdminDecideTarget(null);
       setAdminReason('');
       await onRefresh();
@@ -1150,23 +1496,24 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
 
           return (
             <div key={`${line.order_item_id}-${line.product_key}`}
-              className="rounded-lg border border-outline-variant/20 p-3 bg-surface">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+              className="rounded-2xl border border-outline-variant/25 p-4 bg-white shadow-sm">
+              <div className="flex flex-col xl:flex-row xl:items-start gap-4">
                 {/* Product info */}
-                <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
                   {line.image_url ? (
                     <img src={line.image_url} alt={line.name}
-                      className="w-12 h-12 rounded-lg object-cover border border-outline-variant/20 shrink-0" />
+                      className="w-14 h-14 rounded-xl object-cover border border-outline-variant/20 shrink-0" />
                   ) : (
-                    <div className="w-12 h-12 rounded-lg bg-surface-container-low flex items-center justify-center shrink-0 border border-outline-variant/20">
-                      <span className="material-symbols-outlined text-outline text-sm">local_mall</span>
+                    <div className="w-14 h-14 rounded-xl bg-surface-container-low flex items-center justify-center shrink-0 border border-outline-variant/20">
+                      <span className="material-symbols-outlined text-outline text-base">local_mall</span>
                     </div>
                   )}
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 text-sm truncate">{line.name}</p>
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-gray-900 text-[17px] leading-tight truncate">{line.name}</p>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
                       {line.product_key && (
-                        <span className="text-[10px] font-mono text-gray-900-variant bg-surface-container px-1.5 py-0.5 rounded-md">
+                        <span className="text-[10px] font-mono text-gray-900-variant bg-surface-container px-2 py-0.5 rounded-md border border-outline-variant/25">
                           {line.product_key}
                         </span>
                       )}
@@ -1175,30 +1522,46 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                       )}
                       {/* Show item type: 3rd-party seller vs own-seller */}
                       {isAdminItem ? (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
-                          {aa?.sync_with_insider ? '🔄 Insider sync' : '🏠 Own seller'}
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-200">
+                          {aa?.sync_with_insider ? 'Insider sync' : 'Own seller'}
                         </span>
                       ) : isSellerItem ? (
-                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
-                          🏪 3rd-party seller
+                        <span className="text-[11px] font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
+                          3rd-party seller
                         </span>
                       ) : null}
-                      <span className="text-[10px] text-gray-900-variant">
-                        {line.qty} × {fmt(line.unit_price)} = {fmt(line.line_total)}
-                      </span>
                     </div>
-                    {/* Show inventory snapshot if available (sync_with_insider items) */}
-                    {aa?.inventory_snapshot && (
-                      <div className="mt-1.5 text-[10px] bg-blue-50 border border-blue-200 rounded-md px-2 py-1 text-blue-800">
-                        Insider stock: {aa.inventory_snapshot.qty_available ?? '—'} {aa.inventory_snapshot.unit || 'units'} available
-                      </div>
-                    )}
+
+                    <p className="mt-2 text-[13px] text-slate-600">
+                      {line.qty} × {fmt(line.unit_price)} = <span className="font-semibold text-gray-900">{fmt(line.line_total)}</span>
+                    </p>
+
+                    <div className="mt-2 space-y-1.5">
+                      {aa?.inventory_snapshot && (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 border border-blue-200 text-[12px] text-blue-800">
+                          <span className="material-symbols-outlined text-[14px]">inventory_2</span>
+                          Insider stock: {aa.inventory_snapshot.qty_available ?? '—'} {aa.inventory_snapshot.unit || 'units'} available
+                        </div>
+                      )}
+                      {aa?.sync_with_insider && aa?.status === 'approved' && aa?.batch_assignment_status !== 'assigned' && (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-[12px] font-semibold text-amber-800">
+                          <span className="material-symbols-outlined text-[14px]">error</span>
+                          Batch ID needs to be set
+                        </div>
+                      )}
+                      {aa?.assigned_batch_reference && (
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-200 text-[12px] text-emerald-800">
+                          <span className="material-symbols-outlined text-[14px]">verified</span>
+                          Batch assigned: {aa.assigned_batch_reference}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
                 {/* Decision status */}
-                <div className="flex items-center gap-2.5 shrink-0">
-                  <div className="text-right">
+                <div className="w-full xl:w-auto flex xl:flex-col items-start xl:items-end justify-between xl:justify-start gap-3 xl:gap-2 shrink-0">
+                  <div className="text-left xl:text-right">
                     <Badge label={statusLabel} colorClass={statusColor} />
                     {sourceMeta && (
                       <span className={`inline-flex items-center rounded-md px-2 py-0.5 mt-1 text-[10px] font-medium ${sourceMeta.className}`}>
@@ -1206,7 +1569,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                       </span>
                     )}
                     {(sd?.decision_reason || aa?.decision_reason) && (
-                      <p className="text-[10px] text-red-600 mt-0.5 italic max-w-[160px] truncate">
+                      <p className="text-[10px] text-red-600 mt-1 italic max-w-[180px] truncate">
                         {sd?.decision_reason || aa?.decision_reason}
                       </p>
                     )}
@@ -1218,19 +1581,19 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                   </div>
 
                   {/* Action buttons */}
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-1.5 min-w-[92px]">
                     {/* Admin items: direct approve/reject */}
                     {isAdminItem && aa.status === 'pending_review' && (
                       <>
                         <button
                           onClick={() => openAdminDecide(line, 'approved')}
-                          className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                          className="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs font-semibold hover:bg-emerald-700 transition-colors shadow-sm"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => openAdminDecide(line, 'rejected')}
-                          className="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors"
+                          className="px-3 py-1.5 rounded-md bg-red-600 text-white text-xs font-semibold hover:bg-red-700 transition-colors shadow-sm"
                         >
                           Reject
                         </button>
@@ -1241,7 +1604,7 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                     {isAdminItem && aa.status !== 'pending_review' && (
                       <button
                         onClick={() => openAdminDecide(line, aa.status === 'approved' ? 'rejected' : 'approved')}
-                        className="px-3 py-1.5 rounded-md border border-outline-variant text-gray-900-variant text-xs font-semibold hover:bg-surface-container transition-colors"
+                        className="px-3 py-1.5 rounded-xl border border-outline-variant/30 text-gray-900-variant text-xs font-semibold hover:bg-surface-container-low transition-colors"
                       >
                         Change
                       </button>
@@ -1342,6 +1705,36 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                           </div>
                         </div>
                         <p className="text-[9px] text-gray-400">Last synced: {lastSync}</p>
+                        {inStock && (
+                          <div className="mt-3">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                              Batch ID <span className="text-red-500">*</span>
+                            </label>
+                            <select
+                              value={adminDecideTarget.selectedBatchId || ''}
+                              onChange={(e) => {
+                                const nextBatchId = e.target.value;
+                                const nextLot = (adminDecideTarget.inventoryLots || []).find((lot) => lot.insider_lot_id === nextBatchId);
+                                setAdminDecideTarget((prev) => prev ? {
+                                  ...prev,
+                                  selectedBatchId: nextBatchId,
+                                  selectedBatchReference: nextLot?.batch_reference || '',
+                                } : null);
+                              }}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+                            >
+                              <option value="">Select batch for approval</option>
+                              {(adminDecideTarget.inventoryLots || []).map((lot) => (
+                                <option key={lot.insider_lot_id} value={lot.insider_lot_id}>
+                                  {lot.batch_reference} · Qty {lot.qty_available}{lot.unit ? ` ${lot.unit}` : ''}{lot.production_date ? ` · ${lot.production_date}` : ''}
+                                </option>
+                              ))}
+                            </select>
+                            <p className="mt-1 text-[10px] text-gray-500">
+                              Mandatory for insider items when stock is available.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     );
                   })()
@@ -1394,14 +1787,14 @@ function ItemDecisionPanel({ items, sellerDecisions, adminApprovals, onRefresh }
                   const inv = adminDecideTarget.inventory;
                   const qtyAvail = Number(inv?.total_qty_available ?? 0);
                   const qtyNeeded = Number(adminDecideTarget.qty_ordered ?? 0);
-                  const inStock = inv ? qtyAvail >= qtyNeeded : true; // if no inventory record, assume we can force approve or production fulfills
+                  const inStock = inv ? qtyAvail >= qtyNeeded : false;
                   
                   return (
                     <>
                       {inStock ? (
                         <button
                           onClick={() => handleAdminDecide(false)}
-                          disabled={adminDeciding}
+                          disabled={adminDeciding || !adminDecideTarget.selectedBatchId}
                           className="w-full py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-1.5 shadow-sm"
                         >
                           <span className="material-symbols-outlined text-[14px]">check_circle</span>
@@ -1561,6 +1954,10 @@ function OrderFinalizationPanel({ orderId, order, readiness, onRefresh, onNotice
 
   const handleFinalize = async () => {
     if (!action) return;
+    if (!allDecided) {
+      onError('Complete all item-level approvals/rejections before accepting or finalizing the order.');
+      return;
+    }
     setFinalizing(true);
     onError('');
     try {
@@ -1970,6 +2367,10 @@ function WarehousePills({ warehouses }) {
 
 /** One physical lot: manual tracking or Velocity flow (multi-shipment orders). */
 function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefresh, onNotice, onError }) {
+  const manualShipmentStatusOptions = useMemo(
+    () => getShipmentStatusDropdownOptions(lot?.carrier_shipment_status),
+    [lot?.carrier_shipment_status],
+  );
   const shouldLotStartExpanded = useMemo(() => {
     const status = String(lot?.carrier_shipment_status || '').trim().toLowerCase();
     const tracking = String(lot?.tracking_number || lot?.velocity_awb || '').trim();
@@ -1986,6 +2387,17 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   const [lotTab, setLotTab] = useState('manual');
   const [expanded, setExpanded] = useState(shouldLotStartExpanded);
   const [lotTracking, setLotTracking] = useState(() => String(lot?.tracking_number || ''));
+  const [lotCourierName, setLotCourierName] = useState(() => String(lot?.velocity_carrier_name || ''));
+  const [lotCustomerNote, setLotCustomerNote] = useState(() => String(lot?.velocity_fulfillment?.manual_customer_note || ''));
+  const [lotManualStatus, setLotManualStatus] = useState(() =>
+    normalizeShipmentStatusKey(lot?.carrier_shipment_status || 'pending'),
+  );
+  const [lotTrackingLinkEnabled, setLotTrackingLinkEnabled] = useState(() => {
+    const existingUrl = String(lot?.velocity_tracking_url || '').trim();
+    if (existingUrl) return true;
+    return Boolean(lot?.velocity_fulfillment?.manual_tracking_link_enabled);
+  });
+  const [lotTrackingLink, setLotTrackingLink] = useState(() => String(lot?.velocity_tracking_url || ''));
   const [savingLot, setSavingLot] = useState(false);
   const [lotProductWarehouses, setLotProductWarehouses] = useState([]);
   const [lotHasScopedProducts, setLotHasScopedProducts] = useState(false);
@@ -2055,6 +2467,12 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
 
   useEffect(() => {
     setLotTracking(String(lot?.tracking_number || ''));
+    setLotCourierName(String(lot?.velocity_carrier_name || ''));
+    setLotCustomerNote(String(lot?.velocity_fulfillment?.manual_customer_note || ''));
+    setLotManualStatus(normalizeShipmentStatusKey(lot?.carrier_shipment_status || 'pending'));
+    const existingUrl = String(lot?.velocity_tracking_url || '').trim();
+    setLotTrackingLink(existingUrl);
+    setLotTrackingLinkEnabled(existingUrl.length > 0 || Boolean(lot?.velocity_fulfillment?.manual_tracking_link_enabled));
   }, [lot?.id, lot?.tracking_number]);
 
   useEffect(() => {
@@ -2064,11 +2482,9 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   const lotVelocityLocked = useMemo(
     () => Boolean(
       String(lot?.velocity_pending_shipment_id || '').trim() ||
-      String(lot?.velocity_shipment_id || '').trim() ||
-      String(lot?.tracking_number || '').trim() ||
-      String(lot?.velocity_awb || '').trim(),
+      String(lot?.velocity_shipment_id || '').trim(),
     ),
-    [lot?.velocity_pending_shipment_id, lot?.velocity_shipment_id, lot?.tracking_number, lot?.velocity_awb],
+    [lot?.velocity_pending_shipment_id, lot?.velocity_shipment_id],
   );
 
   useEffect(() => {
@@ -2202,12 +2618,7 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
   const whVelocity = lot?.warehouse?.velocity_warehouse_id;
   const lotShipmentStatusRaw = String(lot?.carrier_shipment_status || '').trim();
   const lotShipmentStatusLabel = lotShipmentStatusRaw
-    ? lotShipmentStatusRaw
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/[_-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .toLowerCase()
-      .replace(/\b\w/g, (c) => c.toUpperCase())
+    ? formatShipmentStatusForDisplay(lotShipmentStatusRaw)
     : 'Pending';
   const lotStatusTone = (() => {
     const s = lotShipmentStatusRaw.toLowerCase();
@@ -2222,18 +2633,77 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
     setSavingLot(true);
     try {
       const now = new Date().toISOString();
+      const existingMeta = lot?.velocity_fulfillment && typeof lot.velocity_fulfillment === 'object'
+        ? lot.velocity_fulfillment
+        : {};
+      const nextMeta = {
+        ...existingMeta,
+        manual_customer_note: lotCustomerNote.trim() || null,
+        manual_tracking_link_enabled: !!lotTrackingLinkEnabled,
+        manual_saved_at: now,
+      };
       const { error } = await supabase
         .from('order_shipments')
         .update({
           tracking_number: lotTracking.trim() || null,
+          velocity_awb: lotTracking.trim() || null,
+          velocity_carrier_name: lotCourierName.trim() || null,
+          velocity_tracking_url: lotTrackingLinkEnabled ? (lotTrackingLink.trim() || null) : null,
+          carrier_shipment_status: normalizeShipmentStatusKey(lotManualStatus || 'pending'),
+          velocity_fulfillment: nextMeta,
           updated_at: now,
         })
         .eq('id', lot.id);
       if (error) throw error;
-      onNotice(`Saved tracking for ${lot.label || `shipment ${lot.lot_index}`}.`);
+      onNotice(`Saved manual shipment details for ${lot.label || `shipment ${lot.lot_index}`}.`);
       await onRefresh();
     } catch (e) {
       onError(String(e?.message || e || 'Could not save shipment lot.'));
+    } finally {
+      setSavingLot(false);
+    }
+  };
+
+  const cancelManualLot = async () => {
+    setSavingLot(true);
+    try {
+      const now = new Date().toISOString();
+      const existingMeta = lot?.velocity_fulfillment && typeof lot.velocity_fulfillment === 'object'
+        ? lot.velocity_fulfillment
+        : {};
+      const { error } = await supabase
+        .from('order_shipments')
+        .update({
+          tracking_number: null,
+          velocity_awb: null,
+          velocity_pending_shipment_id: null,
+          velocity_shipment_id: null,
+          velocity_carrier_name: null,
+          velocity_label_url: null,
+          velocity_tracking_url: null,
+          velocity_tracking_snapshot: null,
+          carrier_shipment_status: 'cancelled',
+          velocity_fulfillment: {
+            ...existingMeta,
+            workflow_stage: 'manual_cancelled',
+            manual_customer_note: null,
+            manual_tracking_link_enabled: false,
+            manual_saved_at: now,
+          },
+          updated_at: now,
+        })
+        .eq('id', lot.id);
+      if (error) throw error;
+      setLotTracking('');
+      setLotCourierName('');
+      setLotCustomerNote('');
+      setLotTrackingLink('');
+      setLotTrackingLinkEnabled(false);
+      setLotManualStatus('cancelled');
+      onNotice(`Manual shipment cancelled for ${lot.label || `shipment ${lot.lot_index}`}. You can re-enter details anytime.`);
+      await onRefresh();
+    } catch (e) {
+      onError(String(e?.message || e || 'Could not cancel manual shipment lot.'));
     } finally {
       setSavingLot(false);
     }
@@ -2254,6 +2724,11 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
               ) : null}
               {lot.velocity_external_code ? (
                 <span className="ml-1 font-mono text-[10px]">· {lot.velocity_external_code}</span>
+              ) : null}
+              {Number(lot?.shipping_attempt_no || 1) > 1 ? (
+                <span className="ml-1 text-[10px] font-semibold text-amber-700">
+                  · Re-order #{lot.shipping_attempt_no}
+                </span>
               ) : null}
             </p>
             <span className={`inline-flex items-center mt-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold ${lotStatusTone}`}>
@@ -2367,9 +2842,72 @@ function ShipmentLotFulfillmentCard({ lot, orderId, allPickupLocations, onRefres
                 placeholder="Carrier tracking or AWB"
               />
             </div>
-            <Button variant="contained" color="primary" size="small" onClick={saveLotManual} disabled={savingLot}>
-              {savingLot ? 'Saving…' : 'Save lot tracking'}
-            </Button>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-900-variant uppercase tracking-wider mb-1">Shipment status (this lot)</label>
+              <select
+                value={lotManualStatus}
+                onChange={(e) => setLotManualStatus(e.target.value)}
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary"
+              >
+                <option value="pending">Pending</option>
+                {manualShipmentStatusOptions.map((s) => (
+                  <option key={s.value} value={s.value}>{s.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-900-variant uppercase tracking-wider mb-1">Courier details (this lot)</label>
+              <input
+                type="text"
+                value={lotCourierName}
+                onChange={(e) => setLotCourierName(e.target.value)}
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary"
+                placeholder="e.g. Delhivery, Blue Dart, India Post"
+              />
+            </div>
+            <div>
+              <label className="block text-[10px] font-bold text-gray-900-variant uppercase tracking-wider mb-1">Dispatch note to customer (this lot)</label>
+              <input
+                type="text"
+                value={lotCustomerNote}
+                onChange={(e) => setLotCustomerNote(e.target.value)}
+                className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary"
+                placeholder="Dispatch details visible to customer..."
+              />
+            </div>
+            <div className="rounded-xl border border-outline-variant/30 bg-white px-3 py-2.5">
+              <label className="flex items-center justify-between gap-3 cursor-pointer">
+                <span className="text-[11px] font-bold text-gray-900 uppercase tracking-wider">
+                  Tracking link available for customer
+                </span>
+                <input
+                  type="checkbox"
+                  checked={lotTrackingLinkEnabled}
+                  onChange={(e) => setLotTrackingLinkEnabled(e.target.checked)}
+                  className="h-4 w-4 accent-primary"
+                />
+              </label>
+            </div>
+            {lotTrackingLinkEnabled && (
+              <div>
+                <label className="block text-[10px] font-bold text-gray-900-variant uppercase tracking-wider mb-1">Courier tracking link (this lot)</label>
+                <input
+                  type="url"
+                  value={lotTrackingLink}
+                  onChange={(e) => setLotTrackingLink(e.target.value)}
+                  className="w-full px-4 py-3 border border-outline-variant/50 rounded-xl bg-surface text-sm focus:ring-2 focus:ring-secondary"
+                  placeholder="https://..."
+                />
+              </div>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="contained" color="primary" size="small" onClick={saveLotManual} disabled={savingLot}>
+                {savingLot ? 'Saving…' : 'Save lot details'}
+              </Button>
+              <Button variant="outlined" color="error" size="small" onClick={cancelManualLot} disabled={savingLot}>
+                Cancel manual shipment
+              </Button>
+            </div>
           </div>
         )}
 
@@ -2522,7 +3060,10 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   // Show a "change mode" banner when single was chosen but nothing shipped yet
   const showSingleChosenBanner =
     order?.status === 'processing' &&
-    order?.fulfillment_mode === 'legacy_single' &&
+    order?.fulfillment_mode === 'multi_shipment' &&
+    !lotBuilderOpen &&
+    shipmentLots.length === 1 &&
+    shipmentLots.every((l) => !String(l.tracking_number || '').trim() && !String(l.velocity_pending_shipment_id || '').trim()) &&
     !String(order?.velocity_pending_shipment_id || '').trim() &&
     !String(order?.velocity_shipment_id || '').trim() &&
     !String(order?.tracking_number || '').trim();
@@ -2532,8 +3073,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
     order?.status === 'processing' &&
     order?.fulfillment_mode === 'multi_shipment' &&
     !lotBuilderOpen &&
-    !hideGlobalVelocityForLots &&
-    shipmentLots.length > 0 &&
+    shipmentLots.length > 1 &&
     shipmentLots.every((l) => !String(l.tracking_number || '').trim() && !String(l.velocity_pending_shipment_id || '').trim()) &&
     !String(order?.velocity_pending_shipment_id || '').trim() &&
     !String(order?.velocity_shipment_id || '').trim() &&
@@ -2691,6 +3231,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
             label,
             warehouse_id,
             velocity_external_code,
+            shipping_attempt_no,
             velocity_pending_shipment_id,
             velocity_shipment_id,
             velocity_fulfillment,
@@ -2975,16 +3516,11 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   const confirmLegacySingleFulfillment = async () => {
     onError('');
     try {
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          fulfillment_mode: 'legacy_single',
-          updated_at: new Date().toISOString(),
-          admin_updated_at: new Date().toISOString(),
-        })
-        .eq('id', orderId);
+      const { error } = await supabase.rpc('admin_prepare_single_shipment_lot', {
+        p_order_id: orderId,
+      });
       if (error) throw error;
-      onNotice('Single-shipment mode selected. Continue with Velocity or manual entry below.');
+      onNotice('Single shipment selected. One shipment lot was created and all items were auto-assigned.');
       await onRefresh();
     } catch (e) {
       onError(toUserError(e, 'Could not update fulfillment mode.'));
@@ -3721,20 +4257,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
   const velocityDonePayload = velStep === 'done' && velResult ? velocityInnerPayload(velResult) : null;
   const velocityDoneCharges = velocityDonePayload?.charges?.frwd_charges;
-  const formatShipmentStatusLabel = (value) => {
-    const raw = String(value || '').trim();
-    if (!raw) return '—';
-    const compact = raw.replace(/\s+/g, '').toLowerCase();
-    if (compact === 'readyforreceive' || compact === 'readyforpickup') {
-      return 'Ready for Receive/Pickup';
-    }
-    return raw
-      .replace(/([a-z])([A-Z])/g, '$1 $2')
-      .replace(/[_-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .toLowerCase()
-      .replace(/\b\w/g, (c) => c.toUpperCase());
-  };
+  const formatShipmentStatusLabel = formatShipmentStatusForDisplay;
   const statusStageKey = (label) => {
     const s = String(label || '').toLowerCase();
     if (s.includes('deliver')) return 'delivered';
@@ -4400,17 +4923,18 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
               <span className="material-symbols-outlined text-primary text-[20px]">inventory</span>
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-bold text-gray-900">Single shipment selected</p>
-              <p className="text-xs text-gray-900-variant mt-0.5">Changed your mind? You can switch to multiple shipments — nothing has been booked yet.</p>
+              <p className="text-sm font-bold text-gray-900">Single shipment lot selected</p>
+              <p className="text-xs text-gray-900-variant mt-0.5">All items were auto-assigned to one lot. You can switch to multiple lots before booking.</p>
             </div>
           </div>
           <button
             type="button"
-            onClick={resetFulfillmentMode}
+            onClick={revertLots}
+            disabled={revertingLots}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-secondary/40 bg-white text-secondary text-xs font-bold hover:bg-secondary/5 transition-colors shrink-0 whitespace-nowrap"
           >
             <span className="material-symbols-outlined text-[15px]">swap_horiz</span>
-            Change mode
+            {revertingLots ? 'Switching…' : 'Change mode'}
           </button>
         </div>
       )}
@@ -4724,7 +5248,7 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
         !shouldHideManualMethod &&
         !lotBuilderOpen &&
         !showFulfillmentRouting &&
-        !(hideGlobalVelocityForLots && order.status === 'processing') && (
+        !hideGlobalVelocityForLots && (
         <div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-6">
             <div>
@@ -5282,6 +5806,203 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
   );
 }
 
+// ─── OrderSlaPanel ───────────────────────────────────────────────────────────
+
+const SLA_STAGES = [
+  {
+    key: 'placed_to_processing',
+    from: 'Placed',
+    to: 'Processing',
+    thresholdHours: 24,
+    icon: 'pending_actions',
+  },
+  {
+    key: 'processing_to_shipping',
+    from: 'Processing',
+    to: 'Shipped',
+    thresholdHours: 24,
+    icon: 'local_shipping',
+  },
+  {
+    key: 'shipping_to_delivery_or_update',
+    from: 'Shipped',
+    to: 'Next Update',
+    thresholdHours: 7 * 24,
+    icon: 'update',
+  },
+];
+
+function fmtSlaHours(h) {
+  if (h < 1) return `${Math.round(h * 60)}m`;
+  if (h < 24) return `${Math.round(h)}h`;
+  const days = Math.floor(h / 24);
+  const rem = Math.round(h % 24);
+  return rem > 0 ? `${days}d ${rem}h` : `${days}d`;
+}
+
+function OrderSlaPanel({ order, shipmentLots }) {
+  // Build a synthetic order-like object with shipmentLots attached so we can
+  // reuse the existing getLotSlaState / getOrderSlaSummary helpers.
+  const lots = Array.isArray(shipmentLots) && shipmentLots.length > 0
+    ? shipmentLots
+    : [];
+
+  // For orders without multi-shipment lots, synthesise a single "lot" from the
+  // order itself so the SLA stages still render.
+  const effectiveLots = lots.length > 0 ? lots : (order ? [{
+    id: order.id,
+    label: 'Shipment 1',
+    created_at: order.created_at,
+    updated_at: order.updated_at,
+    carrier_shipment_status: order.shipment_status || '',
+    tracking_number: order.tracking_number || '',
+    velocity_pending_shipment_id: order.velocity_pending_shipment_id || '',
+    last_event_at: null,
+  }] : []);
+
+  if (!order) return null;
+
+  const orderStatus = String(order?.status || '').toLowerCase();
+  const isTerminal = ['delivered', 'cancelled', 'rejected'].includes(orderStatus);
+
+  // Compute per-stage data
+  const stageRows = SLA_STAGES.map((stage) => {
+    // Find the most critical lot for this stage
+    const lotStates = effectiveLots
+      .map((lot) => ({ lot, sla: getLotSlaState(lot) }))
+      .filter(({ sla }) => sla.stage === stage.key);
+
+    if (lotStates.length === 0) {
+      // Stage not active — determine if it's done or upcoming
+      const stageOrder = ['placed_to_processing', 'processing_to_shipping', 'shipping_to_delivery_or_update'];
+      const currentStageIdx = stageOrder.findIndex((k) =>
+        effectiveLots.some((lot) => getLotSlaState(lot).stage === k),
+      );
+      const thisIdx = stageOrder.indexOf(stage.key);
+      const isDone = isTerminal || (currentStageIdx > thisIdx) || (currentStageIdx === -1 && isTerminal);
+      return { ...stage, active: false, done: isDone, breached: false, progressPct: isDone ? 100 : 0, ageHours: 0, lotLabel: null };
+    }
+
+    // Pick the worst lot (most elapsed relative to threshold)
+    const worst = lotStates.sort(
+      (a, b) => (b.sla.ageHours / b.sla.thresholdHours) - (a.sla.ageHours / a.sla.thresholdHours),
+    )[0];
+
+    const progressPct = Math.max(0, Math.min(100, Math.round((worst.sla.ageHours / worst.sla.thresholdHours) * 100)));
+    const lotLabel = lots.length > 1
+      ? (String(worst.lot?.label || '').trim() || `Lot ${String(worst.lot?.id || '').slice(0, 6)}`)
+      : null;
+
+    return {
+      ...stage,
+      active: true,
+      done: false,
+      breached: worst.sla.breached,
+      progressPct,
+      ageHours: worst.sla.ageHours,
+      thresholdHours: worst.sla.thresholdHours,
+      lotLabel,
+    };
+  });
+
+  const anyBreached = stageRows.some((s) => s.breached);
+  const anyActive = stageRows.some((s) => s.active);
+
+  return (
+    <div className="bg-white rounded-xl p-4 border border-neutral-200 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-[11px] font-bold tracking-[0.2em] text-gray-900-variant uppercase">SLA</h3>
+        {anyBreached && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+            <span className="material-symbols-outlined text-[11px]">warning</span>
+            Breached
+          </span>
+        )}
+        {!anyBreached && anyActive && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+            <span className="material-symbols-outlined text-[11px]">check_circle</span>
+            On Track
+          </span>
+        )}
+        {isTerminal && !anyActive && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+            <span className="material-symbols-outlined text-[11px]">done_all</span>
+            Completed
+          </span>
+        )}
+      </div>
+
+      <div className="space-y-4">
+        {stageRows.map((stage) => {
+          const barColor = stage.breached
+            ? 'bg-red-500'
+            : stage.done
+              ? 'bg-emerald-500'
+              : stage.active
+                ? (stage.progressPct >= 75 ? 'bg-amber-400' : 'bg-blue-500')
+                : 'bg-slate-200';
+
+          const trackColor = stage.breached
+            ? 'bg-red-100'
+            : stage.done
+              ? 'bg-emerald-100'
+              : 'bg-slate-100';
+
+          const labelColor = stage.breached
+            ? 'text-red-700'
+            : stage.done
+              ? 'text-emerald-700'
+              : stage.active
+                ? 'text-gray-900'
+                : 'text-slate-400';
+
+          const timeLabel = stage.active
+            ? `${fmtSlaHours(stage.ageHours)} / ${fmtSlaHours(stage.thresholdHours)}`
+            : stage.done
+              ? `Done`
+              : `${fmtSlaHours(stage.thresholdHours)} limit`;
+
+          return (
+            <div key={stage.key}>
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className={`material-symbols-outlined text-[14px] ${labelColor}`}>{stage.icon}</span>
+                  <span className={`text-[11px] font-semibold ${labelColor}`}>
+                    {stage.from}
+                    <span className="mx-1 opacity-50">→</span>
+                    {stage.to}
+                  </span>
+                  {stage.lotLabel && (
+                    <span className="text-[10px] text-slate-400">({stage.lotLabel})</span>
+                  )}
+                </div>
+                <span className={`text-[10px] font-mono tabular-nums ${stage.breached ? 'text-red-600 font-bold' : 'text-slate-500'}`}>
+                  {timeLabel}
+                </span>
+              </div>
+              <div className={`h-2 rounded-full overflow-hidden ${trackColor}`}>
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+                  style={{ width: `${stage.done ? 100 : stage.progressPct}%` }}
+                />
+              </div>
+              {stage.breached && (
+                <p className="text-[10px] text-red-600 mt-1">
+                  Overdue by {fmtSlaHours(stage.ageHours - stage.thresholdHours)}
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {!anyActive && !isTerminal && effectiveLots.length === 0 && (
+        <p className="text-xs text-slate-400 text-center py-2">No shipment data yet.</p>
+      )}
+    </div>
+  );
+}
+
 // ─── OrderDetail ─────────────────────────────────────────────────────────────
 
 function OrderDetail({ orderId, onBack }) {
@@ -5294,6 +6015,14 @@ function OrderDetail({ orderId, onBack }) {
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
   const [showLog, setShowLog] = useState(false);
+  const itemDecisionSectionRef = useRef(null);
+  const orderItemsSectionRef = useRef(null);
+  const [batchModal, setBatchModal] = useState(null);
+  const [batchLots, setBatchLots] = useState([]);
+  const [selectedBatchId, setSelectedBatchId] = useState('');
+  const [batchSaving, setBatchSaving] = useState(false);
+  const [batchError, setBatchError] = useState('');
+  const [detailShipmentLots, setDetailShipmentLots] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -5324,7 +6053,7 @@ function OrderDetail({ orderId, onBack }) {
           : Promise.resolve({ data: [] }),
         itemIds.length > 0
           ? supabase.from('order_item_approvals')
-              .select('order_item_id, product_key, status, decision_reason, decided_at, decision_by, sync_with_insider, inventory_snapshot')
+              .select('order_item_id, product_key, status, decision_reason, decided_at, decision_by, sync_with_insider, inventory_snapshot, assigned_batch_id, assigned_batch_reference, batch_assignment_status, inventory_deduction_status')
               .in('order_item_id', itemIds)
           : Promise.resolve({ data: [] }),
       ]);
@@ -5345,6 +6074,25 @@ function OrderDetail({ orderId, onBack }) {
   }, [orderId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load shipment lots for the SLA panel (multi-shipment orders only)
+  useEffect(() => {
+    if (!orderId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('order_shipments')
+          .select('id, label, lot_index, carrier_shipment_status, tracking_number, velocity_pending_shipment_id, velocity_shipment_id, created_at, updated_at')
+          .eq('order_id', orderId)
+          .order('lot_index', { ascending: true });
+        if (!cancelled) setDetailShipmentLots(data || []);
+      } catch {
+        if (!cancelled) setDetailShipmentLots([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [orderId]);
 
   useEffect(() => {
     const ch = supabase
@@ -5384,6 +6132,116 @@ function OrderDetail({ orderId, onBack }) {
   // Shipping available once order is processing (full or partial)
   const isPostProcessing = order?.status === 'processing' || order?.status === 'shipped' || order?.status === 'delivered';
   const isPartialOrder = order?.partial_fulfillment === true;
+  const pendingBatchCount = (adminApprovals || []).filter(
+    (aa) => aa?.sync_with_insider === true
+      && aa?.status === 'approved'
+      && aa?.batch_assignment_status !== 'assigned',
+  ).length;
+  const handlePendingBatchClick = () => {
+    const target = isPending ? itemDecisionSectionRef.current : orderItemsSectionRef.current;
+    if (target && typeof target.scrollIntoView === 'function') {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const openBatchModal = async ({ orderItemId, productKey, qty, itemName }) => {
+    if (!orderItemId || !productKey) return;
+    setBatchError('');
+    setBatchLots([]);
+    setSelectedBatchId('');
+    setBatchModal({ orderItemId, productKey, qty: Number(qty || 0), itemName: itemName || 'Item' });
+    try {
+      const { data: lots, error: lotsErr } = await supabase
+        .from('hatvoni_inventory_lots')
+        .select('insider_lot_id, batch_reference, qty_available, production_date, unit')
+        .eq('tag_key', productKey)
+        .gt('qty_available', 0)
+        .order('production_date', { ascending: true, nullsFirst: false });
+      if (lotsErr) throw lotsErr;
+      const rows = Array.isArray(lots) ? lots : [];
+      setBatchLots(rows);
+      setSelectedBatchId(rows[0]?.insider_lot_id || '');
+    } catch (e) {
+      setBatchError(e.message || 'Failed to load available batches.');
+    }
+  };
+
+  const saveBatchAssignment = async () => {
+    if (!batchModal || !selectedBatchId) return;
+    setBatchSaving(true);
+    setBatchError('');
+    try {
+      const chosenLot = (batchLots || []).find((lot) => lot.insider_lot_id === selectedBatchId);
+      const { data: inv, error: invErr } = await supabase
+        .from('hatvoni_inventory')
+        .select('tag_key, total_qty_available, unit, last_synced_at')
+        .eq('tag_key', batchModal.productKey)
+        .maybeSingle();
+      if (invErr) throw invErr;
+
+      const { error: approveErr } = await supabase.rpc('admin_approve_item', {
+        p_order_item_id: batchModal.orderItemId,
+        p_product_key: batchModal.productKey,
+        p_decision: 'approved',
+        p_reason: 'Batch assigned from order items panel',
+        p_inventory_snap: inv
+          ? {
+              tag_key: inv.tag_key,
+              qty_available: inv.total_qty_available,
+              unit: inv.unit,
+              last_synced_at: inv.last_synced_at,
+              selected_batch_id: selectedBatchId,
+              selected_batch_reference: chosenLot?.batch_reference || null,
+              force_approved: false,
+            }
+          : null,
+        p_assigned_batch_id: selectedBatchId,
+        p_assigned_batch_reference: chosenLot?.batch_reference || null,
+        p_fulfillment_mode: 'batch',
+      });
+      if (approveErr) throw approveErr;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token;
+      if (!token) throw new Error('No auth token — please sign in again.');
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const deductRes = await fetch(`${supabaseUrl}/functions/v1/check-hatvoni-inventory`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+          apikey: supabaseAnonKey,
+        },
+        body: JSON.stringify({
+          action: 'deduct',
+          order_id: orderId,
+          order_item_id: batchModal.orderItemId,
+          product_key: batchModal.productKey,
+          qty: Number(batchModal.qty || 0),
+          assigned_batch_id: selectedBatchId,
+          assigned_batch_reference: chosenLot?.batch_reference || null,
+          idempotency_key: `${batchModal.orderItemId}:${batchModal.productKey}:${selectedBatchId}`,
+        }),
+      });
+      const deductPayload = await deductRes.json().catch(() => ({}));
+      if (!deductRes.ok) throw new Error(deductPayload?.error || `Batch deduction failed (HTTP ${deductRes.status})`);
+
+      setBatchModal(null);
+      setBatchLots([]);
+      setSelectedBatchId('');
+      setNotice('Batch assigned successfully.');
+      await load();
+    } catch (e) {
+      setBatchError(e.message || 'Failed to assign batch.');
+    } finally {
+      setBatchSaving(false);
+    }
+  };
+
+  const combinedStatusBadge = order
+    ? getAdminOrderCombinedStatusBadge(order)
+    : { label: '—', colorClass: STATUS_COLORS.pending };
 
   return (
     <div className="min-h-screen bg-surface pt-24 md:pt-28 pb-12">
@@ -5409,12 +6267,20 @@ function OrderDetail({ orderId, onBack }) {
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
+            {pendingBatchCount > 0 && (
+              <button
+                type="button"
+                onClick={handlePendingBatchClick}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold hover:bg-amber-200 transition-colors"
+                title={isPending ? 'Go to Item-Level Approval' : 'Go to Order Items'}
+              >
+                <span className="material-symbols-outlined text-[14px]">inventory</span>
+                Batch pending: {pendingBatchCount}
+              </button>
+            )}
             <div className="bg-white border border-outline-variant/25 rounded-md px-3 py-1.5 flex items-center gap-2">
               <span className="text-[10px] uppercase font-bold text-gray-900-variant">Status</span>
-              <Badge
-                label={(order?.status || '').replace(/_/g, ' ')}
-                colorClass={STATUS_COLORS[order?.status] || STATUS_COLORS.pending}
-              />
+              <Badge label={combinedStatusBadge.label} colorClass={combinedStatusBadge.colorClass} />
             </div>
             <div className="bg-white border border-outline-variant/25 rounded-md px-3 py-1.5 flex items-center gap-2">
               <span className="text-[10px] uppercase font-bold text-gray-900-variant">Payment</span>
@@ -5446,6 +6312,51 @@ function OrderDetail({ orderId, onBack }) {
           </div>
         )}
 
+        {batchModal && (
+          <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+            <div className="bg-white rounded-lg max-w-sm w-full p-5 border border-neutral-200 shadow-sm">
+              <h3 className="font-bold text-base text-gray-900 mb-1">Set Batch ID</h3>
+              <p className="text-xs text-gray-500 mb-3">
+                <span className="font-semibold text-gray-900">{batchModal.itemName}</span>
+                <span className="ml-1">· Qty {batchModal.qty}</span>
+              </p>
+              <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">
+                Batch ID <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={selectedBatchId}
+                onChange={(e) => setSelectedBatchId(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-xs bg-white focus:ring-1 focus:ring-gray-900 focus:border-gray-900 outline-none"
+              >
+                <option value="">Select batch</option>
+                {(batchLots || []).map((lot) => (
+                  <option key={lot.insider_lot_id} value={lot.insider_lot_id}>
+                    {lot.batch_reference} · Qty {lot.qty_available}{lot.unit ? ` ${lot.unit}` : ''}{lot.production_date ? ` · ${lot.production_date}` : ''}
+                  </option>
+                ))}
+              </select>
+              {batchError && <p className="text-xs text-red-600 mt-2">{batchError}</p>}
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => { setBatchModal(null); setBatchError(''); setBatchLots([]); setSelectedBatchId(''); }}
+                  className="flex-1 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={saveBatchAssignment}
+                  disabled={batchSaving || !selectedBatchId}
+                  className="flex-1 py-2 rounded-lg bg-amber-600 text-white text-xs font-bold hover:bg-amber-700 disabled:opacity-60 transition-colors"
+                >
+                  {batchSaving ? 'Saving...' : 'Save Batch ID'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-5">
           <div className="lg:col-span-2 space-y-4">
 
@@ -5461,13 +6372,15 @@ function OrderDetail({ orderId, onBack }) {
 
             {/* Step 1: Item-level approval — pending orders */}
             {isPending && (
-              <ItemDecisionPanel
-                orderId={orderId}
-                items={items}
-                sellerDecisions={sellerDecisions}
-                adminApprovals={adminApprovals}
-                onRefresh={load}
-              />
+              <div ref={itemDecisionSectionRef}>
+                <ItemDecisionPanel
+                  orderId={orderId}
+                  items={items}
+                  sellerDecisions={sellerDecisions}
+                  adminApprovals={adminApprovals}
+                  onRefresh={load}
+                />
+              </div>
             )}
 
             {/* Step 3: Order finalization — pending orders */}
@@ -5495,7 +6408,7 @@ function OrderDetail({ orderId, onBack }) {
             )}
 
             {/* Order items summary */}
-            <section className="bg-white rounded-lg p-4 border border-neutral-200">
+            <section ref={orderItemsSectionRef} className="bg-white rounded-lg p-4 border border-neutral-200">
               <h2 className="text-xs uppercase tracking-[0.12em] font-semibold text-gray-900 mb-4 flex items-center gap-2">
                 <span className="material-symbols-outlined">receipt_long</span> Order Items
               </h2>
@@ -5515,6 +6428,30 @@ function OrderDetail({ orderId, onBack }) {
                               {s.quantity * item.quantity} × {fmt(s.unit_price)}
                               {item.lot_name && <span className="ml-2 text-secondary font-bold uppercase text-[10px]">{item.lot_name}</span>}
                             </p>
+                            {aa?.sync_with_insider && aa?.status === 'approved' && aa?.batch_assignment_status !== 'assigned' && (
+                              <div className="mt-1 flex items-center gap-2">
+                                <p className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                                  Batch ID needs to be set
+                                </p>
+                                <button
+                                  type="button"
+                                  onClick={() => openBatchModal({
+                                    orderItemId: item.id,
+                                    productKey: s.product_key,
+                                    qty: s.quantity * item.quantity,
+                                    itemName: s.product_name || s.product_key,
+                                  })}
+                                  className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                                >
+                                  Set Batch ID
+                                </button>
+                              </div>
+                            )}
+                            {aa?.assigned_batch_reference && (
+                              <p className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                Batch: {aa.assigned_batch_reference}
+                              </p>
+                            )}
                           </div>
                           <div className="text-right shrink-0">
                             <p className={`font-bold ${isRejected ? 'text-red-600 line-through' : 'text-gray-900'}`}>{fmt(s.unit_price * s.quantity * item.quantity)}</p>
@@ -5539,6 +6476,30 @@ function OrderDetail({ orderId, onBack }) {
                       <div className="flex-1 min-w-0">
                         <p className={`font-semibold text-sm truncate ${isRejected ? 'line-through text-red-700' : 'text-gray-900'}`}>{item.products?.name || item.lot_name || 'Product'}</p>
                         <p className="text-xs text-gray-900-variant">{item.quantity} × {fmt(item.price)}</p>
+                        {aa?.sync_with_insider && aa?.status === 'approved' && aa?.batch_assignment_status !== 'assigned' && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <p className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200">
+                              Batch ID needs to be set
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => openBatchModal({
+                                orderItemId: item.id,
+                                productKey: item.products?.key,
+                                qty: item.quantity,
+                                itemName: item.products?.name || item.lot_name || 'Item',
+                              })}
+                              className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-600 text-white hover:bg-amber-700 transition-colors"
+                            >
+                              Set Batch ID
+                            </button>
+                          </div>
+                        )}
+                        {aa?.assigned_batch_reference && (
+                          <p className="mt-1 inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                            Batch: {aa.assigned_batch_reference}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <p className={`font-bold ${isRejected ? 'text-red-600 line-through' : 'text-gray-900'}`}>{fmt(item.price * item.quantity)}</p>
@@ -5650,6 +6611,9 @@ function OrderDetail({ orderId, onBack }) {
                 )}
               </div>
             </div>
+
+            {/* ── SLA Panel ── */}
+            <OrderSlaPanel order={order} shipmentLots={detailShipmentLots} />
 
           </div>
         </div>

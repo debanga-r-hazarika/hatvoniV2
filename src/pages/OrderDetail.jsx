@@ -47,6 +47,12 @@ const statusConfig = {
   placed:               { icon: 'receipt_long',    label: 'Order Placed',        color: '#78716c', bg: '#f5f5f4', pill: 'bg-stone-100 text-stone-600 border-stone-200' },
   processing:          { icon: 'autorenew',       label: 'Processing',          color: '#b45309', bg: '#fffbeb', pill: 'bg-amber-50 text-amber-700 border-amber-200' },
   shipped:             { icon: 'local_shipping',  label: 'Shipped',             color: '#1d4ed8', bg: '#eff6ff', pill: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partially_delivered: { icon: 'inventory_2',     label: 'Partially Delivered', color: '#2563eb', bg: '#eff6ff', pill: 'bg-blue-50 text-blue-700 border-blue-200' },
+  partially_returning: { icon: 'undo',            label: 'Partially Returning', color: '#7c3aed', bg: '#f5f3ff', pill: 'bg-violet-50 text-violet-700 border-violet-200' },
+  partially_failed:    { icon: 'error',           label: 'Partially Failed',    color: '#b91c1c', bg: '#fff1f2', pill: 'bg-rose-50 text-rose-700 border-rose-200' },
+  in_transit:          { icon: 'local_shipping',  label: 'In Transit',          color: '#1d4ed8', bg: '#eff6ff', pill: 'bg-blue-50 text-blue-700 border-blue-200' },
+  attention_required:  { icon: 'warning',         label: 'Attention Required',  color: '#c2410c', bg: '#fff7ed', pill: 'bg-orange-50 text-orange-700 border-orange-200' },
+  failed:              { icon: 'cancel',          label: 'Failed',              color: '#b91c1c', bg: '#fff1f2', pill: 'bg-rose-50 text-rose-700 border-rose-200' },
   delivered:           { icon: 'check_circle',    label: 'Delivered',           color: '#047857', bg: '#ecfdf5', pill: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   cancelled:           { icon: 'cancel',          label: 'Cancelled',           color: '#dc2626', bg: '#fef2f2', pill: 'bg-red-50 text-red-700 border-red-200' },
 };
@@ -93,7 +99,12 @@ function resolveCustomerStatus(order) {
   if (s === 'processed')          return 'processing';
   if (s === 'partially_approved') return 'processing';
   if (s === 'partially_shipped')  return 'shipped';
-  if (s === 'partially_delivered') return 'shipped';
+  if (s === 'partially_delivered') return 'partially_delivered';
+  if (s === 'partially_returning') return 'partially_returning';
+  if (s === 'partially_failed') return 'partially_failed';
+  if (s === 'attention_required') return 'attention_required';
+  if (s === 'in_transit') return 'in_transit';
+  if (s === 'failed') return 'failed';
   if (s === 'rejected')           return 'cancelled';
   return s;
 }
@@ -219,6 +230,12 @@ export default function OrderDetail() {
     let cur = statusFlow.indexOf(displayStatus);
     if (displayStatus === 'partially_shipped') cur = Math.max(cur, statusFlow.indexOf('shipped'));
     if (displayStatus === 'partially_delivered') cur = Math.max(cur, statusFlow.indexOf('shipped'));
+    if (displayStatus === 'partially_returning' || displayStatus === 'partially_failed' || displayStatus === 'attention_required' || displayStatus === 'in_transit') {
+      cur = Math.max(cur, statusFlow.indexOf('shipped'));
+    }
+    if (displayStatus === 'failed') {
+      cur = Math.max(cur, statusFlow.indexOf('processing'));
+    }
     if (cur < 0) cur = 0;
     return statusFlow.map((s, i) => ({
       key: s,
@@ -458,8 +475,14 @@ export default function OrderDetail() {
                     ? 'linear-gradient(135deg, #ecfdf5 0%, #fff 60%)'
                     : displayStatus === 'partially_delivered'
                     ? 'linear-gradient(135deg, #ecfdfa 0%, #fff 65%)'
-                    : displayStatus === 'partially_shipped'
+                    : displayStatus === 'partially_shipped' || displayStatus === 'in_transit'
                     ? 'linear-gradient(135deg, #e0f2fe 0%, #fff 65%)'
+                    : displayStatus === 'partially_returning'
+                    ? 'linear-gradient(135deg, #f5f3ff 0%, #fff 65%)'
+                    : displayStatus === 'partially_failed' || displayStatus === 'failed'
+                    ? 'linear-gradient(135deg, #fff1f2 0%, #fff 65%)'
+                    : displayStatus === 'attention_required'
+                    ? 'linear-gradient(135deg, #fff7ed 0%, #fff 65%)'
                     : displayStatus === 'shipped'
                     ? 'linear-gradient(135deg, #eff6ff 0%, #fff 60%)'
                     : displayStatus === 'processing'
@@ -468,7 +491,10 @@ export default function OrderDetail() {
                   borderColor: isCancelled ? '#fecaca'
                     : displayStatus === 'delivered' ? '#a7f3d0'
                     : displayStatus === 'partially_delivered' ? '#99f6e4'
-                    : displayStatus === 'partially_shipped' ? '#7dd3fc'
+                    : displayStatus === 'partially_shipped' || displayStatus === 'in_transit' ? '#7dd3fc'
+                    : displayStatus === 'partially_returning' ? '#c4b5fd'
+                    : displayStatus === 'partially_failed' || displayStatus === 'failed' ? '#fecdd3'
+                    : displayStatus === 'attention_required' ? '#fdba74'
                     : displayStatus === 'shipped' ? '#bfdbfe'
                     : displayStatus === 'processing' ? '#fde68a'
                     : 'rgba(0,74,43,0.1)',

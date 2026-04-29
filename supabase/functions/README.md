@@ -91,6 +91,89 @@ Optional PhonePe secrets:
 - `PHONEPE_EXPIRE_AFTER`
   - Optional checkout expiry in seconds, default `1200`
 
+## Cloudflare R2 Setup (Project-wide File/Object Storage)
+
+Use Cloudflare R2 as your common object store for webhook archives, exports, logs, and generated files.
+
+Required secrets for Supabase Edge Functions:
+
+- `R2_ACCOUNT_ID`
+  - Cloudflare account ID (from dashboard URL/API settings)
+- `R2_BUCKET`
+  - R2 bucket name you created for this project
+- `R2_ACCESS_KEY_ID`
+  - R2 API token access key id
+- `R2_SECRET_ACCESS_KEY`
+  - R2 API token secret access key
+
+Optional:
+
+- `R2_PUBLIC_BASE_URL`
+  - Public domain/base URL for direct object links (for example your custom domain or R2.dev public URL)
+- `R2_UPLOAD_REQUIRE_AUTH`
+  - `true` (default) requires logged-in user token for uploads; set `false` only if you want public uploads
+- `R2_UPLOAD_MAX_BYTES`
+  - Max upload size in bytes for `upload-to-r2` function (default `26214400`, i.e. 25MB)
+
+Create bucket and API token in Cloudflare:
+
+1. Cloudflare Dashboard -> R2 -> Create bucket (example: `customer-site-prod`)
+2. R2 -> Manage R2 API tokens -> Create API token (Object Read & Write for your bucket)
+3. Copy `Access Key ID` and `Secret Access Key`
+
+Set the secrets in Supabase Edge:
+
+```bash
+supabase secrets set \
+  R2_ACCOUNT_ID=your_account_id \
+  R2_BUCKET=customer-site-prod \
+  R2_ACCESS_KEY_ID=your_access_key_id \
+  R2_SECRET_ACCESS_KEY=your_secret_access_key \
+  R2_PUBLIC_BASE_URL=https://files.example.com
+```
+
+R2 helper available to all functions:
+
+- Shared module: `supabase/functions/_shared/r2.ts`
+- Reusable APIs:
+  - `isR2Configured()`
+  - `buildR2ObjectKey(prefix, extension?)`
+  - `uploadJsonToR2(key, payload, metadata?)`
+
+Current live usage:
+
+- `send-whatsapp` now archives full webhook payloads to R2 path prefix `whatsapp/webhooks/`
+- It still succeeds if R2 upload fails (fail-safe webhook behavior)
+- `upload-to-r2` accepts `multipart/form-data` and stores incoming files/photos directly into R2
+
+### Upload files/photos directly from website
+
+Deploy function:
+
+```bash
+supabase functions deploy upload-to-r2
+```
+
+Frontend helper:
+
+- `src/services/r2UploadService.js`
+- `uploadFileToR2(file, { folder, filename })`
+
+Expected frontend env vars:
+
+- `VITE_R2_UPLOAD_FUNCTION=upload-to-r2` (optional, defaults to this value)
+- `VITE_R2_PUBLIC_BASE_URL=https://files.example.com` (optional but recommended)
+
+Example usage:
+
+```js
+import { uploadFileToR2 } from '../services/r2UploadService';
+
+const file = input.files[0];
+const uploaded = await uploadFileToR2(file, { folder: 'products/images' });
+// Save uploaded.key in DB, use uploaded.url when you need to render/download it.
+```
+
 ## Razorpay Checkout Flow
 
 1. Checkout creates local order with `payment_method = 'razorpay_upi'` or `payment_method = 'razorpay_cards'` (legacy `'razorpay'` remains supported)

@@ -10,9 +10,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_prevent_decision_overwrite ON public.seller_order_item_decisions;
-
 CREATE TRIGGER trg_prevent_decision_overwrite
   BEFORE UPDATE ON public.seller_order_item_decisions
   FOR EACH ROW EXECUTE FUNCTION public.prevent_decision_overwrite();

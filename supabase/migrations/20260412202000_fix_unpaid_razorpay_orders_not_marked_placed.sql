@@ -43,7 +43,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 UPDATE public.orders
 SET
   insider_order_status = NULL,

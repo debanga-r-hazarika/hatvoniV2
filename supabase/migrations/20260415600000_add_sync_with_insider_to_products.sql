@@ -11,11 +11,9 @@
 
 ALTER TABLE public.products
   ADD COLUMN IF NOT EXISTS sync_with_insider boolean NOT NULL DEFAULT false;
-
 COMMENT ON COLUMN public.products.sync_with_insider IS
   'When true, stock quantity and availability are sourced from Insider inventory '
   '(hatvoni_inventory). The product key must match a tag_key in hatvoni_inventory.';
-
 -- Index for quick filtering of synced products
 CREATE INDEX IF NOT EXISTS idx_products_sync_with_insider
   ON public.products (sync_with_insider)

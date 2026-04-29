@@ -34,12 +34,10 @@ DO $$ BEGIN
   ALTER TYPE public.order_status ADD VALUE IF NOT EXISTS 'partially_approved';
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-
 DO $$ BEGIN
   ALTER TYPE public.order_status ADD VALUE IF NOT EXISTS 'rejected';
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-
 -- ─── 2. order_item_approvals — admin decisions for own/Hatvoni products ──────
 
 DO $$ BEGIN
@@ -50,7 +48,6 @@ DO $$ BEGIN
   );
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-
 CREATE TABLE IF NOT EXISTS public.order_item_approvals (
   id                uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
   order_item_id     uuid        NOT NULL REFERENCES public.order_items(id) ON DELETE CASCADE,
@@ -72,26 +69,21 @@ CREATE TABLE IF NOT EXISTS public.order_item_approvals (
     status <> 'rejected' OR NULLIF(BTRIM(COALESCE(decision_reason, '')), '') IS NOT NULL
   )
 );
-
 CREATE INDEX IF NOT EXISTS idx_order_item_approvals_order_item_id
   ON public.order_item_approvals (order_item_id);
 CREATE INDEX IF NOT EXISTS idx_order_item_approvals_status
   ON public.order_item_approvals (status);
-
 ALTER TABLE public.order_item_approvals ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Admins can manage order_item_approvals"
   ON public.order_item_approvals FOR ALL TO authenticated
   USING   ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true)
   WITH CHECK ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 CREATE POLICY "Sellers can view approvals for their items"
   ON public.order_item_approvals FOR SELECT TO authenticated
   USING (
     seller_id = auth.uid()
     OR (SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true
   );
-
 -- ─── 3. Admin override columns on seller_order_item_decisions ────────────────
 
 ALTER TABLE public.seller_order_item_decisions
@@ -99,7 +91,6 @@ ALTER TABLE public.seller_order_item_decisions
   ADD COLUMN IF NOT EXISTS override_reason   text,
   ADD COLUMN IF NOT EXISTS overridden_at     timestamptz,
   ADD COLUMN IF NOT EXISTS original_decision public.seller_item_decision;
-
 -- ─── 4. order_workflow_log — immutable audit trail ───────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.order_workflow_log (
@@ -113,34 +104,27 @@ CREATE TABLE IF NOT EXISTS public.order_workflow_log (
   metadata      jsonb       NOT NULL DEFAULT '{}'::jsonb,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_order_workflow_log_order_id
   ON public.order_workflow_log (order_id);
 CREATE INDEX IF NOT EXISTS idx_order_workflow_log_created_at
   ON public.order_workflow_log (created_at DESC);
-
 ALTER TABLE public.order_workflow_log ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Admins can view all workflow logs"
   ON public.order_workflow_log FOR SELECT TO authenticated
   USING ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 CREATE POLICY "Sellers can view logs for their orders"
   ON public.order_workflow_log FOR SELECT TO authenticated
   USING (
     (SELECT is_seller FROM public.profiles WHERE id = auth.uid()) = true
     AND (SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = false
   );
-
 -- Logs are insert-only — no updates or deletes allowed
 CREATE POLICY "No updates to workflow log"
   ON public.order_workflow_log FOR UPDATE TO authenticated
   USING (false);
-
 CREATE POLICY "No deletes from workflow log"
   ON public.order_workflow_log FOR DELETE TO authenticated
   USING (false);
-
 -- ─── 5. Helper: get_order_item_readiness ─────────────────────────────────────
 -- Returns a summary of all item decisions for an order.
 -- Used by admin_finalize_order to determine which path is available.
@@ -210,7 +194,6 @@ BEGIN
     (v_seller_approved > 0 OR v_admin_approved > 0);
 END;
 $$;
-
 -- ─── 6. admin_approve_item — admin decides on own/Hatvoni product items ──────
 
 CREATE OR REPLACE FUNCTION public.admin_approve_item(
@@ -295,7 +278,6 @@ BEGIN
   RETURN v_row;
 END;
 $$;
-
 -- ─── 7. admin_override_seller_decision — admin overrides a seller's decision ─
 
 CREATE OR REPLACE FUNCTION public.admin_override_seller_decision(
@@ -383,7 +365,6 @@ BEGIN
   RETURN v_row;
 END;
 $$;
-
 -- ─── 8. admin_finalize_order — the ONLY way to advance order status ───────────
 --
 -- Actions:
@@ -553,7 +534,6 @@ BEGIN
   RETURN v_order;
 END;
 $$;
-
 -- ─── 9. Prevent direct status manipulation on orders ─────────────────────────
 -- Block any UPDATE to orders.status that does NOT come from our
 -- SECURITY DEFINER functions (which run as the table owner / postgres role).
@@ -602,14 +582,11 @@ BEGIN
     OLD.status, NEW.status;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_guard_order_status_change ON public.orders;
-
 CREATE TRIGGER trg_guard_order_status_change
   BEFORE UPDATE OF status ON public.orders
   FOR EACH ROW
   EXECUTE FUNCTION public.guard_order_status_change();
-
 -- ─── 10. Auto-create order_item_approvals rows when order is placed ───────────
 -- For own-seller products (seller_id IS NOT NULL AND is_own_seller = true,
 -- or seller_id IS NULL for Hatvoni-direct products), we auto-create
@@ -696,26 +673,20 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_auto_create_item_approvals ON public.order_items;
-
 CREATE TRIGGER trg_auto_create_item_approvals
   AFTER INSERT ON public.order_items
   FOR EACH ROW
   EXECUTE FUNCTION public.auto_create_item_approvals();
-
 -- ─── 11. RLS: allow admins to read order_workflow_log ────────────────────────
 
 -- Insert is allowed only from SECURITY DEFINER functions (service role)
 CREATE POLICY "System can insert workflow logs"
   ON public.order_workflow_log FOR INSERT
   WITH CHECK (true);
-
 -- ─── 12. Indexes ─────────────────────────────────────────────────────────────
 
 CREATE INDEX IF NOT EXISTS idx_orders_status_pending
   ON public.orders (status) WHERE status = 'pending';
-
 CREATE INDEX IF NOT EXISTS idx_seller_decisions_order_item
   ON public.seller_order_item_decisions (order_item_id, decision);
-

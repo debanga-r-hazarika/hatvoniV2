@@ -28,9 +28,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_check_sync_with_insider_own_seller ON public.products;
-
 CREATE TRIGGER trg_check_sync_with_insider_own_seller
   BEFORE INSERT OR UPDATE OF sync_with_insider, seller_id
   ON public.products
