@@ -372,7 +372,7 @@ export default function Admin() {
     };
 
     return (
-      <div className="min-h-screen bg-[#fbfaf1] pt-24 md:pt-28 pb-16">
+      <div className="min-h-screen bg-[#fbfaf1] pt-6 md:pt-8 pb-16">
         <div className="max-w-3xl mx-auto px-5">
           <header className="mb-8">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-[#815500] mb-1">Staff Portal</p>
@@ -423,7 +423,7 @@ export default function Admin() {
   const tabMeta = TAB_META[activeTab] || { icon: 'settings', label: activeTab };
 
   return (
-    <div className="min-h-screen bg-[#fbfaf1] pt-24 md:pt-28 pb-16">
+    <div className="min-h-screen bg-[#fbfaf1] pt-6 md:pt-8 pb-16">
       <div className="max-w-7xl mx-auto px-5 lg:px-8">
         {/* Header */}
         <header className="mb-8 flex flex-col md:flex-row md:items-center md:justify-between gap-4">

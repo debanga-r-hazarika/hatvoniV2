@@ -376,7 +376,7 @@ export default function AdminCoupons() {
   }
 
   return (
-    <div className="min-h-screen bg-background pt-32 md:pt-40 pb-20">
+    <div className="min-h-screen bg-background pt-6 md:pt-8 pb-20">
       <header className="bg-surface-container-low sticky top-0 z-40 py-4 px-6 shadow-sm">
         <h1 className="font-brand text-2xl md:text-3xl text-primary">Coupon Management</h1>
         <p className="text-sm text-outline mt-1">Create and manage coupons and offers</p>

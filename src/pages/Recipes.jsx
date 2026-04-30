@@ -139,7 +139,7 @@ export default function Recipes() {
     : pageConfig.default_pantry_essentials;
 
   return (
-    <main className="pt-32 md:pt-40 pb-20 px-6 md:px-12 max-w-screen-2xl mx-auto">
+    <main className="pt-8 md:pt-12 pb-20 px-6 md:px-12 max-w-screen-2xl mx-auto">
       {error && (
         <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50 px-5 py-3 text-amber-800 text-sm font-headline">
           {error}

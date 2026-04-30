@@ -442,7 +442,7 @@ export default function Seller() {
   if (!isSeller && !isAdmin) return null;
 
   return (
-    <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-12">
+    <div className="min-h-screen bg-surface pt-6 md:pt-8 pb-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <header className="mb-8">
           <h1 className="font-brand text-4xl md:text-5xl text-primary tracking-tight">Seller Panel</h1>

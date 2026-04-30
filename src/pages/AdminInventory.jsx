@@ -124,7 +124,7 @@ export default function AdminInventory() {
   if (!isAdmin && !hasModule('inventory')) return <Navigate to="/access-denied" replace />;
 
   return (
-    <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">
+    <div className="min-h-screen bg-surface pt-6 md:pt-8 pb-16">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* header */}

@@ -138,7 +138,7 @@ export default function Orders() {
 
   if (loading) {
     return (
-      <main className="pt-28 pb-20 md:pt-36 md:pb-16 min-h-screen bg-surface">
+      <main className="pt-8 pb-20 md:pt-12 md:pb-16 min-h-screen bg-surface">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
           <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
             <AccountSidebar />
@@ -162,7 +162,7 @@ export default function Orders() {
   }
 
   return (
-    <main className="pt-28 pb-20 md:pt-36 md:pb-16 bg-surface min-h-screen">
+    <main className="pt-8 pb-20 md:pt-12 md:pb-16 bg-surface min-h-screen">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
           <AccountSidebar />

@@ -51,7 +51,7 @@ export default function Wishlist() {
 
   if (loading) {
     return (
-      <main className="pt-32 pb-24 md:pt-40 md:pb-16 min-h-screen bg-surface">
+      <main className="pt-8 pb-24 md:pt-12 md:pb-16 min-h-screen bg-surface">
         <div className="max-w-6xl mx-auto px-6 md:px-12 py-8 md:py-12 flex items-center justify-center">
           <span className="material-symbols-outlined animate-spin text-secondary text-4xl">progress_activity</span>
         </div>
@@ -60,7 +60,7 @@ export default function Wishlist() {
   }
 
   return (
-    <main className="pt-32 pb-24 md:pt-40 md:pb-24 bg-surface min-h-screen">
+    <main className="pt-8 pb-24 md:pt-12 md:pb-24 bg-surface min-h-screen">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-10">
           <AccountSidebar />

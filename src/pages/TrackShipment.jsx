@@ -24,7 +24,7 @@ export default function TrackShipment() {
 
   if (!valid) {
     return (
-      <main className="pt-28 pb-16 md:pt-36 md:pb-20 min-h-screen bg-gradient-to-b from-background via-surface to-surface-container-low/80">
+      <main className="pt-8 pb-16 md:pt-12 md:pb-20 min-h-screen bg-gradient-to-b from-background via-surface to-surface-container-low/80">
         <div className="max-w-lg mx-auto px-4 text-center">
           <div className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-error-container/30 text-error mb-4">
             <span className="material-symbols-outlined text-3xl">gpp_maybe</span>
@@ -54,7 +54,7 @@ export default function TrackShipment() {
   }
 
   return (
-    <main className="pt-24 pb-12 min-h-screen bg-white">
+    <main className="pt-6 pb-12 min-h-screen bg-white">
       <div className="max-w-6xl mx-auto px-4 sm:px-6">
         {/* Header */}
         <header className="mb-6 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">

@@ -2,7 +2,7 @@ export default function TermsConditions() {
   return (
     <main>
       {/* Hero Section */}
-      <header className="relative pt-28 pb-16 md:pt-32 md:pb-24 px-6 md:px-8 overflow-hidden">
+      <header className="relative pt-8 pb-16 md:pt-12 md:pb-24 px-6 md:px-8 overflow-hidden">
         <div className="max-w-4xl mx-auto relative z-10">
           <span className="font-headline font-bold uppercase tracking-[0.2em] text-xs text-secondary mb-3 block">
             Legal Documentation

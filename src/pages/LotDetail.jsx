@@ -84,14 +84,14 @@ export default function LotDetail() {
 
   if (loading) {
     return (
-      <main className="pt-32 md:pt-40 pb-20 min-h-[60vh] grid place-items-center">
+      <main className="pt-8 md:pt-12 pb-20 min-h-[60vh] grid place-items-center">
         <span className="material-symbols-outlined animate-spin text-4xl text-secondary">progress_activity</span>
       </main>
     );
   }
 
   return (
-    <main className="pt-32 md:pt-40 pb-20">
+    <main className="pt-8 md:pt-12 pb-20">
       <div className="max-w-7xl mx-auto px-6 md:px-8 py-4 text-sm text-on-surface-variant flex items-center gap-2">
         <Link to="/" className="hover:text-primary transition-colors">Home</Link>
         <span className="material-symbols-outlined text-sm">chevron_right</span>

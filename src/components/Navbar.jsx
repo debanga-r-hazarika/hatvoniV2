@@ -346,7 +346,7 @@ export default function Navbar() {
                       </Button>
                     </>
                   )}
-                  {isSeller && <SellerNotificationsMenu userId={user?.id} />}
+                  {!isAdmin && !isEmployee && isSeller && <SellerNotificationsMenu userId={user?.id} />}
                   {!isAdmin && !isEmployee && !isSeller && <CustomerNotificationsMenu userId={user?.id} />}
                   {isSeller && (
                     <Button
@@ -714,51 +714,66 @@ export default function Navbar() {
             {user ? (
               <>
                 {(isAdmin || isEmployee) && (
-                  <ListItemButton
-                    component={Link}
-                    to="/admin"
-                    onClick={handleLinkClick}
-                    sx={{
-                      borderRadius: 4,
-                      py: 1.5,
-                      px: 2,
-                      bgcolor: alpha('#f59e0b', 0.1),
-                      color: '#b45309',
-                      '&:hover': { bgcolor: alpha('#f59e0b', 0.2) },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>admin_panel_settings</span>
-                    </ListItemIcon>
-                    <ListItemText
-                      primary={isAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
-                      primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
-                    />
-                  </ListItemButton>
+                  <>
+                    <ListItemButton
+                      component={Link}
+                      to="/admin"
+                      onClick={handleLinkClick}
+                      sx={{
+                        borderRadius: 4,
+                        py: 1.5,
+                        px: 2,
+                        bgcolor: alpha('#f59e0b', 0.1),
+                        color: '#b45309',
+                        '&:hover': { bgcolor: alpha('#f59e0b', 0.2) },
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>admin_panel_settings</span>
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={isAdmin ? 'Admin Dashboard' : 'Staff Dashboard'}
+                        primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+                      />
+                    </ListItemButton>
+                    <Box sx={{ px: 1, py: 0.5 }}>
+                      <AdminNotificationsMenu userId={user?.id} />
+                    </Box>
+                  </>
                 )}
-                {isSeller && (
-                  <ListItemButton
-                    component={Link}
-                    to="/seller"
-                    onClick={handleLinkClick}
-                    sx={{
-                      borderRadius: 4,
-                      py: 1.5,
-                      px: 2,
-                      mt: 0.5,
-                      bgcolor: alpha(theme.palette.primary.main, 0.1),
-                      color: 'primary.main',
-                      '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) },
-                    }}
-                  >
-                    <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
-                      <span className="material-symbols-outlined" style={{ fontSize: 20 }}>storefront</span>
-                    </ListItemIcon>
-                    <ListItemText
-                      primary="Seller Panel"
-                      primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
-                    />
-                  </ListItemButton>
+                {!isAdmin && !isEmployee && isSeller && (
+                  <>
+                    <ListItemButton
+                      component={Link}
+                      to="/seller"
+                      onClick={handleLinkClick}
+                      sx={{
+                        borderRadius: 4,
+                        py: 1.5,
+                        px: 2,
+                        mt: 0.5,
+                        bgcolor: alpha(theme.palette.primary.main, 0.1),
+                        color: 'primary.main',
+                        '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) },
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 36, color: 'inherit' }}>
+                        <span className="material-symbols-outlined" style={{ fontSize: 20 }}>storefront</span>
+                      </ListItemIcon>
+                      <ListItemText
+                        primary="Seller Panel"
+                        primaryTypographyProps={{ fontSize: '0.875rem', fontWeight: 600 }}
+                      />
+                    </ListItemButton>
+                    <Box sx={{ px: 1, py: 0.5 }}>
+                      <SellerNotificationsMenu userId={user?.id} />
+                    </Box>
+                  </>
+                )}
+                {!isAdmin && !isEmployee && !isSeller && (
+                  <Box sx={{ px: 1, py: 0.5 }}>
+                    <CustomerNotificationsMenu userId={user?.id} />
+                  </Box>
                 )}
                 <ListItemButton component={Link} to="/profile" onClick={handleLinkClick} sx={{ borderRadius: 4, py: 1.5, px: 2, mt: 0.5 }}>
                   <ListItemIcon sx={{ minWidth: 36, color: alpha(theme.palette.primary.main, 0.5) }}>

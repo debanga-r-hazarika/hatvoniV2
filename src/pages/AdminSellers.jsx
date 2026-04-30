@@ -130,7 +130,7 @@ export default function AdminSellers() {
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-surface pt-24 pb-12">
+    <div className="min-h-screen bg-surface pt-6 pb-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* Header */}

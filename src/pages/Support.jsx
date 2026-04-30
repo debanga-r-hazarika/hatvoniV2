@@ -223,7 +223,7 @@ export default function Support() {
 
   if (authLoading || loading) {
     return (
-      <main className="pt-28 pb-16 min-h-screen bg-surface">
+      <main className="pt-6 pb-16 min-h-screen bg-surface">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 flex items-center justify-center py-24">
           <span className="material-symbols-outlined animate-spin text-4xl text-secondary">progress_activity</span>
         </div>
@@ -233,7 +233,7 @@ export default function Support() {
 
   if (!user) {
     return (
-      <main className="pt-28 pb-16 min-h-screen bg-surface">
+      <main className="pt-6 pb-16 min-h-screen bg-surface">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="bg-surface-container-low rounded-2xl border border-outline-variant/20 p-8 text-center">
             <span className="material-symbols-outlined text-5xl text-primary">support_agent</span>
@@ -258,7 +258,7 @@ export default function Support() {
   }
 
   return (
-    <main className="pt-28 pb-16 min-h-screen bg-surface">
+    <main className="pt-6 pb-16 min-h-screen bg-surface">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-8">
           <AccountSidebar />

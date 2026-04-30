@@ -2,7 +2,7 @@ export default function Traditions() {
   return (
     <>
       {/* Hero */}
-      <header className="relative min-h-screen flex items-center justify-center pt-32 md:pt-40 overflow-hidden">
+      <header className="relative min-h-screen flex items-center justify-center pt-8 md:pt-12 overflow-hidden">
         <div className="absolute inset-0 z-0">
           <img
             src="https://lh3.googleusercontent.com/aida-public/AB6AXuAZ9Bn0ilDIcpiNHjvV4DHZ8JhSpS7un6k_p227DaHE9fgxJofEdZIOLLdbIqoEj2ii1Tc__jqQrJVDRoY1CDXtXTN1mUp5DTQ2Qh0PPnWXayQMEC_YLFNWcBuB4bYOxjde5bOWx-ALhWc28YD_bGVSK1-rqReig-lxzNNX4Jyv7kBxSc5JxDI0zqGnS-OWQhbkvnqAdkHSX1MngthjwuxyhmpOQzMEJXn_Hrwc-_xhyFfuWZCEu3TQIyT3jIUFU0x3VRZeFMe5P-7I"

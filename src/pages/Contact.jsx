@@ -4,7 +4,7 @@ export default function Contact() {
   const [form, setForm] = useState({ name: '', email: '', subject: 'Product Inquiry', message: '' });
 
   return (
-    <main className="pt-32 md:pt-40 pb-24">
+    <main className="pt-8 md:pt-12 pb-24">
       {/* Hero */}
       <section className="px-6 md:px-12 max-w-screen-2xl mx-auto mb-20">
         <div className="grid grid-cols-12 gap-8 items-end">

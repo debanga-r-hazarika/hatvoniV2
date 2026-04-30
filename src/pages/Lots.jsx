@@ -114,7 +114,7 @@ export default function Lots() {
   }, [lots, search]);
 
   return (
-    <main className="mx-auto max-w-7xl px-6 py-16 pt-32 lg:px-20">
+    <main className="mx-auto max-w-7xl px-6 py-8 pt-8 lg:px-20">
       <section className="mb-12 space-y-6">
         <div className="flex items-center gap-4">
           <div className="h-px w-12 bg-secondary" />

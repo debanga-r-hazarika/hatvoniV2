@@ -254,7 +254,7 @@ export default function SellerOrderDetail() {
 
   if (loading) {
     return (
-      <main className="pt-32 md:pt-40 pb-20 min-h-[60vh] grid place-items-center">
+      <main className="pt-8 md:pt-12 pb-20 min-h-[60vh] grid place-items-center">
         <span className="material-symbols-outlined animate-spin text-4xl text-secondary">progress_activity</span>
       </main>
     );
@@ -262,7 +262,7 @@ export default function SellerOrderDetail() {
 
   if (error || !order) {
     return (
-      <main className="pt-28 pb-20 max-w-4xl mx-auto px-6 text-center">
+      <main className="pt-8 pb-20 max-w-4xl mx-auto px-6 text-center">
         <span className="material-symbols-outlined text-6xl text-error">error</span>
         <h1 className="font-brand text-4xl text-primary mt-4">Order not available</h1>
         <p className="text-on-surface-variant mt-3">{error || 'You do not have permission to view this order.'}</p>
@@ -272,7 +272,7 @@ export default function SellerOrderDetail() {
   }
 
   return (
-    <main className="pb-16 md:pb-24 px-4 md:px-10 max-w-3xl mx-auto pt-28 md:pt-32">
+    <main className="pb-16 md:pb-24 px-4 md:px-10 max-w-3xl mx-auto pt-8 md:pt-12">
 
       {/* Header */}
       <div className="mb-8">

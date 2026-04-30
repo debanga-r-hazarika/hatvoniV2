@@ -215,7 +215,7 @@ export default function AdminSupport() {
   }
 
   return (
-    <main className="min-h-screen bg-surface pt-28 pb-14">
+    <main className="min-h-screen bg-surface pt-6 pb-14">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
         <header className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>

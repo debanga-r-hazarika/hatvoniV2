@@ -10,7 +10,7 @@ const galleryItems = [
 
 export default function Gallery() {
   return (
-    <main className="pt-32 md:pt-40 pb-24">
+    <main className="pt-8 md:pt-12 pb-24">
       {/* Hero */}
       <header className="max-w-screen-2xl mx-auto px-6 md:px-12 mb-20 text-center md:text-left">
         <h1 className="font-brand text-5xl md:text-7xl text-primary leading-tight mb-6 tracking-tighter">

@@ -1,6 +1,6 @@
 export default function About() {
   return (
-    <main className="pt-32 md:pt-40">
+    <main className="pt-8 md:pt-12">
       {/* Hero */}
       <section className="relative h-[870px] flex items-center overflow-hidden px-6 md:px-12 mb-24">
         <div className="absolute inset-0 z-0">

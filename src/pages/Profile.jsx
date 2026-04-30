@@ -264,7 +264,7 @@ export default function Profile() {
 
   if (loading) {
     return (
-      <main className="pt-32 pb-24 md:pt-40 md:pb-16 bg-surface min-h-screen">
+      <main className="pt-8 pb-24 md:pt-12 md:pb-16 bg-surface min-h-screen">
         <div className="max-w-screen-xl mx-auto px-6 md:px-12 py-8 md:py-16">
           <div className="flex items-center justify-center min-h-[400px]">
             <p className="text-lg text-slate-600">Loading profile...</p>
@@ -275,7 +275,7 @@ export default function Profile() {
   }
 
   return (
-    <main className="pt-32 pb-24 md:pt-40 md:pb-16 bg-surface min-h-screen">
+    <main className="pt-8 pb-24 md:pt-12 md:pb-16 bg-surface min-h-screen">
       <ProfileMobileView
         profile={profile}
         formData={formData}

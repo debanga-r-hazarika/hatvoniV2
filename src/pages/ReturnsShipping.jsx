@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 
 export default function ReturnsShipping() {
   return (
-    <main className="max-w-7xl mx-auto px-6 md:px-12 pt-28 pb-12 md:pt-32 md:pb-24">
+    <main className="max-w-7xl mx-auto px-6 md:px-12 pt-8 pb-12 md:pt-12 md:pb-24">
       {/* Hero Header */}
       <header className="mb-12 md:mb-20">
         <h1 className="text-4xl md:text-6xl text-primary font-brand leading-tight mb-4 tracking-tight">

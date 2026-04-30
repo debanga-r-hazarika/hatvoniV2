@@ -56,6 +56,16 @@ function Layout({ children, path }) {
   return (
     <div className="min-h-screen flex flex-col">
       <Navbar />
+      {/*
+        Offset spacer for the fixed AppBar.
+        xs  (~72px):  no announcement bar + toolbar
+        sm  (~108px): announcement bar (~36px) + toolbar (~72px)
+        md  (~120px): announcement bar (~36px) + taller toolbar (~84px)
+      */}
+      <div
+        aria-hidden="true"
+        className="h-[72px] sm:h-[108px] md:h-[120px] shrink-0"
+      />
       <div className="flex-1">{children}</div>
       <Footer />
     </div>

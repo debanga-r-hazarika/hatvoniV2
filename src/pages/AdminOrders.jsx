@@ -746,7 +746,7 @@ function OrdersList({ onSelect }) {
   };
 
   return (
-    <div className="min-h-screen bg-surface pt-32 md:pt-40 pb-16">
+    <div className="min-h-screen bg-surface pt-6 md:pt-8 pb-16">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         <header className="mb-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -5808,159 +5808,253 @@ function ShippingPanel({ order, orderId, items: orderItems, onRefresh, onNotice,
 
 // ─── OrderSlaPanel ───────────────────────────────────────────────────────────
 
-const SLA_STAGES = [
-  {
-    key: 'placed_to_processing',
-    from: 'Placed',
-    to: 'Processing',
-    thresholdHours: 24,
-    icon: 'pending_actions',
-  },
-  {
-    key: 'processing_to_shipping',
-    from: 'Processing',
-    to: 'Shipped',
-    thresholdHours: 24,
-    icon: 'local_shipping',
-  },
-  {
-    key: 'shipping_to_delivery_or_update',
-    from: 'Shipped',
-    to: 'Next Update',
-    thresholdHours: 7 * 24,
-    icon: 'update',
-  },
-];
-
 function fmtSlaHours(h) {
   if (h < 1) return `${Math.round(h * 60)}m`;
-  if (h < 24) return `${Math.round(h)}h`;
+  if (h < 24) return `${h % 1 === 0 ? h : h.toFixed(1)}h`;
   const days = Math.floor(h / 24);
   const rem = Math.round(h % 24);
   return rem > 0 ? `${days}d ${rem}h` : `${days}d`;
 }
 
-function OrderSlaPanel({ order, shipmentLots }) {
-  // Build a synthetic order-like object with shipmentLots attached so we can
-  // reuse the existing getLotSlaState / getOrderSlaSummary helpers.
-  const lots = Array.isArray(shipmentLots) && shipmentLots.length > 0
-    ? shipmentLots
-    : [];
+/**
+ * Derive a clean, status-aware SLA model directly from the order + its lots.
+ *
+ * Three stages, each with a threshold:
+ *   1. Placed → Processing   : 24 h  (clock starts at order.created_at)
+ *   2. Processing → Shipped  : 24 h  (clock starts when order moved to processing)
+ *   3. Shipped → Next update : 7 d   (clock starts at shipped_at / lot tracking assigned)
+ *
+ * Terminal statuses (cancelled, rejected, delivered) freeze all clocks.
+ * Pending orders only show stage 1 as active.
+ */
+function buildSlaStages(order, shipmentLots) {
+  const status = String(order?.status || '').toLowerCase();
 
-  // For orders without multi-shipment lots, synthesise a single "lot" from the
-  // order itself so the SLA stages still render.
-  const effectiveLots = lots.length > 0 ? lots : (order ? [{
-    id: order.id,
-    label: 'Shipment 1',
-    created_at: order.created_at,
-    updated_at: order.updated_at,
-    carrier_shipment_status: order.shipment_status || '',
-    tracking_number: order.tracking_number || '',
-    velocity_pending_shipment_id: order.velocity_pending_shipment_id || '',
-    last_event_at: null,
-  }] : []);
+  // Terminal — no active SLA
+  const isCancelled = status === 'cancelled' || status === 'rejected';
+  const isDelivered = status === 'delivered';
+  const isTerminal = isCancelled || isDelivered;
 
-  if (!order) return null;
+  const createdAt = order?.created_at ? new Date(order.created_at).getTime() : null;
+  const shippedAt = order?.shipped_at ? new Date(order.shipped_at).getTime() : null;
+  const processedAt = order?.processed_at ? new Date(order.processed_at).getTime() : null;
 
-  const orderStatus = String(order?.status || '').toLowerCase();
-  const isTerminal = ['delivered', 'cancelled', 'rejected'].includes(orderStatus);
+  // Determine when the order moved to processing.
+  // Best signal: earliest lot created_at (multi-shipment) or order updated_at when status became processing.
+  // Fallback: use created_at (conservative).
+  const lots = Array.isArray(shipmentLots) ? shipmentLots : [];
+  const earliestLotMs = lots.length > 0
+    ? Math.min(...lots.map((l) => new Date(l.created_at || 0).getTime()).filter(Number.isFinite))
+    : null;
 
-  // Compute per-stage data
-  const stageRows = SLA_STAGES.map((stage) => {
-    // Find the most critical lot for this stage
-    const lotStates = effectiveLots
-      .map((lot) => ({ lot, sla: getLotSlaState(lot) }))
-      .filter(({ sla }) => sla.stage === stage.key);
+  // processingStartMs: when the order entered processing state
+  const processingStartMs = earliestLotMs || createdAt;
 
-    if (lotStates.length === 0) {
-      // Stage not active — determine if it's done or upcoming
-      const stageOrder = ['placed_to_processing', 'processing_to_shipping', 'shipping_to_delivery_or_update'];
-      const currentStageIdx = stageOrder.findIndex((k) =>
-        effectiveLots.some((lot) => getLotSlaState(lot).stage === k),
-      );
-      const thisIdx = stageOrder.indexOf(stage.key);
-      const isDone = isTerminal || (currentStageIdx > thisIdx) || (currentStageIdx === -1 && isTerminal);
-      return { ...stage, active: false, done: isDone, breached: false, progressPct: isDone ? 100 : 0, ageHours: 0, lotLabel: null };
+  // shippingStartMs: when the first tracking was assigned
+  const firstTrackingMs = lots.length > 0
+    ? Math.min(
+        ...lots
+          .filter((l) => String(l.tracking_number || '').trim())
+          .map((l) => new Date(l.updated_at || l.created_at || 0).getTime())
+          .filter(Number.isFinite),
+      )
+    : null;
+  const shippingStartMs = shippedAt || (Number.isFinite(firstTrackingMs) ? firstTrackingMs : null);
+
+  const now = Date.now();
+
+  // ── Stage 1: Placed → Processing (24 h) ──────────────────────────────────
+  const stage1Threshold = 24;
+  let stage1 = (() => {
+    if (!createdAt) return { state: 'upcoming', pct: 0, ageHours: 0 };
+
+    // Done once order is processing/shipped/delivered
+    const isDone = ['processing', 'partially_approved', 'shipped', 'delivered'].includes(status);
+    if (isDone || isDelivered) return { state: 'done', pct: 100, ageHours: 0 };
+    if (isCancelled) {
+      // Show how far it got before cancellation (frozen, no breach)
+      const age = (now - createdAt) / 3_600_000;
+      const pct = Math.min(100, Math.round((age / stage1Threshold) * 100));
+      return { state: 'cancelled', pct, ageHours: age };
     }
 
-    // Pick the worst lot (most elapsed relative to threshold)
-    const worst = lotStates.sort(
-      (a, b) => (b.sla.ageHours / b.sla.thresholdHours) - (a.sla.ageHours / a.sla.thresholdHours),
-    )[0];
+    // Active (pending / partially_approved waiting)
+    const age = (now - createdAt) / 3_600_000;
+    const pct = Math.min(100, Math.round((age / stage1Threshold) * 100));
+    const breached = age >= stage1Threshold;
+    return { state: breached ? 'breached' : 'active', pct, ageHours: age };
+  })();
 
-    const progressPct = Math.max(0, Math.min(100, Math.round((worst.sla.ageHours / worst.sla.thresholdHours) * 100)));
-    const lotLabel = lots.length > 1
-      ? (String(worst.lot?.label || '').trim() || `Lot ${String(worst.lot?.id || '').slice(0, 6)}`)
+  // ── Stage 2: Processing → Shipped (24 h) ─────────────────────────────────
+  const stage2Threshold = 24;
+  let stage2 = (() => {
+    const hasProcessing = ['processing', 'partially_approved', 'shipped', 'delivered'].includes(status);
+    if (!hasProcessing) return { state: 'upcoming', pct: 0, ageHours: 0 };
+
+    const isDone = ['shipped', 'delivered'].includes(status) || !!shippingStartMs;
+    if (isDone || isDelivered) return { state: 'done', pct: 100, ageHours: 0 };
+    if (isCancelled) {
+      if (!processingStartMs) return { state: 'cancelled', pct: 0, ageHours: 0 };
+      const age = (now - processingStartMs) / 3_600_000;
+      const pct = Math.min(100, Math.round((age / stage2Threshold) * 100));
+      return { state: 'cancelled', pct, ageHours: age };
+    }
+
+    // Active — order is processing but not yet shipped
+    if (!processingStartMs) return { state: 'upcoming', pct: 0, ageHours: 0 };
+    const age = (now - processingStartMs) / 3_600_000;
+    const pct = Math.min(100, Math.round((age / stage2Threshold) * 100));
+    const breached = age >= stage2Threshold;
+    return { state: breached ? 'breached' : 'active', pct, ageHours: age };
+  })();
+
+  // ── Stage 3: Shipped → Next update (7 d) ─────────────────────────────────
+  const stage3Threshold = 7 * 24;
+  let stage3 = (() => {
+    const hasShipped = ['shipped', 'delivered'].includes(status) || !!shippingStartMs;
+    if (!hasShipped) return { state: 'upcoming', pct: 0, ageHours: 0 };
+
+    if (isDelivered || processedAt) return { state: 'done', pct: 100, ageHours: 0 };
+    if (isCancelled) {
+      if (!shippingStartMs) return { state: 'cancelled', pct: 0, ageHours: 0 };
+      const age = (now - shippingStartMs) / 3_600_000;
+      const pct = Math.min(100, Math.round((age / stage3Threshold) * 100));
+      return { state: 'cancelled', pct, ageHours: age };
+    }
+
+    // Find the most recent tracking event across all lots
+    const latestLotUpdateMs = lots.length > 0
+      ? Math.max(
+          ...lots
+            .filter((l) => String(l.tracking_number || '').trim())
+            .map((l) => new Date(l.updated_at || l.created_at || 0).getTime())
+            .filter(Number.isFinite),
+        )
       : null;
 
-    return {
-      ...stage,
-      active: true,
-      done: false,
-      breached: worst.sla.breached,
-      progressPct,
-      ageHours: worst.sla.ageHours,
-      thresholdHours: worst.sla.thresholdHours,
-      lotLabel,
-    };
-  });
+    const clockStart = (Number.isFinite(latestLotUpdateMs) && latestLotUpdateMs > 0)
+      ? latestLotUpdateMs
+      : shippingStartMs;
 
-  const anyBreached = stageRows.some((s) => s.breached);
-  const anyActive = stageRows.some((s) => s.active);
+    if (!clockStart) return { state: 'upcoming', pct: 0, ageHours: 0 };
+
+    const age = (now - clockStart) / 3_600_000;
+    const pct = Math.min(100, Math.round((age / stage3Threshold) * 100));
+    const breached = age >= stage3Threshold;
+    return { state: breached ? 'breached' : 'active', pct, ageHours: age };
+  })();
+
+  return [
+    { key: 'placed_to_processing', from: 'Placed', to: 'Processing', icon: 'pending_actions', threshold: stage1Threshold, ...stage1 },
+    { key: 'processing_to_shipping', from: 'Processing', to: 'Shipped', icon: 'local_shipping', threshold: stage2Threshold, ...stage2 },
+    { key: 'shipped_to_update', from: 'Shipped', to: 'Delivery / Update', icon: 'update', threshold: stage3Threshold, ...stage3 },
+  ];
+}
+
+function OrderSlaPanel({ order, shipmentLots }) {
+  if (!order) return null;
+
+  const status = String(order?.status || '').toLowerCase();
+  const isCancelled = status === 'cancelled' || status === 'rejected';
+  const isDelivered = status === 'delivered';
+
+  const stages = buildSlaStages(order, shipmentLots);
+  const anyBreached = stages.some((s) => s.state === 'breached');
+  const anyActive = stages.some((s) => s.state === 'active');
+
+  // Header badge
+  let badge = null;
+  if (isCancelled) {
+    badge = (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+        <span className="material-symbols-outlined text-[11px]">cancel</span>
+        Cancelled
+      </span>
+    );
+  } else if (isDelivered) {
+    badge = (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+        <span className="material-symbols-outlined text-[11px]">done_all</span>
+        Fulfilled
+      </span>
+    );
+  } else if (anyBreached) {
+    badge = (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
+        <span className="material-symbols-outlined text-[11px]">warning</span>
+        Breached
+      </span>
+    );
+  } else if (anyActive) {
+    badge = (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+        <span className="material-symbols-outlined text-[11px]">check_circle</span>
+        On Track
+      </span>
+    );
+  }
 
   return (
     <div className="bg-white rounded-xl p-4 border border-neutral-200 shadow-sm">
       <div className="flex items-center justify-between mb-4">
         <h3 className="text-[11px] font-bold tracking-[0.2em] text-gray-900-variant uppercase">SLA</h3>
-        {anyBreached && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-100 text-red-700 border border-red-200">
-            <span className="material-symbols-outlined text-[11px]">warning</span>
-            Breached
-          </span>
-        )}
-        {!anyBreached && anyActive && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-            <span className="material-symbols-outlined text-[11px]">check_circle</span>
-            On Track
-          </span>
-        )}
-        {isTerminal && !anyActive && (
-          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
-            <span className="material-symbols-outlined text-[11px]">done_all</span>
-            Completed
-          </span>
-        )}
+        {badge}
       </div>
 
       <div className="space-y-4">
-        {stageRows.map((stage) => {
-          const barColor = stage.breached
-            ? 'bg-red-500'
-            : stage.done
-              ? 'bg-emerald-500'
-              : stage.active
-                ? (stage.progressPct >= 75 ? 'bg-amber-400' : 'bg-blue-500')
-                : 'bg-slate-200';
+        {stages.map((stage) => {
+          const { state, pct, ageHours, threshold } = stage;
 
-          const trackColor = stage.breached
+          const isActive = state === 'active';
+          const isDone = state === 'done';
+          const isBreached = state === 'breached';
+          const isUpcoming = state === 'upcoming';
+          const isFrozen = state === 'cancelled';
+
+          // Bar fill color
+          const barColor = isBreached
+            ? 'bg-red-500'
+            : isDone
+              ? 'bg-emerald-500'
+              : isFrozen
+                ? 'bg-slate-300'
+                : isActive
+                  ? (pct >= 75 ? 'bg-amber-400' : 'bg-blue-500')
+                  : 'bg-slate-200';
+
+          // Track color
+          const trackColor = isBreached
             ? 'bg-red-100'
-            : stage.done
+            : isDone
               ? 'bg-emerald-100'
               : 'bg-slate-100';
 
-          const labelColor = stage.breached
+          // Label color
+          const labelColor = isBreached
             ? 'text-red-700'
-            : stage.done
+            : isDone
               ? 'text-emerald-700'
-              : stage.active
-                ? 'text-gray-900'
-                : 'text-slate-400';
+              : isUpcoming
+                ? 'text-slate-400'
+                : isFrozen
+                  ? 'text-slate-400'
+                  : 'text-gray-900';
 
-          const timeLabel = stage.active
-            ? `${fmtSlaHours(stage.ageHours)} / ${fmtSlaHours(stage.thresholdHours)}`
-            : stage.done
-              ? `Done`
-              : `${fmtSlaHours(stage.thresholdHours)} limit`;
+          // Right-side time label
+          let timeLabel;
+          if (isDone) {
+            timeLabel = <span className="text-[10px] text-emerald-600 font-semibold">Done</span>;
+          } else if (isUpcoming) {
+            timeLabel = <span className="text-[10px] text-slate-400">{fmtSlaHours(threshold)} limit</span>;
+          } else if (isFrozen) {
+            timeLabel = <span className="text-[10px] text-slate-400">—</span>;
+          } else {
+            // active or breached
+            const remaining = threshold - ageHours;
+            timeLabel = isBreached
+              ? <span className="text-[10px] font-bold text-red-600 font-mono tabular-nums">+{fmtSlaHours(ageHours - threshold)} overdue</span>
+              : <span className="text-[10px] text-slate-500 font-mono tabular-nums">{fmtSlaHours(ageHours)} / {fmtSlaHours(threshold)}</span>;
+          }
 
           return (
             <div key={stage.key}>
@@ -5969,35 +6063,25 @@ function OrderSlaPanel({ order, shipmentLots }) {
                   <span className={`material-symbols-outlined text-[14px] ${labelColor}`}>{stage.icon}</span>
                   <span className={`text-[11px] font-semibold ${labelColor}`}>
                     {stage.from}
-                    <span className="mx-1 opacity-50">→</span>
+                    <span className="mx-1 opacity-40">→</span>
                     {stage.to}
                   </span>
-                  {stage.lotLabel && (
-                    <span className="text-[10px] text-slate-400">({stage.lotLabel})</span>
-                  )}
                 </div>
-                <span className={`text-[10px] font-mono tabular-nums ${stage.breached ? 'text-red-600 font-bold' : 'text-slate-500'}`}>
-                  {timeLabel}
-                </span>
+                {timeLabel}
               </div>
-              <div className={`h-2 rounded-full overflow-hidden ${trackColor}`}>
+              <div className={`h-1.5 rounded-full overflow-hidden ${trackColor}`}>
                 <div
                   className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-                  style={{ width: `${stage.done ? 100 : stage.progressPct}%` }}
+                  style={{ width: `${pct}%` }}
                 />
               </div>
-              {stage.breached && (
-                <p className="text-[10px] text-red-600 mt-1">
-                  Overdue by {fmtSlaHours(stage.ageHours - stage.thresholdHours)}
-                </p>
-              )}
             </div>
           );
         })}
       </div>
 
-      {!anyActive && !isTerminal && effectiveLots.length === 0 && (
-        <p className="text-xs text-slate-400 text-center py-2">No shipment data yet.</p>
+      {isCancelled && (
+        <p className="text-[10px] text-slate-400 mt-3 text-center">SLA tracking stopped — order {status}.</p>
       )}
     </div>
   );
@@ -6244,7 +6328,7 @@ function OrderDetail({ orderId, onBack }) {
     : { label: '—', colorClass: STATUS_COLORS.pending };
 
   return (
-    <div className="min-h-screen bg-surface pt-24 md:pt-28 pb-12">
+    <div className="min-h-screen bg-surface pt-6 md:pt-8 pb-12">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
 
         {/* Header */}
