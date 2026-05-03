@@ -30,7 +30,6 @@ AS $$
   UNION
   SELECT DISTINCT recipient_user_id, module FROM employee_targets
 $$;
-
 CREATE OR REPLACE FUNCTION public.emit_admin_notification(
   p_modules text[],
   p_event_type text,
@@ -72,7 +71,6 @@ BEGIN
   FROM public.admin_notification_targets(p_modules) t;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.notify_product_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -116,13 +114,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_product_admin_event ON public.products;
 CREATE TRIGGER trg_notify_product_admin_event
   AFTER INSERT OR UPDATE ON public.products
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_product_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_lot_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -163,13 +159,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_lot_admin_event ON public.lots;
 CREATE TRIGGER trg_notify_lot_admin_event
   AFTER INSERT OR UPDATE ON public.lots
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_lot_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_coupon_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -210,13 +204,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_coupon_admin_event ON public.coupons;
 CREATE TRIGGER trg_notify_coupon_admin_event
   AFTER INSERT OR UPDATE ON public.coupons
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_coupon_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_inventory_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -259,13 +251,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_inventory_admin_event ON public.hatvoni_inventory;
 CREATE TRIGGER trg_notify_inventory_admin_event
   AFTER UPDATE ON public.hatvoni_inventory
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_inventory_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_logistics_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -308,13 +298,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_logistics_admin_event ON public.order_shipments;
 CREATE TRIGGER trg_notify_logistics_admin_event
   AFTER INSERT OR UPDATE ON public.order_shipments
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_logistics_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_support_admin_event_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -336,13 +324,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_support_admin_event_update ON public.support_tickets;
 CREATE TRIGGER trg_notify_support_admin_event_update
   AFTER UPDATE ON public.support_tickets
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_support_admin_event_update();
-
 CREATE OR REPLACE FUNCTION public.notify_profile_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -397,7 +383,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_profile_admin_event ON public.profiles;
 CREATE TRIGGER trg_notify_profile_admin_event
   AFTER INSERT OR UPDATE ON public.profiles

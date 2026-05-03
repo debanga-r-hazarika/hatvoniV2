@@ -9,7 +9,6 @@
 */
 
 CREATE SEQUENCE IF NOT EXISTS public.support_ticket_number_seq START 1;
-
 CREATE TABLE IF NOT EXISTS public.support_tickets (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_number text UNIQUE,
@@ -41,7 +40,6 @@ CREATE TABLE IF NOT EXISTS public.support_tickets (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE TABLE IF NOT EXISTS public.support_ticket_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   ticket_id uuid NOT NULL REFERENCES public.support_tickets(id) ON DELETE CASCADE,
@@ -51,14 +49,12 @@ CREATE TABLE IF NOT EXISTS public.support_ticket_messages (
   message text NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_support_tickets_user_id ON public.support_tickets(user_id);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_order_id ON public.support_tickets(order_id);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_status ON public.support_tickets(status);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_sla_due_at ON public.support_tickets(sla_due_at);
 CREATE INDEX IF NOT EXISTS idx_support_tickets_assigned_to ON public.support_tickets(assigned_to) WHERE assigned_to IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_support_ticket_messages_ticket_id_created_at ON public.support_ticket_messages(ticket_id, created_at);
-
 CREATE OR REPLACE FUNCTION public.compute_support_sla_hours(p_request_type text, p_priority text)
 RETURNS integer
 LANGUAGE plpgsql
@@ -82,7 +78,6 @@ BEGIN
   END CASE;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.support_tickets_before_insert()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -108,7 +103,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.support_tickets_before_update()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -136,33 +130,27 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_support_tickets_before_insert ON public.support_tickets;
 CREATE TRIGGER trg_support_tickets_before_insert
 BEFORE INSERT ON public.support_tickets
 FOR EACH ROW EXECUTE FUNCTION public.support_tickets_before_insert();
-
 DROP TRIGGER IF EXISTS trg_support_tickets_before_update ON public.support_tickets;
 CREATE TRIGGER trg_support_tickets_before_update
 BEFORE UPDATE ON public.support_tickets
 FOR EACH ROW EXECUTE FUNCTION public.support_tickets_before_update();
-
 ALTER TABLE public.support_tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.support_ticket_messages ENABLE ROW LEVEL SECURITY;
-
 -- Customers can access only their own tickets.
 CREATE POLICY "Customers can read own support tickets"
   ON public.support_tickets
   FOR SELECT
   TO authenticated
   USING (user_id = auth.uid());
-
 CREATE POLICY "Customers can create own support tickets"
   ON public.support_tickets
   FOR INSERT
   TO authenticated
   WITH CHECK (user_id = auth.uid());
-
 CREATE POLICY "Customers can update own support tickets"
   ON public.support_tickets
   FOR UPDATE
@@ -172,7 +160,6 @@ CREATE POLICY "Customers can update own support tickets"
     user_id = auth.uid() AND
     status IN ('open', 'waiting_customer', 'closed')
   );
-
 -- Admins and support-module employees can fully manage tickets.
 CREATE POLICY "Support staff can manage support tickets"
   ON public.support_tickets
@@ -210,7 +197,6 @@ CREATE POLICY "Support staff can manage support tickets"
         AND em.module = 'support'
     )
   );
-
 CREATE POLICY "Customers can read own support messages"
   ON public.support_ticket_messages
   FOR SELECT
@@ -224,7 +210,6 @@ CREATE POLICY "Customers can read own support messages"
     )
     AND is_internal = false
   );
-
 CREATE POLICY "Customers can add own support messages"
   ON public.support_ticket_messages
   FOR INSERT
@@ -240,7 +225,6 @@ CREATE POLICY "Customers can add own support messages"
     AND author_role = 'customer'
     AND is_internal = false
   );
-
 CREATE POLICY "Support staff can manage support messages"
   ON public.support_ticket_messages
   FOR ALL

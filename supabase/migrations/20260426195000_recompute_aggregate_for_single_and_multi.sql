@@ -101,10 +101,7 @@ BEGIN
   PERFORM set_config('hatvoni.workflow_actor', '', true);
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.recompute_order_fulfillment_aggregate(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.recompute_order_fulfillment_aggregate(uuid) TO service_role;
-
 COMMENT ON FUNCTION public.recompute_order_fulfillment_aggregate IS
   'Derives orders.customer_status / status from all order_shipments for both single and multi fulfillment modes.';
-

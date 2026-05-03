@@ -119,6 +119,5 @@ BEGIN
   RETURN v_n;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_prepare_multi_shipment_lots(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_prepare_multi_shipment_lots(uuid) TO authenticated;

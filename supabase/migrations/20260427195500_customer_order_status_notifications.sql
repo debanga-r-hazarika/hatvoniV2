@@ -16,23 +16,18 @@ CREATE TABLE IF NOT EXISTS public.customer_notifications (
   read_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_customer_notifications_recipient_created
   ON public.customer_notifications(recipient_user_id, created_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_customer_notifications_recipient_unread
   ON public.customer_notifications(recipient_user_id, is_read)
   WHERE is_read = false;
-
 ALTER TABLE public.customer_notifications ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Users can read own customer notifications" ON public.customer_notifications;
 CREATE POLICY "Users can read own customer notifications"
   ON public.customer_notifications
   FOR SELECT
   TO authenticated
   USING (recipient_user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Users can update own customer notifications" ON public.customer_notifications;
 CREATE POLICY "Users can update own customer notifications"
   ON public.customer_notifications
@@ -40,14 +35,12 @@ CREATE POLICY "Users can update own customer notifications"
   TO authenticated
   USING (recipient_user_id = auth.uid())
   WITH CHECK (recipient_user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Service role can insert customer notifications" ON public.customer_notifications;
 CREATE POLICY "Service role can insert customer notifications"
   ON public.customer_notifications
   FOR INSERT
   TO service_role
   WITH CHECK (true);
-
 CREATE OR REPLACE FUNCTION public.notify_customer_order_status_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -102,7 +95,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_customer_order_status_update ON public.orders;
 CREATE TRIGGER trg_notify_customer_order_status_update
   AFTER UPDATE OF status ON public.orders

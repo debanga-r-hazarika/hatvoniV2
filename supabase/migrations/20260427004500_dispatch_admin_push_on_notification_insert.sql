@@ -7,19 +7,16 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_net;
 CREATE SCHEMA IF NOT EXISTS private;
-
 CREATE TABLE IF NOT EXISTS private.integration_config (
   key text PRIMARY KEY,
   value text NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 INSERT INTO private.integration_config(key, value)
 VALUES
   ('admin_push_function_url', 'https://dhtwkfethmqcgpqdbksi.supabase.co/functions/v1/send-admin-push'),
   ('admin_push_dispatch_secret', 'CHANGE_ME')
 ON CONFLICT (key) DO NOTHING;
-
 CREATE OR REPLACE FUNCTION public.enqueue_admin_push_notification(p_notification_id uuid)
 RETURNS void
 LANGUAGE plpgsql
@@ -63,7 +60,6 @@ EXCEPTION WHEN OTHERS THEN
   RETURN;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.trigger_admin_push_notification()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -75,7 +71,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_enqueue_admin_push_notification ON public.admin_notifications;
 CREATE TRIGGER trg_enqueue_admin_push_notification
   AFTER INSERT ON public.admin_notifications

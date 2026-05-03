@@ -1,2 +1,1 @@
--- Legacy placeholder migration: no-op.
-
+-- Legacy placeholder migration: no-op.;

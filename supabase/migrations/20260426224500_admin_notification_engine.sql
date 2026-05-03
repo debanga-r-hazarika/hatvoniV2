@@ -23,26 +23,20 @@ CREATE TABLE IF NOT EXISTS public.admin_notifications (
   read_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_admin_notifications_recipient_created
   ON public.admin_notifications(recipient_user_id, created_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_admin_notifications_recipient_unread
   ON public.admin_notifications(recipient_user_id, is_read)
   WHERE is_read = false;
-
 CREATE INDEX IF NOT EXISTS idx_admin_notifications_module_created
   ON public.admin_notifications(module, created_at DESC);
-
 ALTER TABLE public.admin_notifications ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Users can read own admin notifications" ON public.admin_notifications;
 CREATE POLICY "Users can read own admin notifications"
   ON public.admin_notifications
   FOR SELECT
   TO authenticated
   USING (recipient_user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Users can mark own admin notifications" ON public.admin_notifications;
 CREATE POLICY "Users can mark own admin notifications"
   ON public.admin_notifications
@@ -50,14 +44,12 @@ CREATE POLICY "Users can mark own admin notifications"
   TO authenticated
   USING (recipient_user_id = auth.uid())
   WITH CHECK (recipient_user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Service role can insert admin notifications" ON public.admin_notifications;
 CREATE POLICY "Service role can insert admin notifications"
   ON public.admin_notifications
   FOR INSERT
   TO service_role
   WITH CHECK (true);
-
 CREATE OR REPLACE FUNCTION public.admin_notification_recipient_ids(p_modules text[])
 RETURNS SETOF uuid
 LANGUAGE sql
@@ -83,7 +75,6 @@ AS $$
   UNION
   SELECT DISTINCT id FROM employee_ids
 $$;
-
 CREATE OR REPLACE FUNCTION public.emit_admin_notification(
   p_modules text[],
   p_event_type text,
@@ -129,7 +120,6 @@ BEGIN
   FROM public.admin_notification_recipient_ids(p_modules) rid;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.notify_order_admin_event()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -200,13 +190,11 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_order_admin_event ON public.orders;
 CREATE TRIGGER trg_notify_order_admin_event
   AFTER INSERT OR UPDATE ON public.orders
   FOR EACH ROW
   EXECUTE FUNCTION public.notify_order_admin_event();
-
 CREATE OR REPLACE FUNCTION public.notify_support_ticket_created()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -233,7 +221,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_support_ticket_created ON public.support_tickets;
 CREATE TRIGGER trg_notify_support_ticket_created
   AFTER INSERT ON public.support_tickets

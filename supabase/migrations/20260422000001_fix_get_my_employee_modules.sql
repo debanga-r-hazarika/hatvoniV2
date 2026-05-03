@@ -9,7 +9,6 @@
 */
 
 DROP FUNCTION IF EXISTS public.get_my_employee_modules();
-
 CREATE FUNCTION public.get_my_employee_modules()
 RETURNS SETOF text
 LANGUAGE sql

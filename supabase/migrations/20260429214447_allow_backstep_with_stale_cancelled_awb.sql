@@ -1,24 +1,3 @@
-ALTER TABLE public.order_shipments
-  ADD COLUMN IF NOT EXISTS shipping_attempt_no int;
-UPDATE public.order_shipments
-SET shipping_attempt_no = 1
-WHERE shipping_attempt_no IS NULL;
-ALTER TABLE public.order_shipments
-  ALTER COLUMN shipping_attempt_no SET DEFAULT 1;
-ALTER TABLE public.order_shipments
-  ALTER COLUMN shipping_attempt_no SET NOT NULL;
-CREATE OR REPLACE FUNCTION public.hatvoni_velocity_shipment_reorder_code(
-  p_order_id uuid,
-  p_lot_index int,
-  p_attempt_no int
-)
-RETURNS text
-LANGUAGE sql
-IMMUTABLE
-SET search_path = ''
-AS $$
-  SELECT public.hatvoni_velocity_shipment_code(p_order_id, p_lot_index) || '-R' || GREATEST(1, p_attempt_no)::text;
-$$;
 CREATE OR REPLACE FUNCTION public.admin_mark_shipment_lot_reorder_ready(
   p_order_shipment_id uuid
 )
@@ -54,9 +33,8 @@ BEGIN
   END IF;
 
   IF v_lot.velocity_pending_shipment_id IS NOT NULL
-     OR v_lot.velocity_shipment_id IS NOT NULL
-     OR nullif(trim(coalesce(v_lot.tracking_number, '')), '') IS NOT NULL THEN
-    RAISE EXCEPTION 'This lot still has an active draft or AWB. Cancel courier first.';
+     OR v_lot.velocity_shipment_id IS NOT NULL THEN
+    RAISE EXCEPTION 'This lot still has an active draft or shipment id. Cancel courier first.';
   END IF;
 
   v_attempt := GREATEST(1, coalesce(v_lot.shipping_attempt_no, 1)) + 1;
@@ -67,6 +45,12 @@ BEGIN
   SET
     shipping_attempt_no = v_attempt,
     velocity_external_code = v_new_code,
+    tracking_number = null,
+    velocity_awb = null,
+    velocity_carrier_name = null,
+    velocity_label_url = null,
+    velocity_tracking_url = null,
+    velocity_tracking_snapshot = null,
     velocity_fulfillment = coalesce(velocity_fulfillment, '{}'::jsonb)
       || jsonb_build_object(
         'workflow_stage', 'reorder_ready',
@@ -102,7 +86,6 @@ BEGIN
   RETURN v_new_code;
 END;
 $$;
-REVOKE ALL ON FUNCTION public.hatvoni_velocity_shipment_reorder_code(uuid, int, int) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.hatvoni_velocity_shipment_reorder_code(uuid, int, int) TO service_role;
+
 REVOKE ALL ON FUNCTION public.admin_mark_shipment_lot_reorder_ready(uuid) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.admin_mark_shipment_lot_reorder_ready(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_mark_shipment_lot_reorder_ready(uuid) TO authenticated;;

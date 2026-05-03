@@ -14,12 +14,9 @@ CREATE TABLE IF NOT EXISTS public.push_subscriptions (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user_id
   ON public.push_subscriptions(user_id);
-
 ALTER TABLE public.push_subscriptions ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Users manage own push subscriptions" ON public.push_subscriptions;
 CREATE POLICY "Users manage own push subscriptions"
   ON public.push_subscriptions
@@ -27,7 +24,6 @@ CREATE POLICY "Users manage own push subscriptions"
   TO authenticated
   USING (user_id = auth.uid())
   WITH CHECK (user_id = auth.uid());
-
 DROP POLICY IF EXISTS "Service role can read push subscriptions" ON public.push_subscriptions;
 CREATE POLICY "Service role can read push subscriptions"
   ON public.push_subscriptions

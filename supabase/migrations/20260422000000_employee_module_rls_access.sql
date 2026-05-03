@@ -47,7 +47,6 @@ CREATE POLICY "Employees can view orders for their module"
         AND  em.module    = 'orders'
     )
   );
-
 -- orders: UPDATE (status changes, shipping updates, etc.)
 DROP POLICY IF EXISTS "Employees can update orders for their module" ON public.orders;
 CREATE POLICY "Employees can update orders for their module"
@@ -71,7 +70,6 @@ CREATE POLICY "Employees can update orders for their module"
         AND  em.module    = 'orders'
     )
   );
-
 -- order_items: SELECT
 DROP POLICY IF EXISTS "Employees can view order items for their module" ON public.order_items;
 CREATE POLICY "Employees can view order items for their module"
@@ -86,7 +84,6 @@ CREATE POLICY "Employees can view order items for their module"
         AND  em.module    = 'orders'
     )
   );
-
 -- order_item_approvals: SELECT + UPDATE (employees can review items)
 DROP POLICY IF EXISTS "Employees can view order item approvals" ON public.order_item_approvals;
 CREATE POLICY "Employees can view order item approvals"
@@ -101,7 +98,6 @@ CREATE POLICY "Employees can view order item approvals"
         AND  em.module    = 'orders'
     )
   );
-
 DROP POLICY IF EXISTS "Employees can update order item approvals" ON public.order_item_approvals;
 CREATE POLICY "Employees can update order item approvals"
   ON public.order_item_approvals FOR UPDATE
@@ -124,7 +120,6 @@ CREATE POLICY "Employees can update order item approvals"
         AND  em.module    = 'orders'
     )
   );
-
 -- order_workflow_log: SELECT
 DROP POLICY IF EXISTS "Employees can view workflow logs for their module" ON public.order_workflow_log;
 CREATE POLICY "Employees can view workflow logs for their module"
@@ -139,7 +134,6 @@ CREATE POLICY "Employees can view workflow logs for their module"
         AND  em.module    = 'orders'
     )
   );
-
 -- seller_order_item_decisions: SELECT (orders employees need to see seller decisions)
 DROP POLICY IF EXISTS "Employees can view seller decisions for orders module" ON public.seller_order_item_decisions;
 CREATE POLICY "Employees can view seller decisions for orders module"
@@ -154,7 +148,6 @@ CREATE POLICY "Employees can view seller decisions for orders module"
         AND  em.module    = 'orders'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- LOGISTICS MODULE
 -- employees with 'logistics' module can view orders + manage pickup locations
@@ -174,7 +167,6 @@ CREATE POLICY "Employees can view orders for logistics module"
         AND  em.module    = 'logistics'
     )
   );
-
 -- orders: UPDATE (logistics can update shipping status)
 DROP POLICY IF EXISTS "Employees can update orders for logistics module" ON public.orders;
 CREATE POLICY "Employees can update orders for logistics module"
@@ -198,7 +190,6 @@ CREATE POLICY "Employees can update orders for logistics module"
         AND  em.module    = 'logistics'
     )
   );
-
 -- order_items: SELECT (logistics needs item details)
 DROP POLICY IF EXISTS "Employees can view order items for logistics module" ON public.order_items;
 CREATE POLICY "Employees can view order items for logistics module"
@@ -213,7 +204,6 @@ CREATE POLICY "Employees can view order items for logistics module"
         AND  em.module    = 'logistics'
     )
   );
-
 -- seller_pickup_locations: SELECT + ALL (logistics manages pickup locations)
 DROP POLICY IF EXISTS "Employees can view pickup locations for logistics module" ON public.seller_pickup_locations;
 CREATE POLICY "Employees can view pickup locations for logistics module"
@@ -228,7 +218,6 @@ CREATE POLICY "Employees can view pickup locations for logistics module"
         AND  em.module    = 'logistics'
     )
   );
-
 DROP POLICY IF EXISTS "Employees can manage pickup locations for logistics module" ON public.seller_pickup_locations;
 CREATE POLICY "Employees can manage pickup locations for logistics module"
   ON public.seller_pickup_locations FOR ALL
@@ -251,7 +240,6 @@ CREATE POLICY "Employees can manage pickup locations for logistics module"
         AND  em.module    = 'logistics'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- INVENTORY MODULE
 -- employees with 'inventory' module get full access to hatvoni inventory tables
@@ -280,7 +268,6 @@ CREATE POLICY "Employees can manage hatvoni_inventory for inventory module"
         AND  em.module    = 'inventory'
     )
   );
-
 -- hatvoni_inventory_lots: ALL
 DROP POLICY IF EXISTS "Employees can manage hatvoni_inventory_lots for inventory module" ON public.hatvoni_inventory_lots;
 CREATE POLICY "Employees can manage hatvoni_inventory_lots for inventory module"
@@ -304,7 +291,6 @@ CREATE POLICY "Employees can manage hatvoni_inventory_lots for inventory module"
         AND  em.module    = 'inventory'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- COUPONS MODULE
 -- employees with 'coupons' module get full access to coupon management
@@ -333,7 +319,6 @@ CREATE POLICY "Employees can manage coupons for coupons module"
         AND  em.module    = 'coupons'
     )
   );
-
 -- coupon_usage: SELECT (employees can view usage stats)
 DROP POLICY IF EXISTS "Employees can view coupon usage for coupons module" ON public.coupon_usage;
 CREATE POLICY "Employees can view coupon usage for coupons module"
@@ -348,7 +333,6 @@ CREATE POLICY "Employees can view coupon usage for coupons module"
         AND  em.module    = 'coupons'
     )
   );
-
 -- coupon_audit_log: SELECT
 DROP POLICY IF EXISTS "Employees can view coupon audit logs for coupons module" ON public.coupon_audit_log;
 CREATE POLICY "Employees can view coupon audit logs for coupons module"
@@ -363,7 +347,6 @@ CREATE POLICY "Employees can view coupon audit logs for coupons module"
         AND  em.module    = 'coupons'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- CUSTOMERS MODULE
 -- employees with 'customers' module can view all profiles (read-only)
@@ -383,7 +366,6 @@ CREATE POLICY "Employees can view profiles for customers module"
         AND  em.module    = 'customers'
     )
   );
-
 -- orders: SELECT (customers module needs order history per customer)
 DROP POLICY IF EXISTS "Employees can view orders for customers module" ON public.orders;
 CREATE POLICY "Employees can view orders for customers module"
@@ -398,7 +380,6 @@ CREATE POLICY "Employees can view orders for customers module"
         AND  em.module    = 'customers'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- SELLERS MODULE
 -- employees with 'sellers' module can view/manage seller profiles and locations
@@ -418,7 +399,6 @@ CREATE POLICY "Employees can view profiles for sellers module"
         AND  em.module    = 'sellers'
     )
   );
-
 -- profiles: UPDATE (sellers module can ban/unban and toggle is_own_seller)
 DROP POLICY IF EXISTS "Employees can update profiles for sellers module" ON public.profiles;
 CREATE POLICY "Employees can update profiles for sellers module"
@@ -442,7 +422,6 @@ CREATE POLICY "Employees can update profiles for sellers module"
         AND  em.module    = 'sellers'
     )
   );
-
 -- seller_pickup_locations: ALL (sellers module manages pickup locations)
 DROP POLICY IF EXISTS "Employees can manage pickup locations for sellers module" ON public.seller_pickup_locations;
 CREATE POLICY "Employees can manage pickup locations for sellers module"
@@ -466,7 +445,6 @@ CREATE POLICY "Employees can manage pickup locations for sellers module"
         AND  em.module    = 'sellers'
     )
   );
-
 -- orders: SELECT (sellers module needs to see seller-related orders)
 DROP POLICY IF EXISTS "Employees can view orders for sellers module" ON public.orders;
 CREATE POLICY "Employees can view orders for sellers module"
@@ -481,7 +459,6 @@ CREATE POLICY "Employees can view orders for sellers module"
         AND  em.module    = 'sellers'
     )
   );
-
 -- seller_order_item_decisions: SELECT
 DROP POLICY IF EXISTS "Employees can view seller decisions for sellers module" ON public.seller_order_item_decisions;
 CREATE POLICY "Employees can view seller decisions for sellers module"
@@ -496,7 +473,6 @@ CREATE POLICY "Employees can view seller decisions for sellers module"
         AND  em.module    = 'sellers'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- PRODUCTS MODULE
 -- employees with 'products' module get full access to products, lots, lot_items
@@ -525,7 +501,6 @@ CREATE POLICY "Employees can manage products for products module"
         AND  em.module    = 'products'
     )
   );
-
 -- lots: ALL
 DROP POLICY IF EXISTS "Employees can manage lots for products module" ON public.lots;
 CREATE POLICY "Employees can manage lots for products module"
@@ -549,7 +524,6 @@ CREATE POLICY "Employees can manage lots for products module"
         AND  em.module    = 'products'
     )
   );
-
 -- lot_items: ALL
 DROP POLICY IF EXISTS "Employees can manage lot items for products module" ON public.lot_items;
 CREATE POLICY "Employees can manage lot items for products module"
@@ -573,7 +547,6 @@ CREATE POLICY "Employees can manage lot items for products module"
         AND  em.module    = 'products'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- LOTS MODULE
 -- employees with 'lots' module get full access to lots and lot_items
@@ -603,7 +576,6 @@ CREATE POLICY "Employees can manage lots for lots module"
         AND  em.module    = 'lots'
     )
   );
-
 -- lot_items: ALL
 DROP POLICY IF EXISTS "Employees can manage lot items for lots module" ON public.lot_items;
 CREATE POLICY "Employees can manage lot items for lots module"
@@ -627,7 +599,6 @@ CREATE POLICY "Employees can manage lot items for lots module"
         AND  em.module    = 'lots'
     )
   );
-
 -- products: SELECT (lots module needs to read product catalog)
 DROP POLICY IF EXISTS "Employees can view products for lots module" ON public.products;
 CREATE POLICY "Employees can view products for lots module"
@@ -642,7 +613,6 @@ CREATE POLICY "Employees can view products for lots module"
         AND  em.module    = 'lots'
     )
   );
-
 -- ─────────────────────────────────────────────────────────────────────────────
 -- RECIPES MODULE
 -- employees with 'recipes' module get full access to recipes tables

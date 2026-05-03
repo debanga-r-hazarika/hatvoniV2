@@ -112,6 +112,23 @@ export function formatShipmentStatusForDisplay(raw) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+/**
+ * Mirrors public.hatvoni_shipment_lifecycle_bucket for client-side checks.
+ */
+export function shipmentLifecycleBucket(p_status) {
+  const s = String(p_status || '').trim().toLowerCase();
+  if (!s) return 'pre_shipping';
+  if (s === 'delivered') return 'delivered';
+  if (['rto_delivered', 'cancelled', 'rejected', 'lost'].includes(s)) return 'failed_final';
+  if (['rto_initiated', 'rto_in_transit', 'rto_need_attention'].includes(s)) return 'return_in_progress';
+  if (['in_transit', 'out_for_delivery', 'reattempt_delivery', 'externally_fulfilled', 'rto_cancelled'].includes(s)) {
+    return 'active_delivery';
+  }
+  if (['need_attention', 'ndr_raised', 'not_picked'].includes(s)) return 'exception_attention';
+  if (['pending', 'processing', 'ready_for_pickup', 'pickup_scheduled'].includes(s)) return 'pre_shipping';
+  return 'exception_attention';
+}
+
 /** Dropdown options plus legacy value if DB has an unknown token. */
 export function getShipmentStatusDropdownOptions(currentRaw) {
   const cur = normalizeShipmentStatusKey(currentRaw);

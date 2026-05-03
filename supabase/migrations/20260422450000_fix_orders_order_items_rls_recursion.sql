@@ -58,13 +58,10 @@ BEGIN
   RETURN false;
 END;
 $$;
-
 COMMENT ON FUNCTION public.auth_can_view_order_internal(uuid) IS
   'RLS bypass helper: whether the current session may see this order (owner, admin, seller line, employee modules).';
-
 REVOKE ALL ON FUNCTION public.auth_can_view_order_internal(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.auth_can_view_order_internal(uuid) TO authenticated;
-
 -- ─── Drop all SELECT policies on orders (recreate single policy) ─────────────
 
 DROP POLICY IF EXISTS "Users can view own orders or admins can view all" ON public.orders;
@@ -73,12 +70,10 @@ DROP POLICY IF EXISTS "Employees can view orders for their module" ON public.ord
 DROP POLICY IF EXISTS "Employees can view orders for logistics module" ON public.orders;
 DROP POLICY IF EXISTS "Employees can view orders for customers module" ON public.orders;
 DROP POLICY IF EXISTS "Employees can view orders for sellers module" ON public.orders;
-
 CREATE POLICY "Select orders when visible to current user"
   ON public.orders FOR SELECT
   TO authenticated
   USING (public.auth_can_view_order_internal(id));
-
 -- ─── Drop all SELECT policies on order_items (recreate single policy) ─────────
 
 DROP POLICY IF EXISTS "Users can view own order items or admins can view all" ON public.order_items;
@@ -88,7 +83,6 @@ DROP POLICY IF EXISTS "Employees can view order items for their module" ON publi
 DROP POLICY IF EXISTS "Employees can view order items for logistics module" ON public.order_items;
 DROP POLICY IF EXISTS "Employees can view order items for customers module" ON public.order_items;
 DROP POLICY IF EXISTS "Employees can view order items for sellers module" ON public.order_items;
-
 CREATE POLICY "Select order_items when parent order is visible"
   ON public.order_items FOR SELECT
   TO authenticated

@@ -9,17 +9,14 @@
 
 ALTER TABLE public.orders
   ADD COLUMN IF NOT EXISTS fulfillment_mode text;
-
 COMMENT ON COLUMN public.orders.fulfillment_mode IS
   'legacy_single: one Velocity forward order tied to orders row; multi_shipment: use order_shipments lots.';
-
 DO $$ BEGIN
   ALTER TABLE public.orders
     ADD CONSTRAINT orders_fulfillment_mode_check
     CHECK (fulfillment_mode IS NULL OR fulfillment_mode IN ('legacy_single', 'multi_shipment'));
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
-
 -- ─── 2. Shipment lots (one row per Velocity forward-order / warehouse lot) ───
 
 CREATE TABLE IF NOT EXISTS public.order_shipments (
@@ -43,9 +40,7 @@ CREATE TABLE IF NOT EXISTS public.order_shipments (
   CONSTRAINT order_shipments_order_lot_unique UNIQUE (order_id, lot_index),
   CONSTRAINT order_shipments_velocity_code_unique UNIQUE (velocity_external_code)
 );
-
 CREATE INDEX IF NOT EXISTS idx_order_shipments_order_id ON public.order_shipments (order_id);
-
 -- ─── 3. Granular tracking events (webhook-driven) ─────────────────────────────
 
 CREATE TABLE IF NOT EXISTS public.order_shipment_tracking_events (
@@ -59,19 +54,15 @@ CREATE TABLE IF NOT EXISTS public.order_shipment_tracking_events (
   event_time           timestamptz,
   created_at           timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_os_te_shipment_time
   ON public.order_shipment_tracking_events (order_shipment_id, event_time DESC NULLS LAST);
-
 -- ─── 4. Link line items to a lot (optional until admin prepares multi lots) ────
 
 ALTER TABLE public.order_items
   ADD COLUMN IF NOT EXISTS order_shipment_id uuid REFERENCES public.order_shipments(id) ON DELETE SET NULL;
-
 CREATE INDEX IF NOT EXISTS idx_order_items_order_shipment_id
   ON public.order_items (order_shipment_id)
   WHERE order_shipment_id IS NOT NULL;
-
 -- ─── 5. Hatvoni order code (matches Edge baseVelocityOrderCode) ─────────────────
 
 CREATE OR REPLACE FUNCTION public.hatvoni_velocity_order_code(p_order_id uuid)
@@ -82,7 +73,6 @@ SET search_path = ''
 AS $$
   SELECT 'HAT-' || upper(substring(replace(p_order_id::text, '-', ''), 1, 10));
 $$;
-
 CREATE OR REPLACE FUNCTION public.hatvoni_velocity_shipment_code(p_order_id uuid, p_lot_index int)
 RETURNS text
 LANGUAGE sql
@@ -91,7 +81,6 @@ SET search_path = ''
 AS $$
   SELECT public.hatvoni_velocity_order_code(p_order_id) || '-L' || p_lot_index::text;
 $$;
-
 CREATE OR REPLACE FUNCTION public.resolve_order_from_velocity_external_id(p_ext text)
 RETURNS uuid
 LANGUAGE sql
@@ -104,10 +93,8 @@ AS $$
      OR public.hatvoni_velocity_order_code(o.id) = trim(p_ext)
   LIMIT 1;
 $$;
-
 REVOKE ALL ON FUNCTION public.resolve_order_from_velocity_external_id(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.resolve_order_from_velocity_external_id(text) TO service_role;
-
 -- ─── 6. Normalize carrier status → lifecycle bucket ────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.hatvoni_shipment_lifecycle_bucket(p_status text)
@@ -145,7 +132,6 @@ BEGIN
   RETURN 'in_transit';
 END;
 $$;
-
 -- ─── 7. Aggregate fulfillment state → order columns ─────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.recompute_order_fulfillment_aggregate(p_order_id uuid)
@@ -252,13 +238,10 @@ BEGIN
   PERFORM set_config('hatvoni.workflow_actor', '', true);
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.recompute_order_fulfillment_aggregate(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.recompute_order_fulfillment_aggregate(uuid) TO service_role;
-
 COMMENT ON FUNCTION public.recompute_order_fulfillment_aggregate IS
   'Derives orders.customer_status / status from all order_shipments. Invoked after shipment-level webhook writes.';
-
 -- ─── 8. Admin: create lots from default product warehouses ─────────────────────
 
 CREATE OR REPLACE FUNCTION public.admin_prepare_multi_shipment_lots(p_order_id uuid)
@@ -359,21 +342,17 @@ BEGIN
   RETURN v_n;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_prepare_multi_shipment_lots(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_prepare_multi_shipment_lots(uuid) TO authenticated;
-
 -- ─── 9. RLS ────────────────────────────────────────────────────────────────────
 
 ALTER TABLE public.order_shipments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.order_shipment_tracking_events ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Admins manage order_shipments" ON public.order_shipments;
 CREATE POLICY "Admins manage order_shipments"
   ON public.order_shipments FOR ALL TO authenticated
   USING (public.is_admin() = true)
   WITH CHECK (public.is_admin() = true);
-
 DROP POLICY IF EXISTS "Customers view own order_shipments" ON public.order_shipments;
 CREATE POLICY "Customers view own order_shipments"
   ON public.order_shipments FOR SELECT TO authenticated
@@ -383,7 +362,6 @@ CREATE POLICY "Customers view own order_shipments"
       WHERE o.id = order_shipments.order_id AND o.user_id = auth.uid()
     )
   );
-
 DROP POLICY IF EXISTS "Employees logistics view order_shipments" ON public.order_shipments;
 CREATE POLICY "Employees logistics view order_shipments"
   ON public.order_shipments FOR SELECT TO authenticated
@@ -396,13 +374,11 @@ CREATE POLICY "Employees logistics view order_shipments"
         AND em.module IN ('logistics', 'orders')
     )
   );
-
 DROP POLICY IF EXISTS "Admins manage tracking events" ON public.order_shipment_tracking_events;
 CREATE POLICY "Admins manage tracking events"
   ON public.order_shipment_tracking_events FOR ALL TO authenticated
   USING (public.is_admin() = true)
   WITH CHECK (public.is_admin() = true);
-
 DROP POLICY IF EXISTS "Customers view own tracking events" ON public.order_shipment_tracking_events;
 CREATE POLICY "Customers view own tracking events"
   ON public.order_shipment_tracking_events FOR SELECT TO authenticated
@@ -415,7 +391,6 @@ CREATE POLICY "Customers view own tracking events"
         AND o.user_id = auth.uid()
     )
   );
-
 DROP POLICY IF EXISTS "Employees logistics view tracking events" ON public.order_shipment_tracking_events;
 CREATE POLICY "Employees logistics view tracking events"
   ON public.order_shipment_tracking_events FOR SELECT TO authenticated

@@ -214,6 +214,154 @@ function extractVelocityLabelUrl(source: Record<string, unknown>, depth = 0): st
   return null;
 }
 
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/**
+ * Snapshot from Velocity assign-courier / create-order payload after AWB exists.
+ * Merged into order_shipments.velocity_fulfillment or orders.velocity_fulfillment.
+ */
+/** Some Velocity hosts return charges only on nested keys or Get-Rates-shaped objects. */
+function velocityAwbShippingMetaFromPayload(outPayload: Record<string, unknown>): Record<string, unknown> {
+  const tryFrwd = (raw: unknown): Record<string, unknown> | null => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    return raw as Record<string, unknown>;
+  };
+
+  let chargesRoot: Record<string, unknown> | null = outPayload.charges && typeof outPayload.charges === 'object' &&
+      !Array.isArray(outPayload.charges)
+    ? outPayload.charges as Record<string, unknown>
+    : null;
+
+  if (!chargesRoot && outPayload.forward_charges && typeof outPayload.forward_charges === 'object') {
+    chargesRoot = outPayload.forward_charges as Record<string, unknown>;
+  }
+  if (!chargesRoot && outPayload.billing_charges && typeof outPayload.billing_charges === 'object') {
+    chargesRoot = outPayload.billing_charges as Record<string, unknown>;
+  }
+
+  let frwdNested = chargesRoot?.frwd_charges && typeof chargesRoot.frwd_charges === 'object' &&
+      !Array.isArray(chargesRoot.frwd_charges)
+    ? chargesRoot.frwd_charges as Record<string, unknown>
+    : null;
+
+  let frwdRaw = frwdNested ?? tryFrwd(chargesRoot);
+  if (!frwdRaw && outPayload.frwd_charges && typeof outPayload.frwd_charges === 'object') {
+    frwdRaw = outPayload.frwd_charges as Record<string, unknown>;
+    chargesRoot = chargesRoot ?? { frwd_charges: frwdRaw };
+  }
+
+  let freight: number | null = null;
+  let cod: number | null = null;
+  let total: number | null = null;
+
+  if (frwdRaw && typeof frwdRaw === 'object' && !Array.isArray(frwdRaw)) {
+    freight = numOrNull(
+      frwdRaw.forward_freight_charges ?? frwdRaw.shipping_charges ?? frwdRaw.freight_charges,
+    );
+    cod = numOrNull(frwdRaw.cod_charges);
+    total = numOrNull(frwdRaw.total_forward_charges ?? frwdRaw.total_charges);
+    if (total == null && freight != null) {
+      total = freight + (cod ?? 0);
+    }
+  }
+
+  return {
+    velocity_awb_charges: chargesRoot
+      ? {
+        frwd_charges: frwdNested ?? (frwdRaw && typeof frwdRaw === 'object' ? frwdRaw : null),
+        charges: chargesRoot,
+      }
+      : null,
+    velocity_shipping_freight: freight,
+    velocity_shipping_cod_component: cod,
+    velocity_shipping_total: total,
+    awb_charges_recorded_at: nowIso(),
+  };
+}
+
+/** When assign-courier JSON omits charges, use Get-Rates quote from saved serviceability for the chosen carrier. */
+function shippingMetaFromServiceabilityCarrier(
+  vf: unknown,
+  carrierId: string,
+  courierName: string,
+): Record<string, unknown> | null {
+  const root = vf && typeof vf === 'object' && !Array.isArray(vf) ? vf as Record<string, unknown> : null;
+  const svc = root?.serviceability && typeof root.serviceability === 'object' && !Array.isArray(root.serviceability)
+    ? root.serviceability as Record<string, unknown>
+    : null;
+  const carriers = svc?.carriers;
+  if (!Array.isArray(carriers)) return null;
+  const cid = String(carrierId || '').trim();
+  const cname = String(courierName || '').trim().toLowerCase();
+  const hit = carriers.find((c) => {
+    if (!c || typeof c !== 'object' || Array.isArray(c)) return false;
+    const r = c as Record<string, unknown>;
+    const id = String(r.carrier_id || '').trim();
+    const name = String(r.carrier_name || '').trim().toLowerCase();
+    if (cid && id === cid) return true;
+    if (cname && name === cname) return true;
+    return false;
+  });
+  if (!hit || typeof hit !== 'object' || Array.isArray(hit)) return null;
+  const h = hit as Record<string, unknown>;
+  const rq = h.rate_quote && typeof h.rate_quote === 'object' && !Array.isArray(h.rate_quote)
+    ? h.rate_quote as Record<string, unknown>
+    : null;
+  const charges = rq?.charges && typeof rq.charges === 'object' && !Array.isArray(rq.charges)
+    ? rq.charges as Record<string, unknown>
+    : null;
+  if (!charges) return null;
+  const freight = numOrNull(
+    charges.forward_freight_charges ?? charges.shipping_charges ?? charges.freight_charges,
+  );
+  const cod = numOrNull(charges.cod_charges);
+  let total = numOrNull(charges.total_forward_charges ?? charges.total_charges);
+  if (total == null && freight != null) {
+    total = freight + (cod ?? 0);
+  }
+  if (total == null && freight == null) return null;
+  return {
+    velocity_awb_charges: {
+      frwd_charges: charges,
+      charges: { frwd_charges: charges },
+      source: 'serviceability_rate_quote',
+    },
+    velocity_shipping_freight: freight,
+    velocity_shipping_cod_component: cod,
+    velocity_shipping_total: total ?? freight,
+    velocity_shipping_source: 'serviceability_rate_quote',
+    awb_charges_recorded_at: nowIso(),
+  };
+}
+
+function enrichShipmentMetaWithQuoteIfMissing(
+  existingVf: unknown,
+  carrierId: string,
+  courierName: string,
+  shipMeta: Record<string, unknown>,
+): Record<string, unknown> {
+  const rawT = shipMeta.velocity_shipping_total;
+  const t = typeof rawT === 'number' ? rawT : Number(rawT);
+  if (Number.isFinite(t) && t > 0) return shipMeta;
+  const fb = shippingMetaFromServiceabilityCarrier(existingVf, carrierId, courierName);
+  if (!fb) return shipMeta;
+  return mergeVelocityFulfillmentJson(shipMeta, fb);
+}
+
+function mergeVelocityFulfillmentJson(
+  existing: unknown,
+  shippingMeta: Record<string, unknown>,
+): Record<string, unknown> {
+  const prev = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? existing as Record<string, unknown>
+    : {};
+  return { ...prev, ...shippingMeta };
+}
+
 function parseExpiryToMs(raw: unknown): number {
   if (!raw) return Date.now() + 23 * 60 * 60 * 1000;
   if (typeof raw === 'number') return raw > 1e12 ? raw : raw * 1000;
@@ -1844,6 +1992,13 @@ async function handleCreateOrder(
   const outPayload = (dataObj.payload || dataObj) as Record<string, unknown>;
 
   if (apiResult.ok) {
+    const shipMeta = velocityAwbShippingMetaFromPayload(outPayload);
+    const { data: ordRow } = await adminClient
+      .from('orders')
+      .select('velocity_fulfillment')
+      .eq('id', orderId)
+      .maybeSingle();
+    const nextVf = mergeVelocityFulfillmentJson(ordRow?.velocity_fulfillment, shipMeta);
     await adminClient.from('orders').update({
       status: 'shipped',
       shipment_status: 'in_transit',
@@ -1853,10 +2008,12 @@ async function handleCreateOrder(
       velocity_awb: String(outPayload.awb_code || ''),
       velocity_label_url: extractVelocityLabelUrl(outPayload),
       velocity_carrier_name: String(outPayload.courier_name || ''),
+      velocity_fulfillment: nextVf,
       shipped_at: nowIso(),
       updated_at: nowIso(),
       admin_updated_at: nowIso(),
     }).eq('id', orderId).then(() => {}, () => {});
+    await recomputeFulfillmentAggregate(adminClient, orderId);
   }
 
   await logVelocityCall(adminClient, {
@@ -2152,6 +2309,19 @@ async function handleAssignCourier(
     const assignedStatus = assignedStatusRaw || 'ready_for_pickup';
 
     if (apiResult.ok) {
+      const { data: lotRow } = await adminClient
+        .from('order_shipments')
+        .select('velocity_fulfillment')
+        .eq('id', shipmentLotId)
+        .maybeSingle();
+      let shipMeta = velocityAwbShippingMetaFromPayload(outPayload);
+      shipMeta = enrichShipmentMetaWithQuoteIfMissing(
+        lotRow?.velocity_fulfillment,
+        carrierId,
+        String(outPayload.courier_name || ''),
+        shipMeta,
+      );
+      const nextVf = mergeVelocityFulfillmentJson(lotRow?.velocity_fulfillment, shipMeta);
       await adminClient.from('order_shipments').update({
         tracking_number: String(outPayload.awb_code || ''),
         velocity_awb: String(outPayload.awb_code || ''),
@@ -2159,6 +2329,7 @@ async function handleAssignCourier(
         velocity_pending_shipment_id: null,
         velocity_carrier_name: String(outPayload.courier_name || ''),
         velocity_label_url: extractVelocityLabelUrl(outPayload),
+        velocity_fulfillment: nextVf,
         // Keep lot cancellable until pickup actually starts.
         carrier_shipment_status: assignedStatus,
         updated_at: nowIso(),
@@ -2209,6 +2380,19 @@ async function handleAssignCourier(
   const outPayload = (dataObj.payload || dataObj) as Record<string, unknown>;
 
   if (apiResult.ok) {
+    const { data: ordRow } = await adminClient
+      .from('orders')
+      .select('velocity_fulfillment')
+      .eq('id', internalOrderId)
+      .maybeSingle();
+    let shipMeta = velocityAwbShippingMetaFromPayload(outPayload);
+    shipMeta = enrichShipmentMetaWithQuoteIfMissing(
+      ordRow?.velocity_fulfillment,
+      carrierId,
+      String(outPayload.courier_name || ''),
+      shipMeta,
+    );
+    const nextVf = mergeVelocityFulfillmentJson(ordRow?.velocity_fulfillment, shipMeta);
     await adminClient.from('orders').update({
       status: 'shipped',
       shipment_status: 'in_transit',
@@ -2219,11 +2403,12 @@ async function handleAssignCourier(
       velocity_label_url: extractVelocityLabelUrl(outPayload),
       velocity_carrier_name: String(outPayload.courier_name || ''),
       velocity_pending_shipment_id: null,
-      velocity_fulfillment: null,
+      velocity_fulfillment: nextVf,
       shipped_at: nowIso(),
       updated_at: nowIso(),
       admin_updated_at: nowIso(),
     }).eq('id', internalOrderId).then(() => {}, () => {});
+    await recomputeFulfillmentAggregate(adminClient, internalOrderId);
   }
 
   await logVelocityCall(adminClient, {
@@ -2572,6 +2757,13 @@ async function handleCancelOrder(
           workflow_stage: 'cancelled_reorder_ready',
           cancelled_at: nowIso(),
           cancelled_awb: awb || null,
+          // Remove shipping fees when AWB is cancelled
+          velocity_shipping_total: null,
+          velocity_shipping_freight: null,
+          velocity_shipping_cod_component: null,
+          velocity_shipping_source: null,
+          velocity_awb_charges: null,
+          awb_charges_recorded_at: null,
         },
         updated_at: nowIso(),
       }).eq('id', orderShipmentId).then(() => {}, () => {});
@@ -2669,10 +2861,26 @@ async function handleCancelOrder(
       patch.velocity_tracking_snapshot = null;
       patch.shipment_provider = null;
       patch.shipped_at = null;
+      
+      // Remove shipping fees from velocity_fulfillment when AWB is cancelled
+      if (row.velocity_fulfillment && typeof row.velocity_fulfillment === 'object') {
+        const vf = row.velocity_fulfillment as Record<string, unknown>;
+        patch.velocity_fulfillment = {
+          ...vf,
+          velocity_shipping_total: null,
+          velocity_shipping_freight: null,
+          velocity_shipping_cod_component: null,
+          velocity_shipping_source: null,
+          velocity_awb_charges: null,
+          awb_charges_recorded_at: null,
+        };
+      }
     }
     if (row.velocity_pending_shipment_id) {
       patch.velocity_pending_shipment_id = null;
-      patch.velocity_fulfillment = null;
+      if (!patch.velocity_fulfillment) {
+        patch.velocity_fulfillment = null;
+      }
     }
     await adminClient.from('orders').update(patch).eq('id', internalOrderId).then(() => {}, () => {});
   }

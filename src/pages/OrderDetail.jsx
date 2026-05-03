@@ -5,10 +5,11 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { cartService } from '../services/cartService';
 import AccountSidebar from '../components/AccountSidebar';
-import { getOrderDisplayId, getOrderItemDisplayId } from '../lib/orderDisplay';
+import { getOrderDisplayId } from '../lib/orderDisplay';
+import { formatShipmentStatusForDisplay } from '../lib/velocityShipmentStatusCatalog';
 
 /* ─────────────── constants ─────────────── */
-const statusFlow = ['placed', 'processing', 'shipped', 'delivered'];
+const statusFlow = ['placed', 'processing', 'in_transit', 'delivered'];
 
 const formatDate = (v) => {
   if (!v) return '—';
@@ -60,24 +61,82 @@ const statusConfig = {
 const stepIcons = {
   placed:     'receipt_long',
   processing: 'autorenew',
-  shipped:    'local_shipping',
+  in_transit: 'local_shipping',
   delivered:  'check_circle',
 };
 
-const humanizeShipmentStatus = (raw) => {
-  if (!raw || typeof raw !== 'string') return '';
-  return raw.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+/** Short labels for the four-step customer journey (distinct from detailed status chips). */
+const customerStepLabels = {
+  placed: 'Placed',
+  processing: 'Processing',
+  in_transit: 'In transit',
+  delivered: 'Delivered',
 };
+
+function getOrderHeroStyles(displayStatus, isCancelled) {
+  if (isCancelled) {
+    return {
+      background: 'linear-gradient(145deg, #fef2f2 0%, #fefcf8 55%, #ffffff 100%)',
+      borderColor: 'rgba(220, 38, 38, 0.22)',
+    };
+  }
+  switch (displayStatus) {
+    case 'delivered':
+      return {
+        background: 'linear-gradient(145deg, #ecfdf5 0%, #f5f9f6 50%, #ffffff 100%)',
+        borderColor: 'rgba(4, 120, 87, 0.22)',
+      };
+    case 'partially_delivered':
+      return {
+        background: 'linear-gradient(145deg, #ecfdf5 0%, #fbfaf1 52%, #ffffff 100%)',
+        borderColor: 'rgba(0, 74, 43, 0.18)',
+      };
+    case 'shipped':
+    case 'partially_shipped':
+    case 'in_transit':
+      return {
+        background: 'linear-gradient(145deg, #e4eee8 0%, #fbfaf1 48%, #ffffff 100%)',
+        borderColor: 'rgba(0, 74, 43, 0.14)',
+      };
+    case 'processing':
+      return {
+        background: 'linear-gradient(145deg, #fff8ec 0%, #fbfaf1 52%, #ffffff 100%)',
+        borderColor: 'rgba(129, 85, 0, 0.2)',
+      };
+    case 'partially_returning':
+      return {
+        background: 'linear-gradient(145deg, #f5f3ff 0%, #fbfaf1 55%, #ffffff 100%)',
+        borderColor: 'rgba(124, 58, 237, 0.2)',
+      };
+    case 'partially_failed':
+    case 'failed':
+      return {
+        background: 'linear-gradient(145deg, #fff1f2 0%, #fbfaf1 55%, #ffffff 100%)',
+        borderColor: 'rgba(185, 28, 28, 0.2)',
+      };
+    case 'attention_required':
+      return {
+        background: 'linear-gradient(145deg, #fff7ed 0%, #fbfaf1 55%, #ffffff 100%)',
+        borderColor: 'rgba(194, 65, 12, 0.22)',
+      };
+    default:
+      return {
+        background: 'linear-gradient(145deg, #f5f4eb 0%, #fbfaf1 45%, #ffffff 100%)',
+        borderColor: 'rgba(0, 74, 43, 0.12)',
+      };
+  }
+}
 
 function resolveLatestCarrierStatus(order, trackingSnap) {
   const direct = order?.shipment_status;
-  if (direct && String(direct).trim()) return humanizeShipmentStatus(String(direct));
+  if (direct && String(direct).trim()) return formatShipmentStatusForDisplay(String(direct));
   if (!trackingSnap || typeof trackingSnap !== 'object') return '';
   const snap = trackingSnap;
   const fromTd = snap.tracking_data && typeof snap.tracking_data === 'object'
     ? snap.tracking_data.shipment_status : null;
   const top = snap.shipment_status;
-  return humanizeShipmentStatus(String(fromTd || top || ''));
+  const merged = String(fromTd || top || '').trim();
+  return merged ? formatShipmentStatusForDisplay(merged) : '';
 }
 
 function formatRelativeShort(iso) {
@@ -89,6 +148,20 @@ function formatRelativeShort(iso) {
   if (sec < 3600) return `${Math.floor(sec / 60)} min ago`;
   if (sec < 86400) return `${Math.floor(sec / 3600)} hr ago`;
   return formatDate(iso);
+}
+
+function isVelocityShipmentLot(lot) {
+  return Boolean(
+    String(lot?.velocity_shipment_id || '').trim()
+    || String(lot?.velocity_pending_shipment_id || '').trim(),
+  );
+}
+
+function manualEstimatedArrivalFromLot(lot) {
+  const m = lot?.velocity_fulfillment && typeof lot.velocity_fulfillment === 'object'
+    ? lot.velocity_fulfillment
+    : null;
+  return m?.manual_estimated_arrival || null;
 }
 
 function resolveCustomerStatus(order) {
@@ -113,7 +186,9 @@ function resolveCustomerStatus(order) {
 
 function SectionCard({ children, className = '' }) {
   return (
-    <div className={`bg-white rounded-2xl border border-outline-variant/12 shadow-sm hover:shadow-md transition-shadow overflow-hidden ${className}`}>
+    <div
+      className={`rounded-2xl border border-outline-variant/12 bg-white shadow-[0_2px_24px_rgba(27,28,23,0.04)] ring-1 ring-primary/[0.04] transition-[box-shadow] duration-300 hover:shadow-[0_8px_32px_rgba(27,28,23,0.07)] overflow-hidden ${className}`}
+    >
       {children}
     </div>
   );
@@ -121,10 +196,12 @@ function SectionCard({ children, className = '' }) {
 
 function SectionHeader({ icon, title, badge }) {
   return (
-    <div className="flex items-center justify-between px-5 py-3.5 border-b border-outline-variant/10 bg-surface-container-low/30">
-      <div className="flex items-center gap-2">
-        <span className="material-symbols-outlined text-secondary text-[18px]">{icon}</span>
-        <h2 className="text-[11px] font-black uppercase tracking-[0.12em] text-on-surface-variant/60 font-body">{title}</h2>
+    <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-outline-variant/10 bg-gradient-to-r from-surface-container-low/95 via-surface-container-lowest/85 to-surface-container-low/40">
+      <div className="flex items-center gap-3 min-w-0">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-secondary/25 bg-secondary-fixed/35 text-secondary shadow-sm">
+          <span className="material-symbols-outlined text-[18px]">{icon}</span>
+        </div>
+        <h2 className="text-[11px] font-bold uppercase tracking-[0.14em] text-primary/85 font-headline truncate">{title}</h2>
       </div>
       {badge}
     </div>
@@ -133,8 +210,8 @@ function SectionHeader({ icon, title, badge }) {
 
 function InfoRow({ label, value, mono, highlight }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-2.5 border-b border-outline-variant/8 last:border-0">
-      <span className="text-xs text-on-surface-variant/55 font-body shrink-0">{label}</span>
+    <div className="flex items-start justify-between gap-4 py-3 border-b border-outline-variant/8 last:border-0">
+      <span className="text-xs text-on-surface-variant/55 font-body shrink-0 tracking-wide">{label}</span>
       <span className={`text-xs text-right font-body leading-relaxed ${mono ? 'font-mono' : 'font-medium'} ${highlight ? 'text-secondary font-semibold' : 'text-on-surface'}`}>
         {value}
       </span>
@@ -158,8 +235,8 @@ export default function OrderDetail() {
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [trackingEmbedLoaded, setTrackingEmbedLoaded] = useState(false);
   const [showFullTracking, setShowFullTracking] = useState(false);
+  const [expandedTrackingLots, setExpandedTrackingLots] = useState({});
   const [activeProduct, setActiveProduct] = useState(null);
   const [activeShipment, setActiveShipment] = useState(null);
   const [loadingProductShipment, setLoadingProductShipment] = useState(false);
@@ -209,8 +286,6 @@ export default function OrderDetail() {
     return () => supabase.removeChannel(ch);
   }, [authLoading, id, navigate, user]);
 
-  useEffect(() => { setTrackingEmbedLoaded(false); }, [order?.tracking_number]);
-
   /* derived data */
   const displayStatus = useMemo(() => resolveCustomerStatus(order), [order]);
   const isCancelled   = displayStatus === 'cancelled';
@@ -228,10 +303,10 @@ export default function OrderDetail() {
   const timeline = useMemo(() => {
     if (isCancelled) return [];
     let cur = statusFlow.indexOf(displayStatus);
-    if (displayStatus === 'partially_shipped') cur = Math.max(cur, statusFlow.indexOf('shipped'));
-    if (displayStatus === 'partially_delivered') cur = Math.max(cur, statusFlow.indexOf('shipped'));
+    if (displayStatus === 'shipped' || displayStatus === 'partially_shipped') cur = Math.max(cur, statusFlow.indexOf('in_transit'));
+    if (displayStatus === 'partially_delivered') cur = Math.max(cur, statusFlow.indexOf('in_transit'));
     if (displayStatus === 'partially_returning' || displayStatus === 'partially_failed' || displayStatus === 'attention_required' || displayStatus === 'in_transit') {
-      cur = Math.max(cur, statusFlow.indexOf('shipped'));
+      cur = Math.max(cur, statusFlow.indexOf('in_transit'));
     }
     if (displayStatus === 'failed') {
       cur = Math.max(cur, statusFlow.indexOf('processing'));
@@ -239,7 +314,7 @@ export default function OrderDetail() {
     if (cur < 0) cur = 0;
     return statusFlow.map((s, i) => ({
       key: s,
-      label: statusConfig[s]?.label || (s.charAt(0).toUpperCase() + s.slice(1)),
+      label: customerStepLabels[s] || (s.charAt(0).toUpperCase() + s.slice(1)),
       icon: stepIcons[s],
       done: i <= cur,
       active: i === cur,
@@ -347,6 +422,9 @@ export default function OrderDetail() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+  const toggleLotTrackingEvents = (lotId) => {
+    setExpandedTrackingLots((prev) => ({ ...prev, [lotId]: !prev[lotId] }));
+  };
 
   const openProductModal = async (item) => {
     setActiveProduct(item);
@@ -356,7 +434,7 @@ export default function OrderDetail() {
       setLoadingProductShipment(true);
       const { data, error: e } = await supabase
         .from('order_shipments')
-        .select('id, tracking_number, carrier_shipment_status, velocity_tracking_url, label, shipment_provider, order_shipment_tracking_events(activity, location, carrier_remark, event_time, created_at)')
+        .select('id, tracking_number, carrier_shipment_status, velocity_tracking_url, velocity_carrier_name, velocity_fulfillment, label, shipment_provider, order_shipment_tracking_events(activity, location, carrier_remark, event_time, created_at)')
         .eq('id', item.order_shipment_id)
         .maybeSingle();
       if (e) throw e;
@@ -441,8 +519,6 @@ export default function OrderDetail() {
     ? trackingSnap.shipment_track_activities : [];
 
   const latestCarrierLabel  = resolveLatestCarrierStatus(order, trackingSnap);
-  const trackingEmbedOk     = !!(order?.tracking_number && isLikelyTrackingId(order.tracking_number));
-  const trackingEmbedSrc    = trackingEmbedOk ? velocityTrackingPageUrl(order.tracking_number) : '';
   const hasTracking         = !!(order?.tracking_number);
   const visibleActivities   = showFullTracking ? trackActivities : trackActivities.slice(0, 5);
 
@@ -459,52 +535,22 @@ export default function OrderDetail() {
             <div>
               <Link
                 to="/orders"
-                className="inline-flex items-center gap-1.5 text-on-surface-variant/50 hover:text-secondary transition-colors group mb-4"
+                className="inline-flex items-center gap-1.5 text-on-surface-variant/55 hover:text-secondary transition-colors group mb-5"
               >
                 <span className="material-symbols-outlined text-[17px] group-hover:-translate-x-0.5 transition-transform">arrow_back</span>
-                <span className="text-xs font-semibold font-body">My Orders</span>
+                <span className="text-[13px] font-semibold font-body tracking-wide">My orders</span>
               </Link>
 
               {/* Hero header card */}
               <div
-                className="rounded-2xl p-5 sm:p-6 border shadow-sm"
-                style={{
-                  background: isCancelled
-                    ? 'linear-gradient(135deg, #fef2f2 0%, #fff 60%)'
-                    : displayStatus === 'delivered'
-                    ? 'linear-gradient(135deg, #ecfdf5 0%, #fff 60%)'
-                    : displayStatus === 'partially_delivered'
-                    ? 'linear-gradient(135deg, #ecfdfa 0%, #fff 65%)'
-                    : displayStatus === 'partially_shipped' || displayStatus === 'in_transit'
-                    ? 'linear-gradient(135deg, #e0f2fe 0%, #fff 65%)'
-                    : displayStatus === 'partially_returning'
-                    ? 'linear-gradient(135deg, #f5f3ff 0%, #fff 65%)'
-                    : displayStatus === 'partially_failed' || displayStatus === 'failed'
-                    ? 'linear-gradient(135deg, #fff1f2 0%, #fff 65%)'
-                    : displayStatus === 'attention_required'
-                    ? 'linear-gradient(135deg, #fff7ed 0%, #fff 65%)'
-                    : displayStatus === 'shipped'
-                    ? 'linear-gradient(135deg, #eff6ff 0%, #fff 60%)'
-                    : displayStatus === 'processing'
-                    ? 'linear-gradient(135deg, #fffbeb 0%, #fff 60%)'
-                    : 'linear-gradient(135deg, #f8f7f2 0%, #fff 60%)',
-                  borderColor: isCancelled ? '#fecaca'
-                    : displayStatus === 'delivered' ? '#a7f3d0'
-                    : displayStatus === 'partially_delivered' ? '#99f6e4'
-                    : displayStatus === 'partially_shipped' || displayStatus === 'in_transit' ? '#7dd3fc'
-                    : displayStatus === 'partially_returning' ? '#c4b5fd'
-                    : displayStatus === 'partially_failed' || displayStatus === 'failed' ? '#fecdd3'
-                    : displayStatus === 'attention_required' ? '#fdba74'
-                    : displayStatus === 'shipped' ? '#bfdbfe'
-                    : displayStatus === 'processing' ? '#fde68a'
-                    : 'rgba(0,74,43,0.1)',
-                }}
+                className="rounded-2xl p-5 sm:p-7 border shadow-[0_8px_40px_rgba(0,74,43,0.06)]"
+                style={getOrderHeroStyles(displayStatus, isCancelled)}
               >
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex items-start sm:items-center gap-4">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-5">
+                  <div className="flex items-start sm:items-center gap-4 sm:gap-5">
                     {/* Status icon circle */}
                     <div
-                      className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm"
+                      className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 shadow-md ring-1 ring-white/80"
                       style={{ background: sMeta.bg, color: sMeta.color }}
                     >
                       <span
@@ -515,12 +561,12 @@ export default function OrderDetail() {
                       </span>
                     </div>
                     <div>
-                      <div className="flex flex-wrap items-center gap-2 mb-0.5">
-                        <h1 className="font-headline text-lg font-bold text-primary">
+                      <div className="flex flex-wrap items-center gap-2.5 mb-1">
+                        <h1 className="font-headline text-xl sm:text-2xl font-bold text-primary tracking-tight">
                           Order {getOrderDisplayId(order)}
                         </h1>
                         <span
-                          className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${sMeta.pill}`}
+                          className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-[10px] font-bold border tracking-wide ${sMeta.pill}`}
                         >
                           <span
                             className="material-symbols-outlined text-[11px]"
@@ -531,34 +577,34 @@ export default function OrderDetail() {
                           {sMeta.label}
                         </span>
                       </div>
-                      <p className="text-xs text-on-surface-variant/60 font-body">
+                      <p className="text-[13px] text-on-surface-variant/65 font-body leading-relaxed">
                         {formatDate(order.created_at)} · {formatTime(order.created_at)} · {payLabel}
-                        {payStatus === 'paid' && <span className="text-emerald-600 font-semibold ml-1">· Paid</span>}
-                        {payStatus === 'refunded' && <span className="text-blue-600 font-semibold ml-1">· Refunded</span>}
+                        {payStatus === 'paid' && <span className="text-emerald-700 font-semibold ml-1">· Paid</span>}
+                        {payStatus === 'refunded' && <span className="text-primary font-semibold ml-1">· Refunded</span>}
                       </p>
                     </div>
                   </div>
                   <div className="flex flex-col items-start sm:items-end gap-1 shrink-0 sm:pl-4">
-                    <p className="font-headline text-2xl font-bold text-primary">{money(grandTotal)}</p>
-                    <p className="text-[10px] text-on-surface-variant/45 font-body">{items.length} item{items.length !== 1 ? 's' : ''}</p>
+                    <p className="font-headline text-2xl sm:text-3xl font-bold text-primary tabular-nums">{money(grandTotal)}</p>
+                    <p className="text-[11px] text-on-surface-variant/50 font-body tracking-wide">{items.length} item{items.length !== 1 ? 's' : ''}</p>
                   </div>
                 </div>
               </div>
             </div>
 
             {!isCancelled && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <div className="rounded-xl border border-outline-variant/15 bg-white px-3.5 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-on-surface-variant/45 font-semibold">Order ID</p>
-                  <p className="text-xs font-mono text-primary mt-1 break-all">{getOrderDisplayId(order)}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="rounded-xl border border-primary/10 bg-surface-container-low/80 px-4 py-3 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-on-surface-variant/50 font-semibold font-headline">Order ID</p>
+                  <p className="text-xs font-mono text-primary mt-1.5 break-all font-medium">{getOrderDisplayId(order)}</p>
                 </div>
-                <div className="rounded-xl border border-blue-200 bg-blue-50/60 px-3.5 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-blue-700/70 font-semibold">Shipment</p>
-                  <p className="text-xs font-semibold text-blue-800 mt-1">{hasTracking ? 'Tracking available' : 'Preparing dispatch'}</p>
+                <div className="rounded-xl border border-secondary/20 bg-secondary-fixed/25 px-4 py-3 shadow-sm">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-secondary font-semibold font-headline">Shipment</p>
+                  <p className="text-xs font-semibold text-on-secondary-container mt-1.5 font-headline">{hasTracking ? 'Tracking active' : 'Preparing dispatch'}</p>
                 </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-3.5 py-2.5">
-                  <p className="text-[10px] uppercase tracking-[0.12em] text-emerald-700/70 font-semibold">Payment</p>
-                  <p className="text-xs font-semibold text-emerald-800 mt-1">{payStatus === 'paid' ? 'Confirmed' : payStatus === 'refunded' ? 'Refunded' : 'Pending'}</p>
+                <div className="rounded-xl border border-primary/12 bg-white px-4 py-3 shadow-sm ring-1 ring-primary/[0.04]">
+                  <p className="text-[10px] uppercase tracking-[0.14em] text-on-surface-variant/50 font-semibold font-headline">Payment</p>
+                  <p className="text-xs font-semibold text-primary mt-1.5 font-headline">{payStatus === 'paid' ? 'Confirmed' : payStatus === 'refunded' ? 'Refunded' : 'Pending'}</p>
                 </div>
               </div>
             )}
@@ -643,26 +689,26 @@ export default function OrderDetail() {
             {/* ══ Order Progress Timeline ══ */}
             {!isCancelled && (
               <SectionCard>
-                <SectionHeader icon="timeline" title="Order Status" />
-                <div className="p-5">
+                <SectionHeader icon="timeline" title="Your order journey" />
+                <div className="p-5 sm:p-6">
                   {/* Stepper */}
-                  <div className="relative flex items-start justify-between mb-6">
+                  <div className="relative flex items-start justify-between mb-8 px-0.5">
                     {/* Connector line */}
-                    <div className="absolute top-5 left-0 right-0 h-0.5 bg-outline-variant/15 z-0">
+                    <div className="absolute top-[22px] left-[8%] right-[8%] h-[3px] bg-outline-variant/20 z-0 rounded-full">
                       <div
-                        className="h-full bg-secondary transition-all duration-700 ease-out rounded-full"
+                        className="h-full bg-gradient-to-r from-secondary via-secondary to-primary/35 transition-all duration-700 ease-out rounded-full"
                         style={{ width: `${progressPct}%` }}
                       />
                     </div>
                     {timeline.map((step) => (
-                      <div key={step.key} className="relative z-10 flex flex-col items-center gap-2 flex-1">
+                      <div key={step.key} className="relative z-10 flex flex-col items-center gap-2.5 flex-1 min-w-0">
                         <div
-                          className={`w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-500 shadow-sm ${
+                          className={`w-11 h-11 rounded-full flex items-center justify-center border-2 transition-all duration-500 shadow-sm ${
                             step.active
-                              ? 'bg-secondary border-secondary text-white shadow-secondary/25 shadow-md'
+                              ? 'bg-secondary border-secondary text-white shadow-[0_4px_14px_rgba(129,85,0,0.35)]'
                               : step.past
-                              ? 'bg-secondary/10 border-secondary/40 text-secondary'
-                              : 'bg-white border-outline-variant/20 text-on-surface-variant/25'
+                              ? 'bg-secondary/12 border-secondary/45 text-secondary'
+                              : 'bg-surface-container-lowest border-outline-variant/25 text-on-surface-variant/30'
                           }`}
                         >
                           <span
@@ -673,15 +719,15 @@ export default function OrderDetail() {
                           </span>
                         </div>
                         <span
-                          className={`text-[10px] font-semibold font-body text-center leading-tight max-w-[60px] ${
-                            step.active ? 'text-secondary' : step.past ? 'text-on-surface-variant' : 'text-on-surface-variant/30'
+                          className={`text-[11px] font-semibold font-headline text-center leading-snug max-w-[5.5rem] sm:max-w-[6.5rem] tracking-wide ${
+                            step.active ? 'text-secondary' : step.past ? 'text-on-surface-variant' : 'text-on-surface-variant/35'
                           }`}
                         >
                           {step.label}
                         </span>
                         {step.active && (
                           <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-60" />
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary-container opacity-70" />
                             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-secondary" />
                           </span>
                         )}
@@ -690,9 +736,9 @@ export default function OrderDetail() {
                   </div>
 
                   {/* Status summary row */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-outline-variant/10">
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-5 border-t border-outline-variant/10">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-on-surface-variant/50 font-body">Current status:</span>
+                      <span className="text-xs text-on-surface-variant/55 font-body tracking-wide">Current status</span>
                       <span
                         className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${sMeta.pill}`}
                       >
@@ -715,7 +761,7 @@ export default function OrderDetail() {
               <SectionCard>
                 <SectionHeader
                   icon="local_shipping"
-                  title="Shipment lots"
+                  title="Shipment Tracking by Package"
                   badge={
                     <span className="text-[10px] font-bold text-on-surface-variant/70 font-body">
                       {multiShipments.length} package{multiShipments.length !== 1 ? 's' : ''}
@@ -746,51 +792,108 @@ export default function OrderDetail() {
                       location: r.location,
                       description: r.carrier_remark,
                     }));
-                    const label =
-                      humanizeShipmentStatus(String(lot.carrier_shipment_status || '').trim())
-                      || 'Awaiting carrier scan update';
+                    const rawLotStatus = String(lot.carrier_shipment_status || '').trim();
+                    const statusHeadline = formatShipmentStatusForDisplay(rawLotStatus || 'processing');
+                    const carrierName = String(lot.velocity_carrier_name || lot.shipment_provider || '').trim();
+                    const etaRaw = manualEstimatedArrivalFromLot(lot);
+                    const etaLabel = etaRaw ? formatDate(etaRaw) : null;
+                    const velLot = isVelocityShipmentLot(lot);
+                    const extUrl = String(lot.velocity_tracking_url || '').trim();
+                    const trk = String(lot.tracking_number || '').trim();
+                    const primaryTrackHref = extUrl.startsWith('http')
+                      ? extUrl
+                      : (trk ? `/track/${encodeURIComponent(trk)}` : '');
+                    const showVelocityPortal = velLot && trk && isLikelyTrackingId(trk);
 
                     return (
                       <div key={lot.id} className="px-5 py-5 space-y-4">
-                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-secondary font-body">
-                              Lot {lot.lot_index}
-                              {lot.label ? ` · ${lot.label}` : ''}
-                            </p>
-                            <p className="font-headline text-lg font-bold text-primary mt-1">{label || 'Awaiting dispatch'}</p>
-                            <p className="text-[10px] font-mono text-on-surface-variant/55 mt-0.5">{lot.velocity_external_code}</p>
+                        <div className="rounded-xl bg-gradient-to-br from-primary/[0.06] via-surface-container-low/50 to-secondary-fixed/20 border border-primary/12 p-5 shadow-sm">
+                          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-secondary font-headline mb-2">
+                            Package {lot.lot_index}
+                            {lot.label ? ` · ${lot.label}` : ''}
+                          </p>
+                          <p className="font-headline text-xl sm:text-2xl font-bold text-primary leading-snug mb-3 tracking-tight">
+                            {statusHeadline}
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {carrierName && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/85 border border-outline-variant/15 text-[11px] font-semibold text-on-surface font-body">
+                                <span className="material-symbols-outlined text-[15px] text-secondary">local_shipping</span>
+                                {carrierName}
+                              </span>
+                            )}
+                            {etaLabel && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/85 border border-outline-variant/15 text-[11px] font-semibold text-on-surface font-body">
+                                <span className="material-symbols-outlined text-[15px] text-secondary">calendar_month</span>
+                                Est. delivery {etaLabel}
+                              </span>
+                            )}
+                            {!velLot && trk && (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-100 text-[11px] font-bold text-emerald-900 font-headline">
+                                Manual dispatch
+                              </span>
+                            )}
                           </div>
-                          {lot.tracking_number ? (
-                            <div className="flex flex-wrap items-center gap-2 shrink-0">
-                              <code className="text-xs font-mono font-bold text-primary bg-surface-container-low px-2 py-1 rounded-lg border border-outline-variant/15">
-                                {lot.tracking_number}
-                              </code>
-                              <Link
-                                to={`/track/${encodeURIComponent(lot.tracking_number)}`}
-                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-secondary text-on-secondary text-[11px] font-bold font-headline hover:opacity-90 transition"
-                              >
-                                Track
-                              </Link>
-                              <a
-                                href={velocityTrackingPageUrl(lot.tracking_number)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-outline-variant/25 bg-white text-[11px] font-bold text-primary"
-                              >
-                                Carrier
-                              </a>
-                            </div>
-                          ) : (
-                            <p className="text-xs text-on-surface-variant/55 font-body">AWB pending for this lot</p>
-                          )}
                         </div>
 
+                        {trk ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <code className="text-xs font-mono font-bold text-primary bg-surface-container-low px-2 py-1 rounded-lg border border-outline-variant/15">
+                              {trk}
+                            </code>
+                            {primaryTrackHref.startsWith('http') ? (
+                              <a
+                                href={primaryTrackHref}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-secondary text-on-secondary text-[11px] font-bold font-headline hover:opacity-90 transition"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                                Track package
+                              </a>
+                            ) : (
+                              <Link
+                                to={primaryTrackHref}
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-secondary text-on-secondary text-[11px] font-bold font-headline hover:opacity-90 transition"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">open_in_full</span>
+                                Track package
+                              </Link>
+                            )}
+                            {showVelocityPortal && (
+                              <a
+                                href={velocityTrackingPageUrl(trk)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-3 py-2 rounded-xl border border-outline-variant/25 bg-white text-[11px] font-bold text-primary hover:bg-surface-container-low transition"
+                              >
+                                Carrier portal
+                              </a>
+                            )}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-on-surface-variant/55 font-body">AWB pending for this lot</p>
+                        )}
+
                         {timelineSrc.length > 0 && (
-                          <div className="relative">
-                            <div className="absolute left-3 top-0 bottom-0 w-px bg-outline-variant/20" />
+                          <div className="relative rounded-xl border border-outline-variant/12 bg-surface-container-low/40 p-4 sm:p-5">
+                            {timelineSrc.length > 3 && (
+                              <div className="mb-3 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleLotTrackingEvents(lot.id)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-primary/10 bg-white px-3 py-1.5 text-[11px] font-semibold text-secondary font-headline shadow-sm hover:bg-surface-container-low/80 transition"
+                                >
+                                  <span className="material-symbols-outlined text-[14px]">
+                                    {expandedTrackingLots[lot.id] ? 'expand_less' : 'expand_more'}
+                                  </span>
+                                  {expandedTrackingLots[lot.id] ? 'Collapse events' : `Show all ${timelineSrc.length} events`}
+                                </button>
+                              </div>
+                            )}
+                            <div className="absolute left-3 top-2 bottom-2 w-px bg-gradient-to-b from-secondary/35 via-outline-variant/25 to-transparent" />
                             <ul className="space-y-0">
-                              {timelineSrc.slice(0, 8).map((ev, idx) => (
+                              {(expandedTrackingLots[lot.id] ? timelineSrc : timelineSrc.slice(0, 3)).map((ev, idx) => (
                                 <li key={`${lot.id}-ev-${idx}`} className="relative flex gap-4 pb-4 pl-9">
                                   <div
                                     className={`absolute left-0 top-1 w-6 h-6 rounded-full flex items-center justify-center border-2 z-10 ${
@@ -838,30 +941,30 @@ export default function OrderDetail() {
                   icon="local_shipping"
                   title="Shipment Tracking"
                   badge={
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 rounded-full border border-secondary/25 bg-secondary-fixed/30 px-2.5 py-1">
                       <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-secondary opacity-60" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-secondary" />
                       </span>
-                      <span className="text-[10px] font-bold text-emerald-600 font-body">Live</span>
+                      <span className="text-[10px] font-bold text-secondary font-headline tracking-wide">Live</span>
                     </div>
                   }
                 />
 
                 {/* Carrier status hero */}
                 <div className="px-5 pt-5 pb-4">
-                  <div className="rounded-xl bg-gradient-to-br from-primary/[0.05] to-secondary/[0.03] border border-primary/10 p-4 mb-4">
-                    <p className="text-[10px] font-black uppercase tracking-[0.15em] text-secondary font-body mb-1.5">
-                      Carrier Status · Velocity
+                  <div className="rounded-xl bg-gradient-to-br from-primary/[0.06] via-surface-container-low/50 to-secondary-fixed/20 border border-primary/12 p-5 mb-4 shadow-sm">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-secondary font-headline mb-2">
+                      Carrier status
                     </p>
-                    <p className="font-headline text-xl font-bold text-primary leading-snug mb-2">
+                    <p className="font-headline text-xl sm:text-2xl font-bold text-primary leading-snug mb-2 tracking-tight">
                       {latestCarrierLabel || 'Awaiting carrier scan update'}
                     </p>
                     <p className="text-[11px] text-on-surface-variant/60 font-body">
                       {order.updated_at && (
                         <>Updated <span className="font-semibold text-on-surface">{formatRelativeShort(order.updated_at)}</span> · </>
                       )}
-                      Auto-refreshes via Velocity webhook.
+                      Live tracking updates are shown automatically.
                     </p>
                   </div>
 
@@ -899,41 +1002,12 @@ export default function OrderDetail() {
                     </div>
                   </div>
 
-                  {/* Tracking iframe */}
-                  {trackingEmbedOk && trackingEmbedSrc && (
-                    <div className="mt-4 rounded-xl border border-outline-variant/20 overflow-hidden">
-                      <div className="flex items-center justify-between px-4 py-2.5 bg-surface-container-low/50 border-b border-outline-variant/10">
-                        <p className="text-[11px] font-bold text-on-surface font-headline flex items-center gap-1.5">
-                          <span className="material-symbols-outlined text-secondary text-[16px]">map</span>
-                          Live Tracking Map
-                        </p>
-                        <p className="text-[10px] text-on-surface-variant/50 font-body">If blank, use "Carrier" button above</p>
-                      </div>
-                      <div className="relative bg-white" style={{ minHeight: '380px' }}>
-                        {!trackingEmbedLoaded && (
-                          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-surface-container-low/50 backdrop-blur-[2px]">
-                            <div className="w-7 h-7 rounded-full border-2 border-secondary border-t-transparent animate-spin" />
-                            <span className="text-xs text-on-surface-variant/50 font-body">Loading tracking…</span>
-                          </div>
-                        )}
-                        <iframe
-                          title="Velocity shipment tracking"
-                          src={trackingEmbedSrc}
-                          className="w-full border-0 block bg-white"
-                          style={{ minHeight: '380px' }}
-                          onLoad={() => setTrackingEmbedLoaded(true)}
-                          referrerPolicy="no-referrer-when-downgrade"
-                        />
-                      </div>
-                    </div>
-                  )}
-
                   {/* Tracking Events Timeline */}
                   {trackActivities.length > 0 && (
-                    <div className="mt-5">
-                      <p className="text-[10px] font-black uppercase tracking-[0.12em] text-on-surface-variant/50 font-body mb-3">Tracking Events</p>
+                    <div className="mt-6 rounded-xl border border-outline-variant/12 bg-surface-container-low/35 p-4 sm:p-5">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-primary/70 font-headline mb-4">Tracking events</p>
                       <div className="relative">
-                        <div className="absolute left-3 top-0 bottom-0 w-px bg-outline-variant/20" />
+                        <div className="absolute left-3 top-2 bottom-2 w-px bg-gradient-to-b from-secondary/35 via-outline-variant/25 to-transparent" />
                         <ul className="space-y-0">
                           {visibleActivities.map((ev, idx) => {
                             const isFirst = idx === 0;
@@ -981,12 +1055,12 @@ export default function OrderDetail() {
                       {trackActivities.length > 5 && (
                         <button
                           onClick={() => setShowFullTracking(!showFullTracking)}
-                          className="mt-1 ml-9 inline-flex items-center gap-1 text-[11px] font-bold text-secondary hover:text-secondary/80 font-body transition-colors"
+                          className="mt-3 ml-9 inline-flex items-center gap-1 rounded-lg border border-primary/10 bg-white px-3 py-1.5 text-[11px] font-bold text-secondary font-headline shadow-sm hover:bg-surface-container-low/80 transition-colors"
                         >
                           <span className="material-symbols-outlined text-[14px]">
                             {showFullTracking ? 'expand_less' : 'expand_more'}
                           </span>
-                          {showFullTracking ? 'Show less' : `Show all ${trackActivities.length} events`}
+                          {showFullTracking ? 'Collapse events' : `Show all ${trackActivities.length} events`}
                         </button>
                       )}
                     </div>
@@ -1019,10 +1093,10 @@ export default function OrderDetail() {
                 <SectionCard>
                   <SectionHeader
                     icon="shopping_bag"
-                    title={`${items.length} Item${items.length !== 1 ? 's' : ''} in this order`}
+                    title={`${items.length} item${items.length !== 1 ? 's' : ''} in your order`}
                   />
                   <div className="divide-y divide-outline-variant/10">
-                    {items.map((item, itemIndex) => {
+                    {items.map((item) => {
                       const name      = item.lot_name || item.lots?.lot_name || item.products?.name || 'Item';
                       const img       = item.lots?.image_url || item.products?.image_url || 'https://placehold.co/80x80?text=Item';
                       const isVoid    = isPartial && (
@@ -1030,7 +1104,6 @@ export default function OrderDetail() {
                         rejectedItems.some((r) => r.order_item_id === item.id)
                       );
                       const lineTotal = Number(item.price || 0) * Number(item.quantity || 0);
-                      const lineDisplayId = getOrderItemDisplayId(order, item, itemIndex);
                       const itemRefundStatus = String(item.refund_status || '').toLowerCase();
                       const hasItemRefund = itemRefundStatus && itemRefundStatus !== 'not_required';
 
@@ -1065,14 +1138,11 @@ export default function OrderDetail() {
                             <p className="text-[11px] text-on-surface-variant/50 font-body mt-0.5">
                               {item.quantity} × {money(item.price)}
                             </p>
-                            <p className="text-[10px] text-on-surface-variant/45 font-mono mt-1">
-                              Item ID: {lineDisplayId}
-                            </p>
                             <span className={`inline-flex mt-2 px-2 py-0.5 rounded-full text-[10px] font-semibold border capitalize ${itemStatusPill(resolveItemStatus(item))}`}>
                               {resolveItemStatus(item)}
                             </span>
                             {hasItemRefund && (
-                              <span className={`inline-flex mt-2 ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${refundInfo?.badge || 'bg-blue-50 text-blue-700 border-blue-200'}`}>
+                              <span className={`inline-flex mt-2 ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${refundInfo?.badge || 'bg-secondary-fixed/40 text-secondary border-secondary/25'}`}>
                                 Refund: {itemRefundStatus.replace(/_/g, ' ')}
                                 {Number(item.refund_amount || 0) > 0 ? ` · ${money(item.refund_amount)}` : ''}
                               </span>
@@ -1183,22 +1253,15 @@ export default function OrderDetail() {
                           </p>
                         </div>
                       </div>
-                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-body ${
-                        payStatus === 'paid'     ? 'bg-emerald-100 text-emerald-700' :
-                        payStatus === 'refunded' ? 'bg-blue-100 text-blue-700' :
+                      <span className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-headline tracking-wide ${
+                        payStatus === 'paid'     ? 'bg-emerald-100 text-emerald-800' :
+                        payStatus === 'refunded' ? 'bg-primary/10 text-primary border border-primary/15' :
                         payStatus === 'failed'   ? 'bg-red-100 text-red-700' :
-                        'bg-amber-100 text-amber-700'
+                        'bg-secondary-fixed/50 text-on-secondary-container border border-secondary/20'
                       }`}>
                         {payStatus.charAt(0).toUpperCase() + payStatus.slice(1)}
                       </span>
                     </div>
-
-                    {isRazorpay && order.razorpay_payment_id && (
-                      <div className="p-2.5 bg-surface-container-low rounded-xl border border-outline-variant/12">
-                        <p className="text-[9px] text-on-surface-variant/40 font-body uppercase tracking-wider mb-0.5">Payment ID</p>
-                        <code className="text-[11px] font-mono font-medium text-primary break-all">{order.razorpay_payment_id}</code>
-                      </div>
-                    )}
 
                     {refundInfo && (
                       <div className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-[11px] font-semibold font-body ${refundInfo.badge}`}>
@@ -1356,11 +1419,18 @@ export default function OrderDetail() {
                     <p className="text-xs text-on-surface-variant/70">Loading shipment details...</p>
                   ) : (
                     <>
-                      <div className="rounded-xl border border-outline-variant/15 p-3 bg-surface-container-low/40">
+                      <div className="rounded-xl border border-outline-variant/15 p-3 bg-gradient-to-br from-primary/[0.04] to-surface-container-low/60">
                         <p className="text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/50 mb-1">Shipment</p>
                         <p className="text-xs text-on-surface-variant/75">
-                          {(activeShipment?.shipment_provider || order?.shipment_provider || 'Courier')} · AWB: <span className="font-mono text-primary">{activeShipment?.tracking_number || 'Pending'}</span>
+                          {(activeShipment?.velocity_carrier_name || activeShipment?.shipment_provider || order?.shipment_provider || 'Courier')}
+                          {' · '}
+                          AWB: <span className="font-mono text-primary font-semibold">{activeShipment?.tracking_number || 'Pending'}</span>
                         </p>
+                        {manualEstimatedArrivalFromLot(activeShipment) && (
+                          <p className="text-[11px] text-on-surface-variant/70 mt-1.5">
+                            Est. delivery: <span className="font-semibold text-on-surface">{formatDate(manualEstimatedArrivalFromLot(activeShipment))}</span>
+                          </p>
+                        )}
                         {(activeShipment?.velocity_tracking_url || activeShipment?.tracking_number) && (
                           <a
                             href={activeShipment?.velocity_tracking_url || `/track/${encodeURIComponent(activeShipment?.tracking_number || '')}`}

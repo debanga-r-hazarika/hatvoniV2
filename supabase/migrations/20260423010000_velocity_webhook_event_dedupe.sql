@@ -8,11 +8,9 @@ CREATE TABLE IF NOT EXISTS public.velocity_webhook_event_dedupe (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_velocity_webhook_event_dedupe_external_id
   ON public.velocity_webhook_event_dedupe (external_id)
   WHERE external_id IS NOT NULL;
-
 CREATE OR REPLACE FUNCTION public.reserve_velocity_webhook_event(
   p_event_id text,
   p_event_type text DEFAULT NULL,
@@ -49,9 +47,7 @@ BEGIN
   RETURN v_inserted > 0;
 END;
 $$;
-
 REVOKE ALL ON TABLE public.velocity_webhook_event_dedupe FROM PUBLIC;
 GRANT SELECT, INSERT ON TABLE public.velocity_webhook_event_dedupe TO service_role;
-
 REVOKE ALL ON FUNCTION public.reserve_velocity_webhook_event(text, text, text, jsonb) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.reserve_velocity_webhook_event(text, text, text, jsonb) TO service_role;

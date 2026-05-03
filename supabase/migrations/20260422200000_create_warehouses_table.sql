@@ -27,31 +27,24 @@ CREATE TABLE IF NOT EXISTS public.warehouses (
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
-
 ALTER TABLE public.warehouses
   ADD CONSTRAINT warehouses_pincode_format
   CHECK (pincode ~ '^[0-9]{6}$');
-
 ALTER TABLE public.warehouses
   ADD CONSTRAINT warehouses_contact_number_format
   CHECK (contact_number ~ '^[0-9]{10}$');
-
 CREATE INDEX IF NOT EXISTS idx_warehouses_pincode
   ON public.warehouses (pincode);
-
 CREATE INDEX IF NOT EXISTS idx_warehouses_velocity_id
   ON public.warehouses (velocity_warehouse_id)
   WHERE velocity_warehouse_id IS NOT NULL;
-
 ALTER TABLE public.warehouses ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Admins can manage warehouses"
   ON public.warehouses
   FOR ALL
   TO authenticated
   USING (public.is_admin() = true)
   WITH CHECK (public.is_admin() = true);
-
 -- ── Product ↔ Warehouse assignments ──────────────────────────
 CREATE TABLE IF NOT EXISTS public.product_warehouses (
   product_id uuid NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
@@ -60,26 +53,20 @@ CREATE TABLE IF NOT EXISTS public.product_warehouses (
   assigned_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (product_id, warehouse_id)
 );
-
 CREATE INDEX IF NOT EXISTS idx_product_warehouses_product_id
   ON public.product_warehouses (product_id);
-
 CREATE INDEX IF NOT EXISTS idx_product_warehouses_warehouse_id
   ON public.product_warehouses (warehouse_id);
-
 CREATE INDEX IF NOT EXISTS idx_product_warehouses_default
   ON public.product_warehouses (product_id, is_default)
   WHERE is_default = true;
-
 ALTER TABLE public.product_warehouses ENABLE ROW LEVEL SECURITY;
-
 CREATE POLICY "Admins can manage product warehouse assignments"
   ON public.product_warehouses
   FOR ALL
   TO authenticated
   USING (public.is_admin() = true)
   WITH CHECK (public.is_admin() = true);
-
 CREATE POLICY "Sellers can view warehouse assignments for their products"
   ON public.product_warehouses
   FOR SELECT
@@ -92,7 +79,6 @@ CREATE POLICY "Sellers can view warehouse assignments for their products"
         AND p.seller_id = auth.uid()
     )
   );
-
 -- Add cross-reference policy on warehouses (product_warehouses exists now)
 CREATE POLICY "Sellers can view warehouses assigned to their products"
   ON public.warehouses
@@ -107,7 +93,6 @@ CREATE POLICY "Sellers can view warehouses assigned to their products"
         AND p.seller_id = auth.uid()
     )
   );
-
 -- Trigger: ensure only one default warehouse per product
 CREATE OR REPLACE FUNCTION public.ensure_single_default_product_warehouse()
 RETURNS trigger
@@ -124,9 +109,7 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trigger_ensure_single_default_product_warehouse ON public.product_warehouses;
-
 CREATE TRIGGER trigger_ensure_single_default_product_warehouse
   BEFORE INSERT OR UPDATE ON public.product_warehouses
   FOR EACH ROW

@@ -17,23 +17,18 @@ CREATE TABLE IF NOT EXISTS public.seller_notifications (
   read_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_seller_notifications_recipient_created
   ON public.seller_notifications(recipient_seller_id, created_at DESC);
-
 CREATE INDEX IF NOT EXISTS idx_seller_notifications_recipient_unread
   ON public.seller_notifications(recipient_seller_id, is_read)
   WHERE is_read = false;
-
 ALTER TABLE public.seller_notifications ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Sellers can read own notifications" ON public.seller_notifications;
 CREATE POLICY "Sellers can read own notifications"
   ON public.seller_notifications
   FOR SELECT
   TO authenticated
   USING (recipient_seller_id = auth.uid());
-
 DROP POLICY IF EXISTS "Sellers can mark own notifications" ON public.seller_notifications;
 CREATE POLICY "Sellers can mark own notifications"
   ON public.seller_notifications
@@ -41,14 +36,12 @@ CREATE POLICY "Sellers can mark own notifications"
   TO authenticated
   USING (recipient_seller_id = auth.uid())
   WITH CHECK (recipient_seller_id = auth.uid());
-
 DROP POLICY IF EXISTS "Service role can insert seller notifications" ON public.seller_notifications;
 CREATE POLICY "Service role can insert seller notifications"
   ON public.seller_notifications
   FOR INSERT
   TO service_role
   WITH CHECK (true);
-
 CREATE OR REPLACE FUNCTION public.notify_sellers_for_new_order()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -108,7 +101,6 @@ BEGIN
   RETURN NEW;
 END;
 $$;
-
 DROP TRIGGER IF EXISTS trg_notify_sellers_for_new_order ON public.orders;
 CREATE TRIGGER trg_notify_sellers_for_new_order
   AFTER INSERT ON public.orders

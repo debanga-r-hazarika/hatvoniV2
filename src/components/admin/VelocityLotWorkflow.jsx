@@ -2,6 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Button from '@mui/material/Button';
 import { supabase } from '../../lib/supabase';
 import { formatShipmentStatusForDisplay } from '../../lib/velocityShipmentStatusCatalog';
+import {
+  fmtRecordedInr,
+  frwdChargesFromLotMeta,
+  lotRecordedShippingLine,
+  lotQuotedChargesFromServiceability,
+} from '../../lib/recordedShippingCost';
 
 const fmtInr = (v) => {
   if (v === undefined || v === null || v === '') return '—';
@@ -439,6 +445,10 @@ export default function VelocityLotWorkflow({
 
   const velocityDonePayload = velStep === 'done' && velResult ? velocityInnerPayload(velResult) : null;
   const velocityDoneCharges = velocityDonePayload?.charges?.frwd_charges;
+  const persistedShippingLine = lot ? lotRecordedShippingLine(lot) : null;
+  const persistedFrwd = persistedShippingLine?.source === 'velocity'
+    ? frwdChargesFromLotMeta(lot?.velocity_fulfillment)
+    : null;
   const effectiveAwb = String(
     lot?.tracking_number ||
     lot?.velocity_awb ||
@@ -1021,8 +1031,40 @@ export default function VelocityLotWorkflow({
             AWB: <span className="font-mono font-bold">{velocityDonePayload.awb_code || '—'}</span>
             {velocityDonePayload.courier_name && ` · ${velocityDonePayload.courier_name}`}
           </p>
-          {velocityDoneCharges && (
-            <p className="text-xs mt-1">Shipping ₹{velocityDoneCharges.shipping_charges}</p>
+          {(velocityDoneCharges || persistedFrwd) && (
+            <div className="text-xs mt-2 space-y-1 text-emerald-900">
+              {(velocityDoneCharges?.shipping_charges != null || persistedFrwd?.shipping_charges != null) && (
+                <p>
+                  Freight:{' '}
+                  <span className="font-bold tabular-nums">
+                    {fmtRecordedInr(velocityDoneCharges?.shipping_charges ?? persistedFrwd?.shipping_charges ?? persistedFrwd?.forward_freight_charges)}
+                  </span>
+                </p>
+              )}
+              {Number(velocityDoneCharges?.cod_charges ?? persistedFrwd?.cod_charges) > 0 && (
+                <p>
+                  COD:{' '}
+                  <span className="font-bold tabular-nums">
+                    {fmtRecordedInr(velocityDoneCharges?.cod_charges ?? persistedFrwd?.cod_charges)}
+                  </span>
+                </p>
+              )}
+              {(velocityDoneCharges?.total_forward_charges != null && velocityDoneCharges?.total_forward_charges !== '')
+                || (persistedFrwd?.total_forward_charges != null && persistedFrwd?.total_forward_charges !== '') ? (
+                <p className="font-semibold">
+                  Total forward:{' '}
+                  {fmtRecordedInr(velocityDoneCharges?.total_forward_charges ?? persistedFrwd?.total_forward_charges)}
+                </p>
+              ) : null}
+              {persistedShippingLine?.amount != null && (
+                <p className="text-[10px] text-emerald-800/90">
+                  Stored for reporting: {fmtRecordedInr(persistedShippingLine.amount)}
+                  {lot?.velocity_fulfillment?.awb_charges_recorded_at
+                    ? ` · ${new Date(lot.velocity_fulfillment.awb_charges_recorded_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}`
+                    : ''}
+                </p>
+              )}
+            </div>
           )}
           {velocityDonePayload.label_url && (
             <a href={velocityDonePayload.label_url} target="_blank" rel="noopener noreferrer" className="inline-block mt-2 text-xs font-bold text-emerald-900 underline">

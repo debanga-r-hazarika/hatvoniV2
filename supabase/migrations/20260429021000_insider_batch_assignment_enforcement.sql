@@ -15,7 +15,6 @@ ALTER TABLE public.order_item_approvals
   ADD COLUMN IF NOT EXISTS batch_assigned_by uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS inventory_deduction_status text NOT NULL DEFAULT 'pending',
   ADD COLUMN IF NOT EXISTS inventory_deduction_ref text;
-
 DO $$
 BEGIN
   IF NOT EXISTS (
@@ -38,14 +37,11 @@ BEGIN
       CHECK (inventory_deduction_status IN ('pending', 'success', 'failed', 'retried'));
   END IF;
 END $$;
-
 CREATE INDEX IF NOT EXISTS idx_order_item_approvals_batch_assignment_status
   ON public.order_item_approvals (batch_assignment_status);
-
 CREATE INDEX IF NOT EXISTS idx_order_item_approvals_sync_batch_pending
   ON public.order_item_approvals (status, batch_assignment_status)
   WHERE sync_with_insider = true;
-
 CREATE TABLE IF NOT EXISTS public.order_item_batch_events (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   order_item_id uuid NOT NULL REFERENCES public.order_items(id) ON DELETE CASCADE,
@@ -55,22 +51,17 @@ CREATE TABLE IF NOT EXISTS public.order_item_batch_events (
   payload jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-
 CREATE INDEX IF NOT EXISTS idx_order_item_batch_events_item_created
   ON public.order_item_batch_events (order_item_id, created_at DESC);
-
 ALTER TABLE public.order_item_batch_events ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Admins can view batch events" ON public.order_item_batch_events;
 CREATE POLICY "Admins can view batch events"
   ON public.order_item_batch_events FOR SELECT TO authenticated
   USING ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 DROP POLICY IF EXISTS "System can insert batch events" ON public.order_item_batch_events;
 CREATE POLICY "System can insert batch events"
   ON public.order_item_batch_events FOR INSERT
   WITH CHECK (true);
-
 CREATE OR REPLACE FUNCTION public.admin_approve_item(
   p_order_item_id   uuid,
   p_product_key     text,
@@ -249,7 +240,6 @@ BEGIN
   RETURN v_row;
 END;
 $$;
-
 CREATE OR REPLACE FUNCTION public.admin_assign_item_to_lot(
   p_order_item_id    uuid,
   p_order_shipment_id uuid

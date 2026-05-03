@@ -16,15 +16,11 @@ CREATE TABLE IF NOT EXISTS public.employee_notification_preferences (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, module, event_type)
 );
-
 CREATE INDEX IF NOT EXISTS idx_emp_notif_pref_user
   ON public.employee_notification_preferences(user_id);
-
 CREATE INDEX IF NOT EXISTS idx_emp_notif_pref_user_module
   ON public.employee_notification_preferences(user_id, module);
-
 ALTER TABLE public.employee_notification_preferences ENABLE ROW LEVEL SECURITY;
-
 DROP POLICY IF EXISTS "Admins can manage employee notification preferences" ON public.employee_notification_preferences;
 CREATE POLICY "Admins can manage employee notification preferences"
   ON public.employee_notification_preferences
@@ -32,14 +28,12 @@ CREATE POLICY "Admins can manage employee notification preferences"
   TO authenticated
   USING ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true)
   WITH CHECK ((SELECT is_admin FROM public.profiles WHERE id = auth.uid()) = true);
-
 DROP POLICY IF EXISTS "Employees can read own managed notification preferences" ON public.employee_notification_preferences;
 CREATE POLICY "Employees can read own managed notification preferences"
   ON public.employee_notification_preferences
   FOR SELECT
   TO authenticated
   USING (user_id = auth.uid());
-
 CREATE OR REPLACE FUNCTION public.should_send_admin_notification(
   p_user_id uuid,
   p_module text,

@@ -69,10 +69,8 @@ BEGIN
   RETURN p_lot_count;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_create_empty_shipment_lots(uuid, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_create_empty_shipment_lots(uuid, int) TO authenticated;
-
 -- ─── 2. Assign one order_item to a lot ────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.admin_assign_item_to_lot(
@@ -113,10 +111,8 @@ BEGIN
   WHERE id = p_order_item_id;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_assign_item_to_lot(uuid, uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_assign_item_to_lot(uuid, uuid) TO authenticated;
-
 -- ─── 3. Unassign an item from its lot ─────────────────────────────────────────
 
 CREATE OR REPLACE FUNCTION public.admin_unassign_item_from_lot(
@@ -140,10 +136,8 @@ BEGIN
   WHERE id = p_order_item_id;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_unassign_item_from_lot(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_unassign_item_from_lot(uuid) TO authenticated;
-
 -- ─── 4. Add one more lot to an existing multi-shipment order ──────────────────
 
 CREATE OR REPLACE FUNCTION public.admin_add_shipment_lot(
@@ -192,10 +186,8 @@ BEGIN
   RETURN v_next_idx;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_add_shipment_lot(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_add_shipment_lot(uuid) TO authenticated;
-
 -- ─── 5. Revert all lots — delete shipments, unlink items, reset mode ──────────
 
 CREATE OR REPLACE FUNCTION public.admin_revert_shipment_lots(
@@ -250,6 +242,5 @@ BEGIN
   WHERE id = p_order_id;
 END;
 $$;
-
 REVOKE ALL ON FUNCTION public.admin_revert_shipment_lots(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_revert_shipment_lots(uuid) TO authenticated;
